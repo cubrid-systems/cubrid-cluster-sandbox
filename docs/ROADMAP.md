@@ -59,6 +59,7 @@ G5, G6, G7, G9.
 | M2.2 | Replication observability with a master-side reference | a lag series that stays true through an apply stall, a copy stall, and a role change |
 | M2.3 | `describe` as a shareable artifact | the output recreates the same cluster on another machine and fits in a JIRA issue |
 | M2.4 | The surface `cubrid-testkit` provisions through | testkit calls it to set up and tear down without screen-scraping |
+| M2.5 | **Switchover-threshold validation** — vary one HA setting under load and observe whether the cluster switches over | RND-1509 asks for exactly this and says developers cannot do it: validation belongs in a user's environment, which is what this tool is. A reproduced switchover records its *inputs* (settings, load, timings), because a threshold-caused switchover may leave nothing in the engine log |
 
 ## Phase 3 — skeletal
 
@@ -73,13 +74,20 @@ machine-readable metrics contract.
 ## Open
 
 **What does the technical team require of failback?** ([`DESIGN.md`](DESIGN.md)
-§9 OQ8.) The engine's own failback is automatic once diagnosed, and after a
-*clean* failover there is no engine path back to the original master at all —
-so whatever is done by hand on a real cluster is exactly the part the engine
-does not do, and nobody here knows what that is.
-[`harness/failback.sh`](../harness/failback.sh) encodes this project's guess,
-with a decision point wherever the guess is a guess. **The marks it comes back
-with are the requirement set**, and they shape phase 1's verb vocabulary — which
-is why M0.7 sits in phase 0 and not later.
+§9 OQ8.) Narrower than it was.
+[`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md)
+collected what the internal tracker already says, and it answers the mechanical
+half: the rejoin path is `ha_make_slavedb.sh`, the alarm is `fail_counter`, and
+the failback that actually hurts is the one that should never have started
+(RND-49 — four sites, ten or more failover/split-brain/failback cycles a day
+under load). What no ticket answers is what an operator *decides*: the threshold
+for "caught up enough", whether write traffic is quiesced, who authorises it,
+and whether the original master is preferred at all.
+[`harness/failback.sh`](../harness/failback.sh) goes to the team with four edits
+first (§7 of that document). **The marks it comes back with are the requirement
+set**, and they shape phase 1's verb vocabulary — which is why M0.7 sits in
+phase 0 and not later.
 
-**Implementation language.** Not decided; see `design/README.md`.
+**Implementation language.** [`design/ADR-001`](design/ADR-001-implementation-language.md)
+proposes Python for the provisioner and shell for the operator-facing scripts.
+Proposed, not accepted — decide before M1.1.

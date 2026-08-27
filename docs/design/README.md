@@ -21,6 +21,7 @@ which is what has to exist before anything is built.
 | [`03-assembly.md`](03-assembly.md) | 2, 3 | The state machine from empty directory to serving cluster, and every trap it owns on the user's behalf |
 | [`04-faults.md`](04-faults.md) | 4 | The verb vocabulary: events, conditions, and what it means to clear one |
 | [`05-inspect.md`](05-inspect.md) | 5 | What the inspector reads, and what it is not allowed to claim |
+| [`ADR-001-implementation-language.md`](ADR-001-implementation-language.md) | — | Python for the provisioner, shell for the operator-facing scripts. **Proposed** |
 
 ## Six principles, and where each came from
 
@@ -61,15 +62,12 @@ found the bug.
 
 ## Not yet decided
 
-**Implementation language.** The candidates are Python (the harness is already
-POSIX shell plus Python for fixtures; batteries-included, and every CUBRID
-developer has it), Go (single static binary, no runtime on the developer's
-machine, which matters for the external-contributor half of the audience), and
-staying in shell (zero new dependencies, and the Phase-0 spike already works —
-but the topology model and the JSON contract are exactly what shell is worst
-at). The `describe` artifact and the `--json` contract in
-[`01-cli.md`](01-cli.md) are specified independently of this choice, so it can
-be made late; it should be made before M1.1.
+**Implementation language — proposed, not accepted.**
+[`ADR-001`](ADR-001-implementation-language.md) argues for Python in the
+provisioner and shell for anything an operator reads, edits, or runs on a real
+host. Go wins on distribution and is rejected on ecosystem grounds; the
+reasoning and the conditions for reopening it are in the ADR. Decide before
+M1.1.
 
 **Whether `cubrid-contrib/sandbox`'s build-shell use case is a one-node topology
 with a `build` role.** If it is, this project eventually subsumes it

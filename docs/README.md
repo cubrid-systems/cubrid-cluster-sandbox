@@ -5,6 +5,7 @@
 | [`DESIGN.md`](DESIGN.md) | The design document — problem, goals, architecture, alternatives, decisions. Start here. |
 | [`ROADMAP.md`](ROADMAP.md) | Phases, milestones, and where the project actually is |
 | [`design/`](design/) | The design below the architecture: command surface, topology model, assembly, faults, inspection |
+| [`requirements/`](requirements/) | What the field asks for — gathered from CUBRID's internal tracker |
 | [`survey/`](survey/) | How PostgreSQL, MySQL, MongoDB and TiDB solved the same problem, and where CUBRID stands |
 | [`findings/`](findings/) | What running it showed — including the two places it contradicted the design |
 

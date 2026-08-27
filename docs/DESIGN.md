@@ -568,27 +568,37 @@ calibrated lag measurements. The mechanism questions are settled; "what does
 
 **OQ8 — What does the technical team actually require of failback?** *Owner*:
 this project, blocked on a party outside it. *Verification*: the marked-up
-script comes back. Nobody in this repo knows today, and the gap is specific:
-the engine's own failback is *automatic* once it is diagnosed — detecting
-multiple masters queues `HB_CJOB_FAILBACK` with no operator in the loop
-(`master_heartbeat.c:866-895`) — so whatever the technical team does by hand is
-the part the engine does not do. Deciding when it is safe, dealing with the
-divergence that accumulated on the node that was wrong, and ordering the
-restarts are the candidates, and they are guesses. The G8 script is the
-instrument: it encodes this project's guess so the team corrects it, and the
-corrections are the requirement set. Until then the split between what the tool
-does and what the operator decides is unfounded, and G8 declines to pick it.
+script comes back.
 
-**Sharpened by running it, 2026-08-27.** The script works — original master back
-in 2 s, no rows lost — so the open part is judgement, not mechanism, exactly as
-assumed. Two of its five questions changed shape. Question 1 ("what counts as
-caught up") now has to survive the evidence being *absent*: a just-demoted node
-has no `db_ha_apply_info` row at all, and both runs printed `<none>` at the step
-that asks. Question 3 ("is `heartbeat stop` what you use") gained a reason to
-doubt the command itself: it hangs indefinitely when the node's HA processes
-cannot be reaped, after having already succeeded (§4 layer 3), so an operator
-watching it cannot tell a completed switch from a stuck one.
-*Artifacts*: `findings/failback.md`.
+**Narrowed 2026-08-28 by searching the internal tracker**
+([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md)).
+The engine's own failback is automatic once diagnosed, and after a clean
+failover there is no engine path back to the original master
+(`master_heartbeat.c:866-895`, and measured) — so whatever the team does by hand
+is the part the engine does not do. The tracker turns out to answer the
+mechanical half of that and none of the judgement half.
+
+*Answered by the tracker*: the rejoin path is the online rebuild script
+`ha_make_slavedb.sh`, and it has a long trouble history worth reproducing; the
+operational alarm is `fail_counter`, whose diagnostics the team has separately
+asked to be improved; and the failback that actually costs them is not a
+deliberate return at all but a **loop** — four sites reporting ten or more
+failover/split-brain/failback cycles a day under load, with no network fault
+(RND-49).
+
+*Still unknown, and the reason to send the script*: the threshold for "caught up
+enough"; whether and how write traffic is quiesced first; who authorises a
+failback and on what evidence; and whether the original master is preferred at
+all, or whether sites simply run on whichever node holds the service.
+
+`harness/failback.sh` encodes this project's guess and goes to the team with the
+four edits listed in §7 of that document — the tracker already answers what they
+would otherwise be asked, and this gets one round of their attention.
+
+**A second requirement arrived unasked** and is not about failback: RND-1509
+wants the settings that can trigger a switchover documented and **validated in a
+user's environment**, and says explicitly that developers cannot do it. That is
+a commission for this tool; [`ROADMAP.md`](ROADMAP.md) M2.5 carries it.
 
 **OQ9 — Does split brain need a deliberately broken configuration? → Answered
 2026-08-27. No.** Run on a two-node containerised pair in three arms, cutting
