@@ -1,0 +1,128 @@
+############ OQ7 lag ############
+== [1/4] launching n65-n1 (master) and n65-n2 (slave) on n65-oq7-net   ping_hosts=<unset>
+   master createdb done after 2s
+== [2/4] seeding the slave from the master's volumes
+   databases.txt hadb hadb_keys hadb_lgar_t hadb_lgat hadb_lginf hadb_vinf == [3/4] heartbeat start on BOTH nodes concurrently (it blocks until the group forms)
+== [4/4] waiting for the master to reach registered_and_active
+   master server: registered_and_active (after 2s)
+   slave server:  registered_and_standby
+== schema on the master (PK present on purpose: row replication records are
+   written only while walking a PK index, locator_sr.c:8038 -- N54 C-053)
+   Execute OK. (0.069002 sec) Committed. (0.025000 sec) 
+   slave sees table t: 0
+   slave sees table t: 
+== replication processes on the slave
+       260 cub_admin copylogdb -L /db/hadb_n65-n1 -m sync hadb@n65-n1
+       263 cub_admin applylogdb -L /db/hadb_n65-n1 --max-mem-size=300 hadb@localhost
+   copylogdb=260  applylogdb=263
+== seeding t with 20k rows (setup, not measured)
+   Execute OK. (0.001000 sec) 
+   master rows after seed: 20000
+== sampler on the slave (0.5 s) + load on the master
+   master rows: 360000 -> 640000 over 10 s
+0s  PHASE 1 baseline (20 s, no injection)
+21s     eof/final/lag/ins = 40419 12633 27786 340000
+21s  PHASE 2 SIGSTOP applylogdb (pid 263) for 30 s
+36s     at +15s  eof/final/lag/ins = 40419 12633 27786 340000
+36s     heartbeat status on the slave:
+     @ cubrid heartbeat status
+     
+      HA-Node Info (current n65-n2, state slave)
+        Node n65-n2 (priority 2, state slave)
+        Node n65-n1 (priority 1, state master)
+     
+     
+      HA-Process Info (master 51, state slave)
+        Applylogdb hadb@localhost:/db/hadb_n65-n1 (pid 263, state registered)
+        Copylogdb hadb@n65-n1:/db/hadb_n65-n1 (pid 260, state registered)
+        Server hadb (pid 62, state registered_and_standby)
+     
+51s     at +30s  eof/final/lag/ins = 40419 12633 27786 340000
+51s     replication procs now: copylogdb:260 applylogdb:263 
+51s     heartbeat log tail:
+52s  PHASE 3 SIGCONT applylogdb, drain 25 s
+57s     +5s  eof/final/lag/ins = 71143 16288 54855 440000
+62s     +10s  eof/final/lag/ins = 74076 19215 54861 520000
+67s     +15s  eof/final/lag/ins = 77510 22871 54639 620000
+73s     +20s  eof/final/lag/ins = 79214 26528 52686 720000
+78s     +25s  eof/final/lag/ins = 80459 30915 49544 840000
+78s  PHASE 4 SIGSTOP copylogdb (pid 260) for 30 s
+93s     at +15s  eof/final/lag/ins = 80459 41883 38576 1140000   <-- watch the apply lag, not the truth
+93s     applyinfo against the master (the only view that sees a COPY stall):
+     Can't generate the applied info due to an invalid path of the -L option or no related information in the db_ha_apply_info catalog table.
+     Can't generate the applied info due to an invalid path of the -L option or no related information in the db_ha_apply_info catalog table.
+     Can't generate the applied info due to an invalid path of the -L option or no related information in the db_ha_apply_info catalog table.
+     Can't generate the applied info due to an invalid path of the -L option or no related information in the db_ha_apply_info catalog table.
+     
+      *** Applied Info. *** 
+     
+      *** Copied Active Info. *** 
+     DB name                        : hadb
+     DB creation time               : 06:59:39.000 AM 08/27/2026 (1787813979)
+     Vol creation time              : 06:59:39.000 AM 08/27/2026 (1787813979)
+     EOF LSA                        : 32765 | 24
+     Append LSA                     : 32766 | 0
+     HA server state                : standby
+     HA promotion time              : 12:00:00.000 AM 01/01/1970 (0)
+     DB restore time                : 12:00:00.000 AM 01/01/1970 (0)
+     Mark will be deleted           : false 
+     
+      ***  Active Info. *** 
+     DB name                        : hadb
+     DB creation time               : 06:59:39.000 AM 08/27/2026 (1787813979)
+     Vol creation time              : 06:59:39.000 AM 08/27/2026 (1787813979)
+     EOF LSA                        : 81109 | 9696
+     Append LSA                     : 81109 | 9696
+     HA server state                : active
+     HA promotion time              : 07:00:27.000 AM 08/27/2026 (1787814027)
+     DB restore time                : 12:00:00.000 AM 01/01/1970 (0)
+     Mark will be deleted           : false 
+     
+      *** Delay in Copying Active Log *** 
+     Delayed log page count         : 48343
+     Estimated Delay                : - second(s)
+     
+      *** Applied Info. *** 
+     
+      *** Copied Active Info. *** 
+     DB name                        : hadb
+     DB creation time               : 06:59:39.000 AM 08/27/2026 (1787813979)
+     Vol creation time              : 06:59:39.000 AM 08/27/2026 (1787813979)
+     EOF LSA                        : 32765 | 24
+     Append LSA                     : 32766 | 0
+     HA server state                : standby
+     HA promotion time              : 12:00:00.000 AM 01/01/1970 (0)
+     DB restore time                : 12:00:00.000 AM 01/01/1970 (0)
+     Mark will be deleted           : false 
+     
+      ***  Active Info. *** 
+     DB name                        : hadb
+     DB creation time               : 06:59:39.000 AM 08/27/2026 (1787813979)
+     Vol creation time              : 06:59:39.000 AM 08/27/2026 (1787813979)
+     EOF LSA                        : 82019 | 9496
+     Append LSA                     : 82019 | 9496
+     HA server state                : active
+     HA promotion time              : 07:00:27.000 AM 08/27/2026 (1787814027)
+     DB restore time                : 12:00:00.000 AM 01/01/1970 (0)
+     Mark will be deleted           : false 
+     
+      *** Delay in Copying Active Log *** 
+     Delayed log page count         : 49253
+     Estimated Delay                : - second(s)
+116s     at +30s  eof/final/lag/ins = 80459 41883 38576 1140000
+116s     replication procs now: copylogdb:260 applylogdb:263 
+116s  PHASE 5 SIGCONT copylogdb, drain 25 s
+122s     +5s  eof/final/lag/ins = 98490 44076 54414 1200000
+127s     +10s  eof/final/lag/ins = 98490 46269 52221 1260000
+132s     +15s  eof/final/lag/ins = 98490 48464 50026 1320000
+137s     +20s  eof/final/lag/ins = 98490 49272 49218 1340000
+142s     +25s  eof/final/lag/ins = 103428 50657 52771 1380000
+142s  PHASE 6 tc netem delay 200ms on the slave's eth0 for 30 s
+159s     at +15s  eof/final/lag/ins = 114270 52121 62149 1420000
+174s     at +30s  eof/final/lag/ins = 122516 54315 68201 1480000
+174s  PHASE 7 netem removed, drain 30 s
+204s     eof/final/lag/ins = 126058 62209 63849 1680000
+212s  == master row count vs slave row count
+   n65-n1   3440000
+   n65-n2   1680000
+== artifacts: /data/workspace/for-plan/cluster-sandbox/out/oq7 (apply.captured, marks.log)

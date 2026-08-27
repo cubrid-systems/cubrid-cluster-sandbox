@@ -1,0 +1,95 @@
+############ OQ9 arm C ############
+  ha_ping_hosts = n65-ping   master also cut from ping host: yes
+== [1/4] launching n65-n1 (master) and n65-n2 (slave) on n65-oq9-net   ping_hosts=n65-ping
+   master createdb done after 18s
+== [2/4] seeding the slave from the master's volumes
+   databases.txt hadb hadb_keys hadb_lgar_t hadb_lgat hadb_lginf hadb_vinf == [3/4] heartbeat start on BOTH nodes concurrently (it blocks until the group forms)
+== [4/4] waiting for the master to reach registered_and_active
+   master server: registered_and_active (after 2s)
+   slave server:  registered_and_standby
+== addresses: n65-n1=172.19.0.3  n65-n2=172.19.0.4  n65-ping=172.19.0.2
+== ping reachability before the cut
+   n65-n1   -> n65-ping : 0
+   n65-n2   -> n65-ping : 0
+== baseline roles
+   n65-n1   The server 'hadb''s current HA running mode is active.
+   n65-n2   The server 'hadb''s current HA running mode is standby.
+
+== CUT: blackhole the peer on both nodes, and the ping host on the master
+t  n65-n1  n65-n2
+  0s  active       standby     
+  3s  active       standby     
+  6s               standby     
+  9s  standby      active      
+ 12s  standby      active      
+ 15s  standby      active      
+ 18s  standby      active      
+ 21s  standby      active      
+ 24s  standby      active      
+ 27s  standby      active      
+ 30s  standby      active      
+ 34s  standby      active      
+ 37s  standby      active      
+ 40s  standby      active      
+ 43s  standby      active      
+ 46s  standby      active      
+ 49s  standby      active      
+ 52s  standby      active      
+ 55s  standby      active      
+ 58s  standby      active      
+ 61s  standby      active      
+ 64s  standby      active      
+ 67s  standby      active      
+ 71s  standby      active      
+ 74s  standby      active      
+
+== roles while partitioned
+   n65-n1   standby
+   n65-n2   active
+   >>> clean failover (master demoted)
+== heartbeat log, n65-n1
+     [Failover] [Success] Current node has been successfully promoted to master.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Success] Current node has been successfully demoted to slave.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+== heartbeat log, n65-n2
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+
+== HEAL: remove the blackhole routes, then watch for the split-brain diagnosis
+== roles after heal
+   n65-n1   standby
+   n65-n2   active
+== heartbeat log after heal, n65-n1
+     [Failover] [Success] Current node has been successfully promoted to master.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Success] Current node has been successfully demoted to slave.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+     [Failover] [Cancelled] Ping check has been failed to all hosts registered in ha_ping_hosts, indicating a network partition.
+== heartbeat log after heal, n65-n2
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.
+== artifacts: /data/workspace/for-plan/cluster-sandbox/out/oq9-C

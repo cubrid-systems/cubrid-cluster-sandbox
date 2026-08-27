@@ -1,0 +1,26 @@
+t  n65-n1  n65-n2
+  0s  active       standby     
+  3s  active       standby     
+  6s               standby     
+  9s  standby      active      
+ 12s  standby      active      
+ 15s  standby      active      
+ 18s  standby      active      
+ 21s  standby      active      
+ 24s  standby      active      
+ 27s  standby      active      
+ 30s  standby      active      
+ 34s  standby      active      
+ 37s  standby      active      
+ 40s  standby      active      
+ 43s  standby      active      
+ 46s  standby      active      
+ 49s  standby      active      
+ 52s  standby      active      
+ 55s  standby      active      
+ 58s  standby      active      
+ 61s  standby      active      
+ 64s  standby      active      
+ 67s  standby      active      
+ 71s  standby      active      
+ 74s  standby      active      

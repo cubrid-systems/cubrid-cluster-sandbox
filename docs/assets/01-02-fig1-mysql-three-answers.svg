@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 380" width="880" height="380" font-family="Helvetica, Arial, sans-serif">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .h{font-size:12.5px;font-weight:700;fill:#34495e}
+  .t{font-size:10.5px;fill:#34495e}
+  .m{font-size:10px;font-family:monospace;fill:#1f2937}
+  .good{font-size:10.5px;font-weight:700;fill:#1a7f37}
+  .bad{font-size:10.5px;font-weight:700;fill:#c0392b}
+  .warn{font-size:10.5px;font-weight:700;fill:#b7791f}
+  .pane{fill:#ffffff;stroke:#d1d5db;stroke-width:1.2;rx:5}
+</style>
+<text class="ttl" x="10" y="20">MySQL has three answers at once — and the vendor never absorbed the community one</text>
+<text class="sub" x="10" y="36">The richest topology surface is community; the vendor API stayed deliberately small. Both ship the same one fault verb.</text>
+
+<rect class="pane" x="10" y="50" width="286" height="252"/>
+<text class="h" x="24" y="72">dbdeployer — community</text>
+<rect x="24" y="84" width="258" height="60" fill="#f8fafc" stroke="#d1d5db"/>
+<text class="m" x="30" y="102">downloads get TARBALL</text>
+<text class="m" x="30" y="118">unpack TARBALL  =&#62; $HOME/opt/mysql</text>
+<text class="m" x="30" y="134">deploy single 8.0.4</text>
+<text class="good" x="24" y="164">named topologies — the only tool here with them</text>
+<text class="m" x="24" y="182">--topology=master-slave | group</text>
+<text class="m" x="24" y="197">             | all-masters | fan-in</text>
+<text class="t" x="24" y="220">per-node scripts: start · stop · restart · kill</text>
+<text class="t" x="24" y="238">plus wipe_and_restart and _all variants</text>
+<text class="warn" x="24" y="264">binaries by version dir; a build tree is</text>
+<text class="warn" x="24" y="279">reachable via /path/to/version but undocumented</text>
+
+<rect class="pane" x="308" y="50" width="272" height="252"/>
+<text class="h" x="322" y="72">MySQL Shell AdminAPI — vendor</text>
+<rect x="322" y="84" width="244" height="76" fill="#f8fafc" stroke="#d1d5db"/>
+<text class="m" x="328" y="102">dba.deploySandboxInstance(3310)</text>
+<text class="m" x="328" y="118">dba.startSandboxInstance()</text>
+<text class="m" x="328" y="134">dba.stopSandboxInstance()  ← graceful</text>
+<text class="m" x="328" y="150">dba.killSandboxInstance()  ← abrupt</text>
+<text class="t" x="322" y="180">one instance per call, addressed by port</text>
+<text class="t" x="322" y="198">$HOME/mysql-sandboxes/PORT</text>
+<text class="t" x="322" y="216">no topology concept at the sandbox layer —</text>
+<text class="t" x="322" y="231">InnoDB Cluster assembly is a separate step</text>
+<text class="t" x="322" y="256">documented as for testing, not production</text>
+<text class="good" x="322" y="281">kill vs stop is a first-class distinction</text>
+
+<rect class="pane" x="592" y="50" width="278" height="252"/>
+<text class="h" x="606" y="72">mysql-test-run.pl — in-tree harness</text>
+<text class="t" x="606" y="94">starts servers and topologies for tests,</text>
+<text class="t" x="606" y="110">the MySQL analogue of PostgreSQL's Cluster.pm</text>
+<rect x="606" y="128" width="250" height="76" fill="#fdf2f2" stroke="#c0392b" stroke-width="1.3" rx="4"/>
+<text class="bad" x="616" y="148">absent from all three: a network partition</text>
+<text class="t" x="616" y="166">every answer isolates with processes and</text>
+<text class="t" x="616" y="181">ports, so severing a link is not expressible</text>
+<text class="t" x="616" y="196">— see 01-00 §5.1 DI1</text>
+<rect x="606" y="216" width="250" height="76" fill="#fffbeb" stroke="#b7791f" stroke-width="1.3" rx="4"/>
+<text class="warn" x="616" y="236">the cost of sharing one host network:</text>
+<text class="t" x="616" y="254">dbdeployer accumulated port catalogs,</text>
+<text class="t" x="616" y="269">collision prevention, free-port discovery.</text>
+<text class="t" x="616" y="284">Containers remove the category (01-02 §4 I3).</text>
+
+<text class="sub" x="10" y="326">Implication for CUBRID (01-02 §4 I2): the kill/stop split is cheap and universal — and in CUBRID it is not cosmetic.</text>
+<text class="sub" x="10" y="342">A graceful stop runs the serial cache write-back (serial_flush_cache_pool); a crash does not. Two verbs give the most valuable scenario split for free.</text>
+<text class="sub" x="10" y="366">Sources: dbdeployer docs/features.md + wiki/main-operations · MySQL Shell 8.0 §6.8.1–6.8.2</text>
+</svg>

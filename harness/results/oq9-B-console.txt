@@ -1,0 +1,103 @@
+############ OQ9 arm B ############
+  ha_ping_hosts = <unset>   master also cut from ping host: no
+== [1/4] launching n65-n1 (master) and n65-n2 (slave) on n65-oq9-net   ping_hosts=<unset>
+   master createdb done after 16s
+== [2/4] seeding the slave from the master's volumes
+   databases.txt hadb hadb_keys hadb_lgar_t hadb_lgat hadb_lginf hadb_vinf == [3/4] heartbeat start on BOTH nodes concurrently (it blocks until the group forms)
+== [4/4] waiting for the master to reach registered_and_active
+   master server: registered_and_active (after 2s)
+   slave server:  registered_and_standby
+== addresses: n65-n1=172.19.0.3  n65-n2=172.19.0.4  n65-ping=172.19.0.2
+== ping reachability before the cut
+   n65-n1   -> n65-ping : 0
+   n65-n2   -> n65-ping : 0
+== baseline roles
+   n65-n1   The server 'hadb''s current HA running mode is active.
+   n65-n2   The server 'hadb''s current HA running mode is standby.
+
+== CUT: blackhole the peer on both nodes
+t  n65-n1  n65-n2
+  0s  active       standby     
+  3s  active       standby     
+  6s  active       standby     
+  9s  active       active      
+ 13s  active       active      
+ 16s  active       active      
+ 19s  active       active      
+ 22s  active       active      
+ 25s  active       active      
+ 28s  active       active      
+ 31s  active       active      
+ 34s  active       active      
+ 37s  active       active      
+ 40s  active       active      
+ 43s  active       active      
+ 46s  active       active      
+ 50s  active       active      
+ 53s  active       active      
+ 56s  active       active      
+ 59s  active       active      
+ 62s  active       active      
+ 65s  active       active      
+ 68s  active       active      
+ 71s  active       active      
+ 74s  active       active      
+
+== roles while partitioned
+   n65-n1   active
+   n65-n2   active
+   >>> TWO MASTERS (split brain)
+== heartbeat log, n65-n1
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+== heartbeat log, n65-n2
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+
+== HEAL: remove the blackhole routes, then watch for the split-brain diagnosis
+== roles after heal
+   n65-n1   active
+   n65-n2   standby
+== heartbeat log after heal, n65-n1
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+== heartbeat log after heal, n65-n2
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] The master node has failed to receive heartbeat messages from all other slave nodes, resulting in a network partition.
+     [Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or all registered hosts are invalid, making it impossible to determine the network partition.
+     [Failback] [Diagnosis] Multiple master nodes (n65-n2, n65-n1) are detected.
+     [Failback] [Success] Current node has been successfully demoted to slave.
+== artifacts: /data/workspace/for-plan/cluster-sandbox/out/oq9-B

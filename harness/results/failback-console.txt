@@ -1,0 +1,120 @@
+############ failback demo ############
+== [1/4] launching n65-n1 (master) and n65-n2 (slave) on n65-fb-net   ping_hosts=n65-ping
+   master createdb done after 14s
+== [2/4] seeding the slave from the master's volumes
+   databases.txt hadb hadb_keys hadb_lgar_t hadb_lgat hadb_lginf hadb_vinf == [3/4] heartbeat start on BOTH nodes concurrently (it blocks until the group forms)
+== [4/4] waiting for the master to reach registered_and_active
+   master server: registered_and_active (after 2s)
+   slave server:  registered_and_standby
+== write something, so the failback has data to be careful about
+   n65-n1   rows=3
+   n65-n2   rows=3
+== forcing a clean failover (OQ9 arm C): cut n65-n1 from the peer AND the ping host
+   after 12s:  n65-n1=standby  n65-n2=active
+== healing the network
+   30 s after heal: n65-n1=standby  n65-n2=active   <-- still swapped, and stays that way
+
+############ running failback.sh ############
+════════════════════════════════════════════════════════════════════
+ CUBRID HA failback — n65-n2 (current master)  ->  n65-n1 (original master)
+ db=hadb  transport=docker  auto=yes
+════════════════════════════════════════════════════════════════════
+
+── STEP 1 ── Confirm which node is actually master right now
+     n65-n2 : active
+     n65-n1 : standby
+
+── STEP 2 ── Check that the target has applied everything it has been sent
+     db_ha_apply_info on n65-n1 (eof / final / lag / fail): <none>
+     apply lag = ? log pages   fail_counter = ?
+     NOTE: this number is blind to a COPY stall. eof_lsa is how far copylogdb has
+           FETCHED, so if copying is stuck, eof stops moving and lag reads 0 while
+           the target is arbitrarily far behind the master (measured, OQ7 phase 4).
+           The only view that sees it is: cubrid applyinfo -L <logpath> -r n65-n2 -a -i 1 hadb
+
+  ?? DECISION ─────────────────────────────────────────────
+     Is the target caught up enough to take over?
+     · A non-zero lag means the writes not yet applied are lost when n65-n2 steps down.
+     · A non-zero fail_counter means replication is BROKEN, not merely behind, and
+     · failing back onto it will not fix itself.
+     · We do not know your threshold. Zero? A page? A second of business time?
+     default: y
+     --auto: taking the default
+
+── STEP 3 ── Decide what happens to the application during the switch
+     Stopping the heartbeat on n65-n2 takes its SERVER down with it -- clients on
+     n65-n2 are disconnected, and there is a window with no master at all.
+
+  ?? DECISION ─────────────────────────────────────────────
+     Has write traffic been quiesced / drained?
+     · CUBRID has no read-only mode to hold a master still while replication catches up.
+     · Anything committed on n65-n2 after the lag reading above is at risk.
+     · How do you actually do this -- connection draining at the broker, at the app,
+     · or do you simply accept the loss?
+     default: y
+     --auto: taking the default
+
+── STEP 4 ── Stop the heartbeat on the current master (n65-n2)
+     This is the switch. With n65-n2 out of the group, n65-n1 is the only node left
+     and the heartbeat promotes it.
+
+  ?? DECISION ─────────────────────────────────────────────
+     Run: cubrid heartbeat stop on n65-n2 ?
+     · There is no supported way to demote a master in place: changemode refuses an
+     · active->standby transition the heartbeat did not drive (server_support.c:1558).
+     · If you use a different mechanism -- deregister, service stop, killing cub_master --
+     · tell us which and why.
+     default: y
+     --auto: taking the default
+     (bounded at 180 s: this command can hang forever if the node's HA processes
+      become zombies -- us_hb_deactivate polls "is any cub_server running" and a
+      zombie answers yes. Measured 2026-08-27 in a container without a reaping PID 1.)
+     @ cubrid heartbeat stop
+     ++ cubrid heartbeat stop: success
+
+── STEP 5 ── Wait for the target to be promoted
+     n65-n1 is now: active (after 2s)
+
+── STEP 6 ── Bring the old master back as a slave
+     TRAP: after 'heartbeat stop', 'heartbeat start' alone fails with
+           "CUBRID heartbeat feature is being deactivated". A full service
+           stop/start is required first (measured in the CBRD-26983 session).
+
+  ?? DECISION ─────────────────────────────────────────────
+     Run: cubrid service stop; cubrid service start; on n65-n2 ?
+     · If n65-n2's log diverged -- it accepted writes n65-n1 never received -- rejoining
+     · may not be possible at all, and it needs a fresh backupdb/restoreslave instead.
+     · Do you check for divergence before rejoining, and how?
+     default: y
+     --auto: taking the default
+     cubrid manager server is not installed.
+     @ cubrid master stop
+     ++ cubrid master stop: success
+     ++ cubrid broker start: success
+     @ cubrid manager server start
+     cubrid manager server is not installed.
+     ++ applylogdb start: success
+     ++ HA processes start: success
+     ++ cubrid heartbeat start: success
+
+── STEP 7 ── Verify the cluster
+     n65-n1 : active   n65-n2 : standby
+     replication on n65-n2 (eof / final / lag / fail): 
+
+  ✓ failback complete: n65-n1 is master, n65-n2 is its slave
+
+────────────────────────────────────────────────────────────────────
+ What we still do not know, and would like you to write in:
+   1. Your threshold for "caught up" at STEP 2, and what you do when it
+      is not met.
+   2. How write traffic is actually quiesced at STEP 3 -- or whether it
+      simply is not.
+   3. Whether STEP 5's heartbeat stop is what you use, or something else.
+   4. How you detect that the old master's log diverged before rejoining
+      it at STEP 6, and what you do when it has.
+   5. Every step we did not write down.
+────────────────────────────────────────────────────────────────────
+
+== final state: n65-n1=active  n65-n2=standby   (failback.sh rc=0)
+   n65-n1   rows=3
+   n65-n2   rows=3

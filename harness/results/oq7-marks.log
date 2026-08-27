@@ -1,0 +1,31 @@
+0s  PHASE 1 baseline (20 s, no injection)
+21s     eof/final/lag/ins = 40419 12633 27786 340000
+21s  PHASE 2 SIGSTOP applylogdb (pid 263) for 30 s
+36s     at +15s  eof/final/lag/ins = 40419 12633 27786 340000
+36s     heartbeat status on the slave:
+51s     at +30s  eof/final/lag/ins = 40419 12633 27786 340000
+51s     replication procs now: copylogdb:260 applylogdb:263 
+51s     heartbeat log tail:
+52s  PHASE 3 SIGCONT applylogdb, drain 25 s
+57s     +5s  eof/final/lag/ins = 71143 16288 54855 440000
+62s     +10s  eof/final/lag/ins = 74076 19215 54861 520000
+67s     +15s  eof/final/lag/ins = 77510 22871 54639 620000
+73s     +20s  eof/final/lag/ins = 79214 26528 52686 720000
+78s     +25s  eof/final/lag/ins = 80459 30915 49544 840000
+78s  PHASE 4 SIGSTOP copylogdb (pid 260) for 30 s
+93s     at +15s  eof/final/lag/ins = 80459 41883 38576 1140000   <-- watch the apply lag, not the truth
+93s     applyinfo against the master (the only view that sees a COPY stall):
+116s     at +30s  eof/final/lag/ins = 80459 41883 38576 1140000
+116s     replication procs now: copylogdb:260 applylogdb:263 
+116s  PHASE 5 SIGCONT copylogdb, drain 25 s
+122s     +5s  eof/final/lag/ins = 98490 44076 54414 1200000
+127s     +10s  eof/final/lag/ins = 98490 46269 52221 1260000
+132s     +15s  eof/final/lag/ins = 98490 48464 50026 1320000
+137s     +20s  eof/final/lag/ins = 98490 49272 49218 1340000
+142s     +25s  eof/final/lag/ins = 103428 50657 52771 1380000
+142s  PHASE 6 tc netem delay 200ms on the slave's eth0 for 30 s
+159s     at +15s  eof/final/lag/ins = 114270 52121 62149 1420000
+174s     at +30s  eof/final/lag/ins = 122516 54315 68201 1480000
+174s  PHASE 7 netem removed, drain 30 s
+204s     eof/final/lag/ins = 126058 62209 63849 1680000
+212s  == master row count vs slave row count

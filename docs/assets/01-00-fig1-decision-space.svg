@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520" width="880" height="520" font-family="Helvetica, Arial, sans-serif">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .hd{font-size:12px;font-weight:700;fill:#34495e}
+  .ax{font-size:11.5px;font-weight:700;fill:#1f2937}
+  .axs{font-size:10px;fill:#6b7280}
+  .c{font-size:10.5px;fill:#34495e}
+  .cg{font-size:10.5px;font-weight:700;fill:#1a7f37}
+  .cr{font-size:10.5px;font-weight:700;fill:#c0392b}
+  .cb{font-size:10.5px;font-weight:700;fill:#2563eb}
+  .box{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .boxc{fill:#fdf2f2;stroke:#c0392b;stroke-width:1.4}
+  .hdbox{fill:#eef2f7;stroke:#d1d5db;stroke-width:1}
+  .note{fill:#fdf2f2;stroke:#c0392b;stroke-width:1.4}
+</style>
+<text class="ttl" x="10" y="20">The design space — five decisions, four comparable tools, and where CUBRID cannot follow</text>
+<text class="sub" x="10" y="36">Cells summarise 01-01 … 01-04. The D3 row is uniform, and that uniformity is what produces the empty column in D4.</text>
+
+<rect class="hdbox" x="10" y="48" width="160" height="30"/>
+<rect class="hdbox" x="174" y="48" width="132" height="30"/>
+<rect class="hdbox" x="310" y="48" width="132" height="30"/>
+<rect class="hdbox" x="446" y="48" width="132" height="30"/>
+<rect class="hdbox" x="582" y="48" width="132" height="30"/>
+<rect x="718" y="48" width="152" height="30" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>
+<text class="hd" x="18" y="68">decision</text>
+<text class="hd" x="182" y="68">PostgreSQL</text>
+<text class="hd" x="318" y="68">MySQL</text>
+<text class="hd" x="454" y="68">MongoDB</text>
+<text class="hd" x="590" y="68">TiDB</text>
+<text class="hd" x="726" y="68" fill="#2563eb">CUBRID needs</text>
+
+<rect class="box" x="10" y="82" width="160" height="58"/>
+<text class="ax" x="18" y="102">D1 topology</text><text class="axs" x="18" y="117">how it is declared</text>
+<rect class="box" x="174" y="82" width="132" height="58"/><text class="c" x="182" y="102">imperative Perl</text><text class="c" x="182" y="116">API, no presets</text>
+<rect class="box" x="310" y="82" width="132" height="58"/><text class="cg" x="318" y="102">named topologies</text><text class="c" x="318" y="116">--topology=…</text>
+<rect class="box" x="446" y="82" width="132" height="58"/><text class="cg" x="454" y="102">flags in system</text><text class="c" x="454" y="116">vocabulary</text>
+<rect class="box" x="582" y="82" width="132" height="58"/><text class="c" x="590" y="102">per-component</text><text class="c" x="590" y="116">counts</text>
+<rect class="box" x="718" y="82" width="152" height="58"/><text class="cb" x="726" y="102">preset + count</text><text class="c" x="726" y="116">file deferred (OQ5)</text>
+
+<rect class="box" x="10" y="144" width="160" height="58"/>
+<text class="ax" x="18" y="164">D2 artifact</text><text class="axs" x="18" y="179">where binaries come from</text>
+<rect class="box" x="174" y="144" width="132" height="58"/><text class="cg" x="182" y="164">install_path</text><text class="c" x="182" y="178">local build 1st-class</text>
+<rect class="box" x="310" y="144" width="132" height="58"/><text class="c" x="318" y="164">unpacked tarball</text><text class="c" x="318" y="178">build tree undocumented</text>
+<rect class="box" x="446" y="144" width="132" height="58"/><text class="cg" x="454" y="164">--binarypath</text><text class="c" x="454" y="178">"compile your own"</text>
+<rect class="box" x="582" y="144" width="132" height="58"/><text class="cg" x="590" y="164">--{comp}.binpath</text><text class="c" x="590" y="178">per component</text>
+<rect class="box" x="718" y="144" width="152" height="58"/><text class="cb" x="726" y="164">version OR path</text><text class="c" x="726" y="178">inside precedent (DI2)</text>
+
+<rect class="box" x="10" y="206" width="160" height="58"/>
+<text class="ax" x="18" y="226">D3 isolation</text><text class="axs" x="18" y="241">what separates a node</text>
+<rect class="box" x="174" y="206" width="132" height="58"/><text class="c" x="182" y="230">processes + ports</text>
+<rect class="box" x="310" y="206" width="132" height="58"/><text class="c" x="318" y="230">processes + ports</text>
+<rect class="box" x="446" y="206" width="132" height="58"/><text class="c" x="454" y="230">processes + ports</text>
+<rect class="box" x="582" y="206" width="132" height="58"/><text class="c" x="590" y="230">processes + ports</text>
+<rect class="boxc" x="718" y="206" width="152" height="58"/><text class="cr" x="726" y="226">containers</text><text class="c" x="726" y="240">— a requirement,</text><text class="c" x="726" y="253">not a preference</text>
+
+<rect class="box" x="10" y="268" width="160" height="76"/>
+<text class="ax" x="18" y="288">D4 fault verbs</text><text class="axs" x="18" y="303">how a failure is caused</text><text class="axs" x="18" y="317">and how a node is named</text>
+<rect class="box" x="174" y="268" width="132" height="76"/><text class="c" x="182" y="288">kill9 · promote</text><text class="c" x="182" y="302">stop(immediate)</text><text class="cr" x="182" y="322">no partition</text>
+<rect class="box" x="310" y="268" width="132" height="76"/><text class="c" x="318" y="288">kill vs stop</text><text class="c" x="318" y="302">per-node scripts</text><text class="cr" x="318" y="322">no partition</text>
+<rect class="box" x="446" y="268" width="132" height="76"/><text class="cg" x="454" y="288">kill by role tag</text><text class="c" x="454" y="302">"shard-a secondary"</text><text class="cr" x="454" y="322">no partition</text>
+<rect class="box" x="582" y="268" width="132" height="76"/><text class="c" x="590" y="288">scale-in --pid</text><text class="c" x="590" y="302">no kill/stop split</text><text class="cr" x="590" y="322">no partition</text>
+<rect class="boxc" x="718" y="268" width="152" height="76"/><text class="cr" x="726" y="288">partition required</text><text class="c" x="726" y="302">+ kill vs stop</text><text class="cb" x="726" y="322">addressed by role</text>
+
+<rect class="box" x="10" y="348" width="160" height="58"/>
+<text class="ax" x="18" y="368">D5 what it shows</text><text class="axs" x="18" y="383">observability tier</text>
+<rect class="box" x="174" y="348" width="132" height="58"/><text class="c" x="182" y="372">none (tests assert)</text>
+<rect class="box" x="310" y="348" width="132" height="58"/><text class="c" x="318" y="372">sandbox catalog</text>
+<rect class="box" x="446" y="348" width="132" height="58"/><text class="c" x="454" y="368">list --tags</text><text class="c" x="454" y="382">list --startup</text>
+<rect class="box" x="582" y="348" width="132" height="58"/><text class="cg" x="590" y="368">Grafana + dashboard</text><text class="c" x="590" y="382">bundled (tier 3)</text>
+<rect class="box" x="718" y="348" width="152" height="58"/><text class="cb" x="726" y="368">tier 1 + tier 2 now</text><text class="c" x="726" y="382">tier 3 = seam (N20)</text>
+
+<rect class="note" x="10" y="418" width="860" height="42" rx="4"/>
+<text class="cr" x="22" y="437">DI1 — every comparable tool isolates with processes and ports, so not one ships a network partition.</text>
+<text class="c" x="22" y="452">CUBRID induces failover by cutting a link (cubrid heartbeat stop takes the server down; changemode refuses active→standby — server_support.c:1558), so the substrate choice is forced.</text>
+
+<text class="sub" x="10" y="482">green = documented / first-class · red = absent, or a CUBRID constraint the comparable set does not cover · blue = this project's decision</text>
+<text class="sub" x="10" y="498">Sources: 01-01 PostgreSQL · 01-02 MySQL · 01-03 MongoDB · 01-04 TiDB · 01-05 CUBRID gap-and-measurement</text>
+</svg>

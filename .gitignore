@@ -1,0 +1,10 @@
+# Harness run artifacts. `out/` holds the containers' database volumes — a single
+# run is ~2 GB and the OQ7 run reached 7.7 GB. The small, interesting products of
+# a run (console logs, role timelines, apply-info samples) are committed by hand
+# under harness/results/ instead.
+out/
+*.err
+*.access
+csql.err
+
+.omc/

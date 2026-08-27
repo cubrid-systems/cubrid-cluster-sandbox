@@ -1,0 +1,109 @@
+---
+title: TiDB — Local Multi-Node Provisioning (Survey 04)
+category: roadmap-survey
+project: cluster-sandbox
+status: selected
+lang: en
+sources:
+  - https://docs.pingcap.com/tidb/stable/tiup-playground/ — `tiup playground`
+  - 01-00-survey_overview.md §3 (D1–D5); 01-01 · 01-02 · 01-03
+summary: The vendor-official modern case and the only one in the comparable set where the same tool family spans local and real deployment — `tiup playground` for a throwaway cluster, `tiup cluster` for a deployed one. Version is the first positional argument (`tiup playground v7.5.0`), component counts are flags (`--db --kv --pd --tiflash`), and a locally built binary substitutes per component via `--{comp}.binpath`. It is also the only tool here that ships observability as part of provisioning: Grafana and a dashboard come up with the cluster. Its fault surface is the weakest — `scale-in --pid` is node removal, not fault injection.
+created: 2026-08-18
+updated: 2026-08-18
+tags: [roadmap, survey, cluster-sandbox, tidb, tiup, playground, provisioning, observability]
+---
+
+**Contents:**
+
+- [1. What tiup playground is](#1-what-tiup-playground-is)
+- [2. The five decisions](#2-the-five-decisions)
+- [3. Answers to the overview's five questions](#3-answers-to-the-overviews-five-questions)
+- [4. Implications for CUBRID](#4-implications-for-cubrid)
+
+## 1. What tiup playground is
+
+One command brings up a complete local cluster of a chosen version:
+
+```
+tiup playground ${version} --db 3 --pd 3 --kv 3
+tiup playground nightly
+```
+
+Version is positional and `tiup list tidb` enumerates what is available, so
+"run last release and this one side by side" is the ordinary case rather than a
+special mode. `tiup playground display` lists the running components with pids
+and uptime; `scale-out --db 2` adds instances and `scale-in --pid <pid>` removes
+one. The sibling command `tiup cluster` deploys production clusters, so a
+developer moves between local and real deployment inside one tool family rather
+than across two unrelated ones.
+
+## 2. The five decisions
+
+**D1 topology.** Per-component counts as flags — `--db`, `--kv`, `--pd`,
+`--tiflash`. TiDB's architecture is a fixed set of component types, so the
+topology surface is "how many of each", with no roles to assign and no pairing
+to express. This is a narrower problem than CUBRID's: there is no master/slave
+distinction to name, so nothing in the interface has to address one.
+
+**D2 artifact source.** Two paths, both first-class. Released versions come
+from `tiup` itself by version string. A locally built binary substitutes per
+component with `--{comp}.binpath`, e.g. `--db.binpath /xx/tidb-server`. The
+per-component granularity matters: an engineer working on one component runs
+their build of it against released versions of the rest — a mixed cluster,
+which none of the other three tools in this survey expresses as directly.
+
+**D3 isolation.** Processes on one host, distinguished by port.
+
+**D4 lifecycle and fault verbs.** The weakest of the four. `scale-in --pid`
+removes an instance and `scale-out` adds one; there is no kill-versus-stop
+distinction and no partition. Addressing is by **pid** — the opposite end of
+the range from MongoDB's role tags (`01-03` §2 D4), and the least stable
+identifier available, since it changes on every restart.
+
+**D5 observability.** The strongest of the four, and the only one where
+monitoring is part of the provisioning product rather than left to the user:
+**Grafana** at `:3000` and the **TiDB Dashboard** at `:2379/dashboard` come up
+with the cluster, and `tiup client` discovers running clusters and connects.
+The cluster ships with its metric stack already wired.
+
+## 3. Answers to the overview's five questions
+
+1. **Fault verbs.** Effectively none. `scale-in --pid` is capacity management
+   that happens to remove a node; nothing distinguishes a crash from a clean
+   stop, and there is no partition.
+2. **Local build path.** First-class and per component (`--{comp}.binpath`) —
+   the most granular answer in the survey.
+3. **Where provisioning lives.** In the vendor's own tooling, as one of two
+   modes of one tool family, spanning local and production.
+4. **Observability tier.** Tier 3 — full metric stack, bundled. The others stop
+   at tier 0 or 1.
+5. **What it refused to do.** Playground clusters are explicitly disposable;
+   durability and real deployment belong to `tiup cluster`.
+
+## 4. Implications for CUBRID
+
+**I1 — Bundled observability is achievable, and its cost is architectural, not
+incidental.** TiDB can ship Grafana with a playground because its components
+already expose Prometheus endpoints; the provisioner only has to point a
+scraper at them. CUBRID has no such endpoint — `00-foundation.md` §9 OQ2 tier 3
+is expensive precisely because `cubrid statdump` is text-only and the 2020
+`cubrid-exporter` died against statements that do not exist. **This survey
+therefore confirms the OQ2 recommendation rather than challenging it**: the
+gap between TiDB's tier 3 and CUBRID's is N20 and N64 W1, not the
+provisioner. What `cluster-sandbox` can do now is wire tiers 1 and 2 and leave
+a seam where a scraper attaches once the contract exists.
+
+**I2 — One tool family for local and real deployment is a live option, and it
+has an owner already.** `tiup playground` / `tiup cluster` is the pattern
+`00-foundation.md` §9 OQ4 asks about. In CUBRID's case the production half
+exists as `cubrid-operator` (Kubernetes, `CubridDB` CRD). The choice is
+therefore not "build both" but "share the topology model with the operator or
+not" — a smaller decision than TiDB's, and one that can be deferred without
+blocking a Docker-only first release.
+
+**I3 — Do not address nodes by pid.** TiDB gets away with it because its
+components are interchangeable and stateless in role. CUBRID's nodes are not:
+the whole point of the measured verification was that a node's *role* changed
+under the test. Combined with `01-03` §4 I1, the survey's verdict on addressing
+is unanimous in one direction — name nodes by role and by declared name, never
+by pid.

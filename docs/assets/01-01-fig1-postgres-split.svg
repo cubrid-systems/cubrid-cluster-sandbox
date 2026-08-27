@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 400" width="880" height="400" font-family="Helvetica, Arial, sans-serif">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .h{font-size:12.5px;font-weight:700;fill:#34495e}
+  .t{font-size:10.5px;fill:#34495e}
+  .m{font-size:10.5px;font-family:monospace;fill:#1f2937}
+  .bad{font-size:10.5px;font-weight:700;fill:#c0392b}
+  .good{font-size:10.5px;font-weight:700;fill:#1a7f37}
+  .pane{fill:#ffffff;stroke:#d1d5db;stroke-width:1.2;rx:5}
+  .ed{stroke:#34495e;stroke-width:1.3;fill:none}
+</style>
+<defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#34495e"/></marker></defs>
+<text class="ttl" x="10" y="20">PostgreSQL splits the problem, and neither half is a developer cluster tool</text>
+<text class="sub" x="10" y="36">Packaging provisions one node and knows nothing about replicas; the multi-node capability lives in the test harness and never surfaces.</text>
+
+<rect class="pane" x="10" y="52" width="410" height="300"/>
+<text class="h" x="24" y="74">packaging — pg_createcluster</text>
+<text class="t" x="24" y="94">Debian postgresql-common, not upstream</text>
+<rect x="24" y="106" width="382" height="30" fill="#f8fafc" stroke="#d1d5db"/>
+<text class="m" x="32" y="126">pg_createcluster [options] VERSION NAME</text>
+<text class="t" x="24" y="156">version is positional — several majors side by side</text>
+<text class="t" x="24" y="174">--datadir · --port · --locale · --start-conf</text>
+<text class="t" x="24" y="192">operated afterwards by pg_ctlcluster / pg_lsclusters</text>
+<rect x="24" y="212" width="382" height="52" fill="#fdf2f2" stroke="#c0392b" stroke-width="1.3" rx="4"/>
+<text class="bad" x="34" y="232">no standby, no replica, no multi-node</text>
+<text class="t" x="34" y="250">single-cluster provisioning by construction</text>
+<text class="t" x="24" y="288">D5 observability: n/a — it is packaging</text>
+<text class="t" x="24" y="308">audience: an administrator on a Debian host</text>
+
+<rect class="pane" x="440" y="52" width="430" height="300"/>
+<text class="h" x="454" y="74">in-tree harness — PostgreSQL::Test::Cluster</text>
+<text class="t" x="454" y="94">src/test/perl/ — consumed by TAP tests</text>
+<rect x="454" y="106" width="402" height="76" fill="#f8fafc" stroke="#d1d5db"/>
+<text class="m" x="462" y="124">$primary.backup('bkp');</text>
+<text class="m" x="462" y="140">$standby.init_from_backup($primary, 'bkp');</text>
+<text class="m" x="462" y="156">$standby.enable_streaming($primary);</text>
+<text class="m" x="462" y="172">$standby.start;</text>
+<text class="t" x="454" y="200">the same three-step chain CUBRID assembles by hand</text>
+<text class="t" x="454" y="215">(backupdb → copy → restoreslave) — inherent to</text>
+<text class="t" x="454" y="230">physical replication, only the interface is missing</text>
+<rect x="454" y="242" width="402" height="46" fill="#eafaf0" stroke="#1a7f37" stroke-width="1.3" rx="4"/>
+<text class="good" x="464" y="260">fault verbs present: kill9 · promote · stop('immediate')</text>
+<text class="good" x="464" y="278">binaries: install_path — local build is first-class</text>
+<rect x="454" y="296" width="402" height="42" fill="#fdf2f2" stroke="#c0392b" stroke-width="1.3" rx="4"/>
+<text class="bad" x="464" y="314">no network disruption method — connstr / raw_connect only</text>
+<text class="t" x="464" y="330">and no user-facing surface: it is a Perl API, not a CLI</text>
+
+<text class="sub" x="10" y="372">Implication for CUBRID (01-01 §4 I1): a harness can own the primitives, but the developer-facing surface still has to be built on top —</text>
+<text class="sub" x="10" y="388">which is why cubrid-testkit consuming cluster-sandbox, rather than owning provisioning, is the cleaner split.</text>
+</svg>
