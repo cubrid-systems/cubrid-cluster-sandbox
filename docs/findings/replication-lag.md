@@ -2,8 +2,8 @@
 
 **Answers: suspend a stage; and yes, the heartbeat permits it.** Measured
 2026-08-27, two-node containerised HA pair, CUBRID 11.5.0, one cluster and seven
-phases (`oq7-lag.sh`, raw output `out-oq7.txt`, marks `out/oq7/marks.log`,
-0.5 s samples `out/oq7/apply.captured`).
+phases (`harness/oq7-lag.sh`; console output, marks and 0.5 s samples kept at
+`harness/results/oq7-*`).
 
 The run also produced something nobody asked for and that changes G9: **the
 observable the foundation chose does not observe what it was chosen to
@@ -119,5 +119,5 @@ replication pipeline can actually keep up with.
 ## Reproducing
 
 ```bash
-bash oq7-lag.sh     # ~4 min: baseline, apply stall, drain, copy stall, drain, netem, drain
+cd harness && bash oq7-lag.sh     # ~4 min: baseline, apply stall, drain, copy stall, drain, netem, drain
 ```

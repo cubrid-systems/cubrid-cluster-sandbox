@@ -7,7 +7,7 @@ a two-node containerised HA pair, CUBRID 11.5.0 (engine
 `/data/cub_sys/cubrid` at `5fd7b76c1`).
 
 The foundation carried this as a code reading marked *read-not-run*
-(`00-foundation.md` §9 OQ9). It now has three arms behind it.
+(`../DESIGN.md` §9 OQ9). It now has three arms behind it.
 
 ## The arms
 
@@ -123,10 +123,12 @@ the technical team about.
 ## Reproducing
 
 ```bash
+cd harness
 bash oq9-splitbrain.sh A     # correct config, ping host survives  -> split brain
 bash oq9-splitbrain.sh B     # default config                      -> split brain
 bash oq9-splitbrain.sh C     # correct config, ping host also cut  -> clean failover
 ```
 
-Artifacts land in `out/oq9-<arm>/` (`roles.log`, `masterlog-*.txt`, raw console
-output in `out-oq9-<arm>.txt`).
+A run leaves its containers' database volumes in `harness/out/` (large, not in
+version control); the role timelines and console output that matter are kept at
+`harness/results/oq9-<arm>-*`.

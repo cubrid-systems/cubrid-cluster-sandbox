@@ -1,13 +1,13 @@
 ---
 title: PostgreSQL — Local Multi-Node Provisioning (Survey 01)
-category: roadmap-survey
+category: survey
 project: cluster-sandbox
 status: selected
 lang: en
 sources:
   - src/test/perl/PostgreSQL/Test/Cluster.pm (postgres/postgres, master) — in-tree TAP cluster module
   - https://salsa.debian.org/postgresql/postgresql-common/-/raw/master/pg_createcluster — POD synopsis and options
-  - 01-00-survey_overview.md §3 (the five decisions D1–D5)
+  - 01-00-overview.md §3 (the five decisions D1–D5)
 summary: PostgreSQL splits the problem in two and neither half is a developer cluster tool. The packaging layer (`pg_createcluster`) provisions exactly one cluster and has no notion of a replica. The multi-node capability lives in the in-tree test harness `PostgreSQL::Test::Cluster`, which builds a streaming standby from a base backup in three calls and ships the fault verbs — `promote`, `kill9`, `stop('immediate')` — that the packaging tool lacks. Its binaries come from an `install_path` argument, which makes a locally built tree first-class. What neither provides is network-level disruption, and that is the one primitive CUBRID's HA verification actually needed.
 created: 2026-08-18
 updated: 2026-08-18
@@ -111,7 +111,7 @@ tests, so state is asserted with SQL and log inspection rather than displayed.
 **I1 — The harness-as-provisioner pattern is real, and it stops short of being
 a tool.** PostgreSQL has every primitive `cluster-sandbox` wants and exposes
 none of them to a developer who is not writing a TAP test. This is direct
-evidence for `00-foundation.md` §9 OQ3: a test harness *can* own provisioning,
+evidence for `../DESIGN.md` §9 OQ3: a test harness *can* own provisioning,
 but if it does, the developer-facing surface still has to be built on top. The
 CUBRID variant of the question — whether `cubrid-testkit` provides the
 environment — inherits this shape: testkit could own the primitives and

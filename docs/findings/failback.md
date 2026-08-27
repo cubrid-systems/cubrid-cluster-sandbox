@@ -1,7 +1,7 @@
 # G8 — the failback script, and what running it exposed
 
 `failback.sh` returns a CUBRID HA cluster to its original master. It ran
-end-to-end on 2026-08-27 (`failback-demo.sh`, output `out-failback.txt`) and
+end-to-end on 2026-08-27 (`harness/failback-demo.sh`; console output at `harness/results/failback-console.txt`) and
 completed: `rc=0`, the original master active again, the other node its slave,
 and both nodes still holding the three rows written before the failover.
 
@@ -36,7 +36,7 @@ The node had just been demoted, and its `applylogdb` had not yet written the
 row. Queried directly a few minutes later the row existed and read
 `173 / 173 / 0 / 0` — caught up. STEP 7 showed the same blank on the other node
 after the rejoin. So the view is not merely incomplete as a lag source
-(`findings/oq7-lag.md`); it is **absent across a role change**, which is the
+(`replication-lag.md`); it is **absent across a role change**, which is the
 only time a failback decision is ever made. A monitor that treats "no row" as
 "no lag" will approve a failback onto a node it knows nothing about.
 
@@ -72,5 +72,5 @@ the view being empty.
 ## Reproducing
 
 ```bash
-bash failback-demo.sh      # builds a pair, forces a clean failover, heals, runs failback.sh --auto
+cd harness && bash failback-demo.sh      # builds a pair, forces a clean failover, heals, runs failback.sh --auto
 ```

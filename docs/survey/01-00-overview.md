@@ -1,11 +1,11 @@
 ---
 title: Local Multi-Node Provisioning Across Comparable Systems — Survey OVERVIEW
-category: roadmap-survey
+category: survey
 project: cluster-sandbox
 status: selected
 lang: en
 sources:
-  - 00-foundation.md §1 (the measured CBRD-26983 HA assembly that motivates the series)
+  - ../DESIGN.md §1 (the measured CBRD-26983 HA assembly that motivates the series)
   - Per-system files in this directory (to be authored — see §2)
   - https://github.com/CUBRID/cubrid-contrib — sandbox/, docker_for_ctp/
   - https://github.com/cubrid-systems/cubrid-testkit — docs/ROADMAP.md, docs/adr/ADR-001
@@ -26,7 +26,7 @@ tags: [roadmap, survey, overview, cluster-sandbox, provisioning, containers, ha,
 
 ## 1. Purpose & Scope
 
-`00-foundation.md` §1 records what it cost to answer one HA question by hand:
+`../DESIGN.md` §1 records what it cost to answer one HA question by hand:
 config files per node, a backup/restore chain to build the second node, an
 ordering constraint between `service start` and `heartbeat start`, and failure
 induction improvised with `docker network disconnect` and `pkill`. The claim
@@ -51,12 +51,12 @@ Design in the foundation stays unwritten until this series closes
 
 | File | Role | State |
 |---|---|---|
-| `01-00-survey_overview.md` | This file — axes, comparable set, matrix, cross-cutting findings | authored |
-| `01-01-survey_postgresql.md` | `pg_createcluster` (single-node packaging) and the in-tree TAP cluster harness (multi-node + fault verbs) | authored |
-| `01-02-survey_mysql.md` | `dbdeployer`, MySQL Shell AdminAPI sandbox instances, `mysql-test-run.pl` | authored |
-| `01-03-survey_mongodb.md` | `mlaunch` / mtools — topology from flags, node control by role tag | authored |
-| `01-04-survey_tidb.md` | `tiup playground` / `tiup cluster` — version-selectable local cluster, bundled monitoring | authored |
-| `01-05-survey_cubrid-gap-and-measurement.md` | CUBRID synthesis: seven gaps, measurement plan, prerequisite order | authored |
+| `01-00-overview.md` | This file — axes, comparable set, matrix, cross-cutting findings | authored |
+| `01-01-postgresql.md` | `pg_createcluster` (single-node packaging) and the in-tree TAP cluster harness (multi-node + fault verbs) | authored |
+| `01-02-mysql.md` | `dbdeployer`, MySQL Shell AdminAPI sandbox instances, `mysql-test-run.pl` | authored |
+| `01-03-mongodb.md` | `mlaunch` / mtools — topology from flags, node control by role tag | authored |
+| `01-04-tidb.md` | `tiup playground` / `tiup cluster` — version-selectable local cluster, bundled monitoring | authored |
+| `01-05-cubrid-gap.md` | CUBRID synthesis: seven gaps, measurement plan, prerequisite order | authored |
 
 Reading order is the `NN` prefix; cross-references go strictly backwards
 (CLAUDE.md §2.7).
@@ -66,7 +66,7 @@ Reading order is the `NN` prefix; cross-references go strictly backwards
 The usual textbook anchors for this repo's surveys — Petrov, Silberschatz,
 Gray76 — do not cover developer provisioning, and pretending otherwise would
 manufacture a foundation the topic does not have. The foundational structure
-here is derived instead from the assembly recorded in `00-foundation.md` §1:
+here is derived instead from the assembly recorded in `../DESIGN.md` §1:
 each manual step maps to a decision a provisioner has to make on the
 developer's behalf.
 
@@ -81,7 +81,7 @@ anyway.
 downloads, a version already installed, or a path the developer points at. The
 third case is the one that matters for engine work and the one most tools treat
 as an afterthought — CUBRID's requirement is explicitly that a local build
-directory can be handed in (`00-foundation.md` §1), and that turned out to cost
+directory can be handed in (`../DESIGN.md` §1), and that turned out to cost
 nothing because a host-built tree runs unmodified in a stock container.
 
 **D3 — What isolates a node?** Separate processes and ports on one host,
@@ -97,7 +97,7 @@ comparable tools ship fault injection, and if not what people use instead, is
 the single most decision-relevant question in this series.
 
 **D5 — What does the tool show you?** Nothing (the developer runs their own
-client), process-level status, or replication/cluster state. `00-foundation.md`
+client), process-level status, or replication/cluster state. `../DESIGN.md`
 §9 OQ2 already splits CUBRID's answer into three cost tiers; the legs should
 record which tier each comparable tool stopped at, because that is evidence
 about which tier is actually load-bearing for developers.
@@ -110,7 +110,7 @@ file that needs confirmation before the legs are authored.**
 
 | System | Why it earns a leg |
 |---|---|
-| **PostgreSQL** | The case where provisioning grew *inside* the project: `pg_createcluster` from packaging, and a test-framework cluster module that sets up streaming replication programmatically. Tests whether an in-tree harness can double as a developer tool — directly relevant to the `cubrid-testkit` boundary in `00-foundation.md` §9 OQ3 |
+| **PostgreSQL** | The case where provisioning grew *inside* the project: `pg_createcluster` from packaging, and a test-framework cluster module that sets up streaming replication programmatically. Tests whether an in-tree harness can double as a developer tool — directly relevant to the `cubrid-testkit` boundary in `../DESIGN.md` §9 OQ3 |
 | **MySQL** | The case with *three* answers at once — a community sandbox tool (`dbdeployer`), a vendor-official sandbox API (MySQL Shell AdminAPI), and a test harness that starts topologies (`mysql-test-run.pl`). The most informative single system for D1/D2, and the clearest evidence on whether vendor-official and community tools converge |
 | **MongoDB** | The community single-command case (`mlaunch`): replica sets and sharded clusters from flags, no config file. The lower bound on D1 — how far presets go before a file is needed |
 | **TiDB** | The modern vendor-official case (`tiup playground` / `tiup cluster`): version selection as a first-class argument and the same tool spanning local and real deployment. Directly probes D2 and the OQ4 question of whether one substrate serves both |
@@ -159,7 +159,7 @@ unmodified in a stock container.
 **DI3 — Placement is split four ways, so precedent cannot settle OQ3.**
 In-tree harness (PostgreSQL), community tool *and* vendor API (MySQL),
 community only (MongoDB), vendor tooling spanning local and production (TiDB).
-Every option in `00-foundation.md` §9 OQ3 and OQ4 has a working example behind
+Every option in `../DESIGN.md` §9 OQ3 and OQ4 has a working example behind
 it, which means the CUBRID answer has to come from the `cubrid-testkit`
 boundary and the `cubrid-operator` relationship, not from this table.
 
@@ -173,7 +173,7 @@ Each leg closes with its answers to these, so §5 can be filled mechanically.
    built themselves, and is that a first-class argument or a workaround?
 3. **Where provisioning lives.** Inside the engine repo, in a test harness, or
    in a separate tool — and did that placement change over time? This is the
-   evidence `00-foundation.md` §9 OQ3 needs.
+   evidence `../DESIGN.md` §9 OQ3 needs.
 4. **Observability tier (D5).** Which of the three tiers did the tool stop at,
    and is there a record of users asking for more?
 5. **What it refused to do.** Documented non-goals are the cheapest source of

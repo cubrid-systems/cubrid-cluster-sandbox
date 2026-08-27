@@ -8,9 +8,9 @@ it, and can then reproduce the *states* that setup does not hand them: a slave
 that has fallen behind, two nodes that both believe they are master, and the
 operator-driven return to the original master after a failover.
 
-Part of [CUBRID Systems Research](https://github.com/cubrid-systems). Graduated
-out of the [roadmap](https://github.com/cubrid-systems/roadmap) on 2026-08-28;
-`docs/00-foundation.md` is the source of truth from here on.
+Part of [CUBRID Systems Research](https://github.com/cubrid-systems). [`docs/DESIGN.md`](docs/DESIGN.md) is the design;
+[`docs/design/`](docs/design/) is where it is being specified; and
+[`docs/ROADMAP.md`](docs/ROADMAP.md) says where the project actually is.
 
 ## Why
 
@@ -31,12 +31,12 @@ rather than by reading:
 
 | Question | Answer | Where |
 |---|---|---|
-| Does split brain need a broken configuration? | **No** — a correctly configured cluster reaches two masters in 9 s when the ping host survives the partition | [`docs/findings/oq9-splitbrain.md`](docs/findings/oq9-splitbrain.md) |
-| How is replication lag injected, and does the heartbeat allow it? | Suspend a replication stage; the heartbeat watches process *existence*, not progress, and does not interfere | [`docs/findings/oq7-lag.md`](docs/findings/oq7-lag.md) |
+| Does split brain need a broken configuration? | **No** — a correctly configured cluster reaches two masters in 9 s when the ping host survives the partition | [`docs/findings/split-brain.md`](docs/findings/split-brain.md) |
+| How is replication lag injected, and does the heartbeat allow it? | Suspend a replication stage; the heartbeat watches process *existence*, not progress, and does not interfere | [`docs/findings/replication-lag.md`](docs/findings/replication-lag.md) |
 | Is the operational failback mechanically possible? | Yes — the original master was restored in 2 s with no row loss. What is *not* settled is the policy around it | [`docs/findings/failback.md`](docs/findings/failback.md) |
 
 The one open question this project cannot close on its own is what the technical
-team actually requires of failback (`docs/00-foundation.md` §9 OQ8).
+team actually requires of failback ([`docs/DESIGN.md`](docs/DESIGN.md) §9 OQ8).
 [`harness/failback.sh`](harness/failback.sh) is the instrument for asking them:
 it encodes this project's guess at the operator sequence, with a decision point
 at every step where the guess is a guess, and it is meant to come back marked up.
@@ -45,17 +45,18 @@ at every step where the guess is a guess, and it is meant to come back marked up
 
 ```
 docs/
-  00-foundation.md                    the 11-section design doc — start here
-  01-00 … 01-05-survey_*.md           comparable-engine survey series (PostgreSQL,
-                                      MySQL, MongoDB, TiDB) + CUBRID gap analysis
-  assets/                             survey figures
-  findings/                           measurement write-ups
+  DESIGN.md          the design document — problem, goals, architecture, decisions
+  ROADMAP.md         phases, milestones, and where the project actually is
+  design/            the design below the architecture: command surface, topology
+                     model, assembly, fault vocabulary, inspection
+  survey/            PostgreSQL, MySQL, MongoDB, TiDB, and the CUBRID gap analysis
+  findings/          what running it showed — including where it contradicted the design
 harness/
-  Dockerfile · entrypoint.sh · lib.sh the Phase-0 spike: one node, and the
-                                      four-step assembly that makes two of them
-  oq9-splitbrain.sh · oq7-lag.sh      the experiments
-  failback.sh · failback-demo.sh      the G8 artifact, and a rig that proves it runs
-  results/                            captured console output and samples
+  Dockerfile · entrypoint.sh · lib.sh  the Phase-0 spike: one node, and the
+                                       four-step assembly that makes two of them
+  oq9-splitbrain.sh · oq7-lag.sh       the experiments
+  failback.sh · failback-demo.sh       the failback artifact, and a rig that proves it runs
+  results/                             captured console output and samples
 ```
 
 ## Running the harness

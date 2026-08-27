@@ -1,12 +1,12 @@
 ---
 title: CUBRID — Gap Inventory and Measurement Plan (Survey 05)
-category: roadmap-survey
+category: survey
 project: cluster-sandbox
 status: selected
 lang: en
 sources:
-  - 00-foundation.md §1 (the measured CBRD-26983 two-node assembly, 2026-08-18)
-  - 01-01-survey_postgresql.md · 01-02-survey_mysql.md · 01-03-survey_mongodb.md · 01-04-survey_tidb.md
+  - ../DESIGN.md §1 (the measured CBRD-26983 two-node assembly, 2026-08-18)
+  - 01-01-postgresql.md · 01-02-mysql.md · 01-03-mongodb.md · 01-04-tidb.md
   - src/connection/server_support.c:1558 (`css_change_ha_server_state` — a non-heartbeat caller cannot drive active→standby), :1594-1612 (state transition table)
   - src/object/schema_system_catalog.cpp:111 (`db_ha_apply_info` catalog view)
   - src/executables/utility.h:1599-1602 (`cubrid statdump` has no output-format option), :1634-1646 (`cubrid applyinfo` options)
@@ -33,7 +33,7 @@ tags: [roadmap, survey, cluster-sandbox, cubrid, gap-analysis, measurement, ha, 
 
 | Axis | CUBRID | Evidence |
 |---|---|---|
-| D1 topology | Nothing. Hand-written `cubrid_ha.conf` (`ha_node_list`, `ha_db_list`) plus a `ha_mode=on` `cubrid.conf` per node | `00-foundation.md` §1 |
+| D1 topology | Nothing. Hand-written `cubrid_ha.conf` (`ha_node_list`, `ha_db_list`) plus a `ha_mode=on` `cubrid.conf` per node | `../DESIGN.md` §1 |
 | D2 artifact source | An install tree. A locally built tree works unmodified in a stock `ubuntu:24.04` container — CUBRID binaries need only libc / libm / libgcc_s / libstdc++ beyond what the tree ships | measured 2026-08-18 |
 | D3 isolation | Nothing provided. The measurement used Docker containers on a user-defined bridge | measured |
 | D4 fault verbs | None. `cubrid heartbeat stop` takes the server down with it, and `cubrid changemode` cannot drive active→standby because `css_change_ha_server_state` ignores that request from a non-heartbeat caller (`server_support.c:1558`) | code + measured |
@@ -86,7 +86,7 @@ the engine does not have. *Comparable answer*: TiDB ships Grafana with a
 playground because its components already expose metrics endpoints (`01-04`
 §4 I1) — the difference is the contract, not the provisioner.
 The four below were added on 2026-08-27, from the requirement set in
-`00-foundation.md` §1. They differ in kind from G1–G7: those are assembly work
+`../DESIGN.md` §1. They differ in kind from G1–G7: those are assembly work
 whose shape the comparable set settled, while these are about *states* the
 assembly does not produce, and the comparable set mostly has no answer.
 
@@ -98,7 +98,7 @@ Log" from two different LSA pairs (`util_cs.c:3893-3924`). Nothing induces
 either. The two candidate mechanisms are not equivalent: delaying the container
 network is realistic and stage-agnostic, suspending one of the two processes is
 precise and is the only way to separate the stages. **Both were run 2026-08-27**
-(`00-foundation.md` §9 OQ7): suspension is the default because the heartbeat
+(`../DESIGN.md` §9 OQ7): suspension is the default because the heartbeat
 does not interfere with it — it monitors process existence, not progress, and
 left both suspended processes listed as `registered` with no log line — while
 `netem delay 200ms` grew the lag by roughly 15,000 pages in 30 s without saying
@@ -118,7 +118,7 @@ for want of a ping host and the slave, with nothing to fail, promotes. With
 concludes "not a network partition" and stays, and the slave pings successfully
 and promotes. **Both routes were run on 2026-08-27** and both produce
 two masters — the correctly configured one in **9 seconds**, the default in 13
-(`00-foundation.md` §9 OQ9; harness `findings/oq9-splitbrain.md`). A control arm
+(`../DESIGN.md` §9 OQ9; harness `../findings/split-brain.md`). A control arm
 that cut the master from its ping host as well demoted the master cleanly, so
 the mechanism is exactly what the code says. The gap is therefore neither
 induction nor a configuration deviation: it is inducing a *chosen* flavour on
@@ -234,7 +234,7 @@ this project and should be built as a *seam*, not a collector (`01-04` §4 I1).
 G10 is the one item that can start immediately and out of order, and should:
 it needs none of the tool, and it is the only way to learn what the people who
 perform failback actually require before the verb set is fixed
-(`00-foundation.md` §9 OQ8).
+(`../DESIGN.md` §9 OQ8).
 
 ## 5. What the comparable set settles, and what it leaves open
 
@@ -252,7 +252,7 @@ metric contract, not of the provisioner (G7).
   verb — failover was induced by cutting a link — so the container substrate is
   a *requirement*, not a preference, and `cluster-sandbox` will be designing
   this verb without a model to copy.
-- **Where the primitives live (`00-foundation.md` §9 OQ3).** PostgreSQL puts
+- **Where the primitives live (`../DESIGN.md` §9 OQ3).** PostgreSQL puts
   them in the test harness and never surfaces them; MySQL and MongoDB put them
   outside the server entirely; TiDB puts them in vendor tooling. The precedent
   is genuinely split, so the CUBRID answer has to come from the

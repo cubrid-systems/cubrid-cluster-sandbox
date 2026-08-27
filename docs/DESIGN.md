@@ -1,10 +1,10 @@
 ---
-title: Cluster Sandbox — Foundation
-category: roadmap-foundation
+title: cluster-sandbox — Design
+category: design
 project: cluster-sandbox
-status: graduated (own dir: /data/cub_sys/projects/cluster-sandbox)
+status: phase 0 complete
 sources:
-  - projects/10-selected/N64-cubrid-ops/00-foundation.md §1 ("Developer Experience (Docker/CLI/SDK) is out of scope here" — the only place this repo names the idea, and the only one of the four recorded candidates left without an owner)
+  - CUBRID Ops (cubrid-systems roadmap) §1 — "Developer Experience (Docker/CLI/SDK) is out of scope here": the one place the organization had named this gap, and the only one of its four recorded candidates left without an owner
   - https://github.com/cubrid-systems/cubrid-testkit — docs/ROADMAP.md (HA appears once, as a target workload for isolation-anomaly verification), docs/adr/ADR-001 (Testcontainers named for self-testing the harness, not for provisioning a CUBRID topology)
   - https://github.com/CUBRID/cubrid-contrib — `sandbox/sandbox.sh` (~130 lines of POSIX sh; `img new|rm|ls` and `pod run|rm|ls`; `docker run --rm -it -v $SRC:$SRC -w $SRC -h <name> -u $(whoami) [--cpuset-cpus]`), `sandbox/Dockerfiles/Dockerfile_centos7` (CentOS 7 + devtoolset-8 build dependencies, `ARG WHOAMI` + `adduser $WHOAMI`), `docker_for_ctp/` (two containers on fixed IPs + ssh, drives CTP)
   - https://github.com/CUBRID/cubrid-operator — `CubridDB` CRD (deploy · HA · backup schedule · scale · status), early-stage; production Kubernetes rather than local iteration
@@ -15,29 +15,23 @@ sources:
   - src/executables/master_heartbeat.c:866-895 (split brain is a named diagnosis: `num_master > 1` with a priority mismatch logs `[Failback] [Diagnosis] Multiple master nodes (a, b) are detected` and queues `HB_CJOB_FAILBACK`), :1042-1054 + :1110-1135 (the ping check that decides failback vs failover, and its cancel conditions)
   - src/object/schema_system_catalog_install.cpp:1956-1988 (`db_ha_apply_info` is 26 columns — six LSA pairs, three progress timestamps, six counters — not a delay scalar)
   - src/executables/util_cs.c:3893-3924 + src/transaction/log_applier.c:7456-7478 (`cubrid applyinfo` reports two delays as `printf` text, and the first sample always prints `-` because `process_rate` is zero until a second iteration)
-summary: A CLI-first provisioner that stands up a CUBRID topology in containers from a declarative configuration — node count and roles, engine version or a local build directory, parameters — so that engine developers, QA, and external contributors can reproduce a multi-node setup without hand-assembling it. Seed motivated by a measured case: verifying one HA question for CBRD-26983 took a hand-built two-node cluster, and every step of that assembly is mechanical. A web front end over the same API and per-container monitoring are part of the intended shape; the monitoring depth is the open question with a real cost boundary, because engine-internal counters are text-only until N20 lands. A second requirement set (2026-08-27) extends the scope past assembly to the states a developer needs to reproduce — inter-node lag, split brain, a semi-automatic failback script, and replication monitoring and tracking — which are conditions rather than events and land as G7-G9. Intended to live as its own repository under `cubrid-systems`, like `cubrid-testkit` and `spatial`.
+summary: A CLI-first provisioner that stands up a CUBRID topology in containers from a declarative configuration — node count and roles, engine version or a local build directory, parameters — so that engine developers, QA, and external contributors can reproduce a multi-node setup without hand-assembling it. Seed motivated by a measured case: verifying one HA question for CBRD-26983 took a hand-built two-node cluster, and every step of that assembly is mechanical. A web front end over the same API and per-container monitoring are part of the intended shape; the monitoring depth is the open question with a real cost boundary, because engine-internal counters are text-only until N20 lands. A second requirement set (2026-08-27) extends the scope past assembly to the states a developer needs to reproduce — inter-node lag, split brain, a semi-automatic failback script, and replication monitoring and tracking — which are conditions rather than events and land as G7-G9. Phase 0 closed 2026-08-27: the manual assembly runs as a script and the two questions this design could not settle by reading were answered by measurement (see `findings/`).
 created: 2026-08-18
-updated: 2026-08-27
+updated: 2026-08-28
 lang: en
-tags: [foundation, graduated, developer-experience, docker, containers, ha, test-environment, provisioning, monitoring, replication, fault-injection, cli, cluster-sandbox]
+tags: [design, developer-experience, docker, containers, ha, test-environment, provisioning, monitoring, replication, fault-injection, cli, cluster-sandbox]
 ---
 
-> **Source of truth.** This is the project's own foundation, migrated out of the
-> CUBRID Systems roadmap on 2026-08-28 when `cluster-sandbox` graduated to its
-> own repository. The roadmap keeps a thin pointer at
-> `roadmap/projects/30-graduated/N65-cluster-sandbox/00-foundation.md` carrying
-> org identity and cross-project relationships only; the detail — §1 Context,
-> §4 Proposed Design, §7 Failure Modes, §8 Rollout — lives here now.
+> **What this is.** The design document for `cluster-sandbox` — the problem, the
+> goals, the architecture, and the decisions behind them. It is the starting
+> point for the repository; the comparable-engine evidence it rests on is in
+> [`survey/`](survey/), and what running the design actually showed is in
+> [`findings/`](findings/).
 >
-> All 11 sections were authored in the roadmap's selected band (2026-08-18) on
-> top of the survey series, which sits alongside this file:
-> [`01-00-survey_overview.md`](01-00-survey_overview.md) … CUBRID synthesis
-> [`01-05-survey_cubrid-gap-and-measurement.md`](01-05-survey_cubrid-gap-and-measurement.md).
-> A second requirement set landed 2026-08-27 (§2 G7–G9); two of its three open
-> questions were closed by measurement the same day, and the third (§9 OQ8) is
-> the one this project cannot close on its own. Measurement write-ups:
-> [`findings/`](findings/). Outstanding: SVG comprehension figures for the
-> anomaly material.
+> **Phase 0 is complete and the architecture below is still a sketch.** §4 names
+> five layers and their boundaries; it does not yet specify the command surface,
+> the topology model, the verb semantics, or the inspector contract. That work is
+> [`design/`](design/), and it is where the project goes next.
 
 ## 1. Context & Problem
 
@@ -89,11 +83,9 @@ practical — the same provisioner can take a released version or a path to a
 developer's own `install.out`, and the second case costs a bind mount rather
 than an image build.
 
-**Home.** The work is intended as its own repository under the `cubrid-systems`
-organization, following the pattern this repo already uses for `cubrid-testkit`
-and `spatial` — the roadmap entry carries organizational positioning and the
-sibling repo carries the design, at which point this project moves to
-`30-graduated/` with a thin foundation per CLAUDE.md §2.5.
+**Home.** This repository, under the `cubrid-systems` organization, following
+the pattern of `cubrid-testkit` and `cubrid-spatial`. The organization's roadmap
+keeps a one-page pointer for cross-project purposes; the design lives here.
 
 **The second cost lands after the cluster is up.** Assembly is only the
 precondition. What a developer needs to reproduce are states the assembly does
@@ -133,7 +125,7 @@ steps, verified by someone who has not built one before.
 *Acceptance*: a locally built install tree runs by path, and a released version
 by name, neither requiring an image build. Precedent for treating this as
 ordinary rather than exotic: `install_path`, `--binarypath`, `--{comp}.binpath`
-(`01-00-survey_overview.md` §5.1 DI2).
+(`survey/01-00-overview.md` §5.1 DI2).
 
 **G3 — Failure scenarios are verbs, addressed by role.**
 *Acceptance*: clean stop, crash, and network partition are one verb each and
@@ -148,7 +140,7 @@ delay, with the delay read from the `db_ha_apply_info` catalog view over SQL.
 **G5 — A topology is reproducible from an artifact.**
 *Acceptance*: a `describe` output recreates the same cluster on another
 machine and is small enough to attach to a JIRA issue
-(`01-03-survey_mongodb.md` §4 I3).
+(`survey/01-03-mongodb.md` §4 I3).
 
 **G6 — `cubrid-testkit` can drive it as a dependency.**
 *Acceptance*: a non-interactive surface — stable exit codes, machine-readable
@@ -213,8 +205,10 @@ nothing parses `cubrid applyinfo` text, whose first sample prints `-` because
 
 ## 4. Proposed Design
 
-Architecture only, per CLAUDE.md §2.6. Five layers, each answering one of the
-survey's decisions (`01-00` §3).
+Five layers, each answering one of the decisions the survey found every
+provisioner has to make (`survey/01-00-overview.md` §3). This section fixes the
+**boundaries**; the interfaces across them are specified in
+[`design/`](design/).
 
 1. **Topology model (D1).** A named preset plus a count plus per-node
    overrides — `ha` with two nodes is the case that motivated the project. Roles
@@ -346,7 +340,7 @@ the port bookkeeping that `dbdeployer` accumulated over years (`01-02` §4 I3).
 
 ### Comparable DBMS Practice
 
-The full matrix is `01-00-survey_overview.md` §5 and is not duplicated here.
+The full matrix is `survey/01-00-overview.md` §5 and is not duplicated here.
 Three findings bear on the choices above:
 
 - **DI1** — no comparable tool ships a network partition, because all four
@@ -479,10 +473,11 @@ N64 W1 land.
 **Rollback.** The project is a separate repository with no engine change.
 Abandoning it costs the repository and nothing else.
 
-**Graduation triggers.** `cubrid-testkit` provisioning through it rather than
-its own path; a CUBRID bug reproduced by a second person from a `describe`
-artifact; the roadmap entry shrinking to a thin pointer once the sibling repo
-carries the design (CLAUDE.md §2.5).
+**What "it worked" will look like.** `cubrid-testkit` provisioning through this
+tool rather than through its own path, and a CUBRID bug reproduced by a second
+person from nothing but a `describe` artifact. Neither has happened yet; both
+are phase-2 outcomes rather than phase-2 deliverables, which is why they are
+here and not in §2.
 
 ## 9. Open Questions
 
@@ -569,7 +564,7 @@ than read.
 never kept up (27,786 pages of lag before any injection; 3.44 M master rows
 against 1.68 M on the slave at the end), so the injected figures are not
 calibrated lag measurements. The mechanism questions are settled; "what does
-200 ms cost" is not. *Artifacts*: `findings/oq7-lag.md`.
+200 ms cost" is not. *Artifacts*: `findings/replication-lag.md`.
 
 **OQ8 — What does the technical team actually require of failback?** *Owner*:
 this project, blocked on a party outside it. *Verification*: the marked-up
@@ -628,25 +623,22 @@ healed itself in under 45 s (`[Failback] [Diagnosis] Multiple master nodes
 decides who steps down), while **arm C never recovered** — 45 s after the
 network healed the roles were still swapped, and they stay swapped. CUBRID has
 no engine path back to the original master after a clean failover.
-*Artifacts*: `findings/oq9-splitbrain.md` in the harness (§10).
+*Artifacts*: `findings/split-brain.md` in the harness (§10).
 
 ## 10. References
 
-**Methodology.** `$KB_ROOT/knowledge/methodology/design-doc.md`;
-`$KB_ROOT/knowledge/methodology/comparison-matrix.md` (the empty-cell rule the
-survey matrix follows); roadmap `CLAUDE.md` §2.1 / §2.3 / §2.7.
-
-**This project's survey series.** `01-00-survey_overview.md` (axes D1–D5,
-matrix, DI1–DI3) · `01-01-survey_postgresql.md` · `01-02-survey_mysql.md` ·
-`01-03-survey_mongodb.md` · `01-04-survey_tidb.md` ·
-`01-05-survey_cubrid-gap-and-measurement.md` (gaps G1–G7, measurement plan,
+**This project's survey series.** `survey/01-00-overview.md` (axes D1–D5,
+matrix, DI1–DI3) · `survey/01-01-postgresql.md` · `survey/01-02-mysql.md` ·
+`survey/01-03-mongodb.md` · `survey/01-04-tidb.md` ·
+`survey/01-05-cubrid-gap.md` (gaps G1–G7, measurement plan,
 prerequisite order).
 
-**Roadmap neighbours.** `10-selected/N64-cubrid-ops/` (§1 names this project's
-gap; W1 owns the tier-3 contract) · `00-pending-review/N20-utility-json-output/`
-(hard prerequisite for tier 3) · `30-graduated/cubrid-testkit/` (consumer,
-OQ3) · `30-graduated/spatial/` and `cubrid-testkit` as the sibling-repo pattern
-this project follows.
+**Related work in the organization.** *CUBRID Ops* — named this project's gap,
+and owns the operational metrics contract this design leaves a seam for (§9 OQ2);
+the replication-observability finding in `findings/replication-lag.md` is an input
+to it. *Utility JSON output* — a hard prerequisite for tier-3 monitoring.
+[`cubrid-testkit`](https://github.com/cubrid-systems/cubrid-testkit) — the
+consumer (§9 OQ3). All three are tracked in the organization's roadmap.
 
 **CUBRID code.** `src/connection/server_support.c:1558` (a non-heartbeat caller
 cannot drive active→standby), `:1594-1612` (HA state transition table) ·
@@ -666,8 +658,8 @@ why the first sample prints `-`) · `src/executables/utility.h:1599-1602`
 assembly), `oq9-splitbrain.sh` (three arms), `oq7-lag.sh` (six phases),
 `failback-demo.sh` (drives a cluster into a failed-over state and runs the
 script against it), `failback.sh` (the G8 artifact),
-[`findings/oq9-splitbrain.md`](findings/oq9-splitbrain.md),
-[`findings/oq7-lag.md`](findings/oq7-lag.md),
+[`findings/split-brain.md`](findings/split-brain.md),
+[`findings/replication-lag.md`](findings/replication-lag.md),
 [`findings/failback.md`](findings/failback.md), and captured run output under
 `harness/results/`. Derived from
 N54's WU-51b harness `for-plan/importdb/m5/ha51b-docker`, which established the
@@ -677,133 +669,78 @@ container substrate.
 `CUBRID/cubrid-operator` · CBRD-26983 / PR #7720 (the verification that
 produced §1's baseline).
 
-## 11. Review Log
+## 11. Decision log
 
-- 2026-08-18 — Claude (seed registration). Context & Problem only, motivated by
-  the CBRD-26983 HA verification measured the same day; alternatives, comparable
-  practice, and the survey series park until selected entry. Framing inputs
-  supplied by hgryoo: users are engine developers + QA + external contributors;
-  topology and build source (released version or local build directory) are
-  configuration; monitoring wants engine-internal depth subject to the cost
-  recorded in §9 OQ2. Slug settled the same day as `cluster-sandbox`, over
-  `dev-environment-kit` and `devbox`; HA is deliberately absent from the name
-  because the topology catalogue is meant to be wider than HA. Placement settled
-  the same day: own repository under `cubrid-systems`, not a `cubrid-contrib`
-  addition — so §9 OQ1 keeps only the inheritance and boundary questions.
-- 2026-08-18 — Claude (00-pending-review → 10-selected). Promoted on hgryoo's
-  decision to begin the investigation. §2.1 framing gate: pain point and
-  mine-able references supplied in §1 and `sources:`; audience, output shape,
-  and anti-patterns take the §2.2 carryover values. Survey series opened at
-  [`01-00-survey_overview.md`](01-00-survey_overview.md); the comparable set
-  proposed there awaits confirmation before the per-system legs are authored.
-  §2–§8 and §10 stay unwritten until the series closes.
-- 2026-08-18 — Claude (survey series complete). Comparable set confirmed by
-  hgryoo as PostgreSQL / MySQL / MongoDB / TiDB; legs `01-01`–`01-04` and the
-  CUBRID synthesis `01-05` authored, and the `01-00` matrix filled from them.
-  Three findings bear on this document directly: containers are a requirement
-  rather than a preference, because no comparable tool ships a network
-  partition and CUBRID's failover induction needs one (`01-00` §5.1 DI1); the
-  local-build-path requirement sits inside precedent (DI2); and §9 OQ3/OQ4
-  cannot be settled by precedent, since all four placements have working
-  examples (DI3). §4 Proposed Design is now unblocked (CLAUDE.md §2.7 step 7).
-  Figures (§2.9) remain outstanding.
-- 2026-08-18 — Claude (deepen to full 11 sections). hgryoo settled the two
-  relationship questions: **testkit consumes this tool** (OQ3), and the
-  **operator is a later inclusion for operational testing**, not a dependency
-  or a shared substrate (OQ4). §2–§8 and §10 authored on that basis; the seed's
-  "Anticipated direction" paragraph migrated into §4 and §5 per CLAUDE.md §6a.
-  §5 carries five alternatives (A1 do-nothing, A2 extend contrib/sandbox,
-  A3 provisioning inside testkit, A4 Kubernetes-first, A5 process isolation),
-  each with a revisit condition. Remaining: SVG figures (§2.9), and the
-  incubating move once the sibling repo exists.
-- 2026-08-27 — Claude (second requirement set: reproducing anomalous states).
-  hgryoo supplied five development-time repro requirements — inter-node lag,
-  split brain, a semi-automatic failback script, replication monitoring, and
-  replication tracking. Folded in as §2 G7–G9, with §4 layers 2 / 4 / 5
-  extended, one new trade-off (§6), three new failure modes (§7), a Phase 0
-  slot for the failback script (§8), and §9 OQ7–OQ9. Grounded against the
-  engine the same day rather than asserted: the replication pipeline is two
-  heartbeat-managed processes (`heartbeat.h:62-70`), which is why lag needs a
-  stage target; split brain is a named diagnosis that queues an *automatic*
-  failback (`master_heartbeat.c:866-895`), which is why the interesting half
-  of failback is the operator's and not the engine's; `db_ha_apply_info`
-  carries twenty-six columns rather than a delay scalar
-  (`schema_system_catalog_install.cpp:1956-1988`); and `cubrid applyinfo`
-  prints its delay as text whose first sample is always `-`
-  (`util_cs.c:3893-3924`, `log_applier.c:7456-7478`), so tracking reads SQL
-  and not that. One code read moved a design assumption: the ping check
-  cancels a master's failback both when no ping host is registered and when
-  the ping succeeds (`master_heartbeat.c:1042-1054`), so a *correctly*
-  configured cluster reaches two masters whenever the ping host survives the
-  partition — OQ9 carries the claim as read-not-run, and §6's
-  correct-versus-inducible trade-off is written down as smaller than it looked.
-  The requirement set is hgryoo's, not the technical team's; OQ8 records that
-  theirs is still unknown and names the G8 script as the instrument for
-  getting it. `01-05` gained gaps G8–G11 with measurement rows. Figures (§2.9)
-  remain outstanding.
-- 2026-08-27 — Claude (OQ7 and OQ9 run; the G8 artifact written). The two
-  questions the requirement set opened the same day were answered by running
-  them on a two-node containerised HA pair, in a harness derived from N54's
-  WU-51b rig (§10). **OQ9 — no, split brain does not need a broken
-  configuration**: three arms, and the correctly configured one reached two
-  masters in nine seconds, because a master cancels its failback when the ping
-  succeeds while a slave cancels its failover only when its own ping fails, so
-  a surviving ping host is a quorum of one that votes for whoever asks. §4
-  layer 2's configuration deviation dropped from required to optional and §6's
-  trade-off shrank with it. The control arm demoted cleanly and then **stayed**
-  demoted, which is the fact G8 rests on: CUBRID's `[Failback]` means "demote
-  myself, another master exists", and there is no engine path back to the
-  original master after a clean failover. **OQ7 — suspend a stage, and the
-  heartbeat permits it**: both replication processes stayed `registered` with
-  unchanged pids through 30 s suspensions and the master log said nothing,
-  because the heartbeat watches existence rather than progress. The run's
-  larger yield was a correction to this document rather than a confirmation of
-  it: **G9's observable does not observe what it was chosen for.**
-  `db_ha_apply_info` is written by `applylogdb`, so a stalled applier freezes
-  all twenty-six columns at a constant healthy-looking lag, and during a copy
-  stall the reported lag *falls* while replication is entirely stopped
-  (49,544 → 38,576 pages). G9's acceptance and §4 layer 5 now require a
-  master-side reference; §7 lost the heartbeat-interference failure mode and
-  gained the monitor-lies one. Three provisioner requirements fell out of
-  simply running it, and are in §4 layer 3 and §7: the partition has to be a
-  **route-level** cut (an interface cut cannot express "keep the ping host"),
-  `ping` has to be **in the image** (`hb_check_ping` shells out to it, and its
-  absence is read as a failed ping), and seeding must wait for a **`createdb`
-  completion signal** rather than for `databases.txt`, which appears first and
-  yields a slave that dies in recovery. G8's script exists as `failback.sh` —
-  five decision points, each naming what this project does not know — and is
-  waiting to be sent to the technical team; OQ8 is still open and only they can
-  close it. `01-05` G8–G11 and their measurement rows carry the same results,
-  and `cross-cutting.md` C-054 gained the monitoring finding, which is N64's
-  problem more than this project's. Figures (§2.9) remain outstanding.
-- 2026-08-27 — Claude (G8 script written, run, and validated). `failback.sh`
-  exists and works: driven against a pair that had genuinely failed over, it
-  restored the original master in **2 s** with `rc=0` and no row loss, so the
-  operational return trip is mechanically possible with commands CUBRID already
-  ships. That settles the half of G8 that was never in doubt and isolates the
-  half that is — five decision points where this project is guessing, and only
-  the technical team can close them (§9 OQ8, still open). Running it produced
-  two findings the reading had not. **`cubrid heartbeat stop` hangs forever when
-  the node's HA processes cannot be reaped**, *after* the deactivation has
-  already succeeded and the peer has been promoted: `us_hb_deactivate` polls
-  "is any `cub_server` running" on a one-second sleep
-  (`util_service.c:3995-4004`) and a zombie answers yes. In a container this
-  means `--init`, now a §4 layer 3 requirement alongside `NET_ADMIN`, and it
-  means any tool driving that step must be bounded and decide on the observed
-  roles rather than the command's exit — §7 carries both. **And the check the
-  operator most needs is empty exactly when they need it**: a just-demoted node
-  has no `db_ha_apply_info` row until its applier writes one, and both runs
-  printed `<none>` at the step asking whether the target is caught up. With the
-  OQ7 result this makes three distinct ways that view misleads — frozen during
-  an apply stall, falling during a copy stall, absent across a role change — so
-  §9 OQ2's tier-2 cost row, §2 G9, §4 layer 5 and `01-05` G11 were all corrected
-  rather than merely annotated. §9 OQ8's question 1 is now "what counts as
-  caught up, *when the evidence is missing*". `findings/failback.md` carries the
-  run.
-- 2026-08-28 — Claude (graduation). `cluster-sandbox` left the roadmap for its
-  own repository under `cubrid-systems`, on hgryoo's decision that it now
-  belongs to the organization's project set. This file is the migrated source
-  of truth; the roadmap shrinks to a thin pointer per its CLAUDE.md §2.5, and
-  the survey series, the figures, and the harness moved with it. Nothing was
-  changed in the move beyond the frontmatter, the head note, and §10's harness
-  path.
+What was decided, and what changed a decision. Ordered oldest first.
+
+**2026-08-18 — the shape of the thing.** Users are engine developers, QA, and
+external contributors. Topology and build source are *configuration*, not
+variants of the tool. The name deliberately does not say HA, because the
+topology catalogue is meant to grow wider than HA (`dev-environment-kit` and
+`devbox` were the alternatives). Monitoring wants engine-internal depth, subject
+to the cost recorded in §9 OQ2.
+
+**2026-08-18 — the comparable set, and what it settled.** PostgreSQL, MySQL,
+MongoDB, TiDB, plus the CUBRID gap analysis (`survey/`). Three findings bear on
+§4 and §5 directly. Containers are a **requirement, not a preference**: no
+comparable tool ships a network partition, because all four chose process
+isolation, and CUBRID's failover induction needs one. Pointing at a locally
+built tree sits *inside* precedent — three of the four document it — so G2 is
+ordinary rather than exotic. And provisioning's home is split four ways across
+the set, so precedent could not settle where this belongs; that answer came from
+the testkit and operator relationships instead.
+
+**2026-08-18 — the two relationship questions.** **`cubrid-testkit` consumes
+this tool** (§9 OQ3): this project owns provisioning, testkit owns suites,
+dispatch, and reporting. The consequence is G6 — the surface testkit calls has
+to be non-interactive and machine-readable from phase 2, earlier than a
+CLI-only tool would need it. **`cubrid-operator` is a later inclusion, not a
+dependency** (§9 OQ4): it serves production Kubernetes, this serves a developer
+setting up an environment; the connection arrives when someone wants operational
+testing.
+
+**2026-08-27 — the second requirement set.** Reproducing anomalous states, not
+only assembling a cluster: inter-node lag, split brain, a semi-automatic
+failback script, replication monitoring, replication tracking. Folded in as
+G7–G9, and grounded against the engine rather than asserted — the replication
+pipeline is *two* heartbeat-managed processes, split brain is a named diagnosis
+that queues an **automatic** failback, and `db_ha_apply_info` is twenty-six
+columns rather than a delay scalar.
+
+**2026-08-27 — split brain needs no misconfiguration** (`findings/split-brain.md`).
+Three arms. A correctly configured cluster reached two masters in **9 seconds**,
+because a master cancels its failback when its ping *succeeds* while a slave
+cancels its failover only when its own ping *fails* — a surviving ping host is a
+quorum of one that votes for whoever asks. §4 layer 2 had assumed the anomaly
+needed a deliberately wrong configuration; it does not, and the deviation
+dropped from required to optional. The control arm demoted cleanly and then
+**stayed** demoted, which is the fact G8 rests on: there is no engine path back
+to the original master after a clean failover.
+
+**2026-08-27 — lag is injected by suspending a stage, and the heartbeat permits
+it** (`findings/replication-lag.md`). Both replication processes stayed
+`registered` with unchanged pids through 30-second suspensions and the master
+log said nothing: the heartbeat watches process *existence*, not progress. The
+same run **corrected this document**. `db_ha_apply_info` is written by
+`applylogdb`, so it cannot report a stall of the process that writes it — every
+column freezes at a constant, healthy-looking lag — and during a *copy* stall
+the reported lag **falls** while replication is entirely stopped. G9's
+acceptance and §4 layer 5 now require a master-side reference, and §7 lost its
+heartbeat-interference mode and gained a monitor-lies mode.
+
+**2026-08-27 — the failback script works, and the policy around it is the open
+question** (`findings/failback.md`). Driven against a pair that had genuinely
+failed over, it restored the original master in **2 seconds** with no row loss.
+Two more findings: `cubrid heartbeat stop` hangs when the node's HA processes
+cannot be reaped — hence `--init` alongside `NET_ADMIN` in §4 layer 3 — and a
+just-demoted node has no `db_ha_apply_info` row at all, which is the third
+distinct way that view misleads.
+
+**2026-08-27 — three requirements that only appeared by running it.** The
+partition must be a **route-level** cut, because cutting an interface cannot
+express "cut the peer but keep the ping host". **`ping` must be in the image**:
+`hb_check_ping` shells out to it, and its absence returns 127, which the caller
+reads as a failed ping — so an image without it makes every master demote itself
+on any heartbeat loss. And **seeding must wait for a `createdb` completion
+signal**, not for the `databases.txt` entry, which appears first and yields a
+slave that dies in recovery.

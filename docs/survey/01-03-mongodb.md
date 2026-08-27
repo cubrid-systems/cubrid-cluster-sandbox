@@ -1,12 +1,12 @@
 ---
 title: MongoDB — Local Multi-Node Provisioning (Survey 03)
-category: roadmap-survey
+category: survey
 project: cluster-sandbox
 status: selected
 lang: en
 sources:
   - https://rueckstiess.github.io/mtools/mlaunch.html — mlaunch (mtools) reference
-  - 01-00-survey_overview.md §3 (D1–D5); 01-01-survey_postgresql.md; 01-02-survey_mysql.md
+  - 01-00-overview.md §3 (D1–D5); 01-01-postgresql.md; 01-02-mysql.md
 summary: The single-command case, and the one design in the comparable set that solves the problem `cluster-sandbox` will hit first — how a developer names the node they want to break. `mlaunch init --replicaset --nodes 3 --sharded 2` builds a topology from flags with no configuration file, and the control verbs take *topology-aware tag selectors* rather than pids or ports: `mlaunch kill shard-a secondary` kills the secondaries of one shard. Binaries come from `--binarypath`, documented in as many words for people who compiled their own source. It stops at process isolation and offers no network fault.
 created: 2026-08-18
 updated: 2026-08-18
@@ -105,7 +105,7 @@ model is available for free — it just has to be chosen deliberately.
 Reinforces `01-02` §4 I1 from the opposite direction: MongoDB expresses a
 sharded, multi-router, three-config-node cluster in flags. CUBRID's near-term
 catalogue (HA pair, plus replica and broker variants) is smaller than that, so
-`00-foundation.md` §9 OQ5 does not need a schema before the first release.
+`../DESIGN.md` §9 OQ5 does not need a schema before the first release.
 
 **I3 — Print the startup command.** `mlaunch list --startup` is a small feature
 with an outsized effect on the kind of work that motivated this project:

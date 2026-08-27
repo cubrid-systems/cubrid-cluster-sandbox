@@ -1,6 +1,6 @@
 ---
 title: MySQL — Local Multi-Node Provisioning (Survey 02)
-category: roadmap-survey
+category: survey
 project: cluster-sandbox
 status: selected
 lang: en
@@ -8,7 +8,7 @@ sources:
   - https://github.com/datacharmer/dbdeployer — README.md, docs/features.md, wiki/main-operations
   - https://dev.mysql.com/doc/mysql-shell/8.0/en/deploy-sandbox-instances.html — `dba.deploySandboxInstance()`
   - https://dev.mysql.com/doc/mysql-shell/8.0/en/manage-sandbox-instances.html — start / stop / kill / delete
-  - 01-00-survey_overview.md §3 (D1–D5); 01-01-survey_postgresql.md (harness-as-provisioner pattern)
+  - 01-00-overview.md §3 (D1–D5); 01-01-postgresql.md (harness-as-provisioner pattern)
 summary: The most informative single system, because MySQL has three answers at once. `dbdeployer` is the community tool and the only one in this survey that treats topology as a named choice — `--topology=master-slave|group|all-masters|fan-in` — with binaries unpacked from tarballs into a versioned directory that deployments reference by name. MySQL Shell's AdminAPI is the vendor-official answer and is deliberately smaller: numbered sandbox instances on ports, explicitly for testing, with `killSandboxInstance()` as a first-class abrupt-stop verb next to the graceful `stopSandboxInstance()`. Both stop at process isolation and neither provisions a network fault.
 created: 2026-08-18
 updated: 2026-08-18
@@ -124,7 +124,7 @@ nothing beyond instance status in AdminAPI. Tier 1 at most.
 lets a developer say what they want in one word, and CUBRID's need is narrower
 than MySQL's — master-slave, and later replica and broker variants. A preset
 name plus a node count covers the measured case without a topology document,
-and `00-foundation.md` §9 OQ5 can be answered incrementally rather than by
+and `../DESIGN.md` §9 OQ5 can be answered incrementally rather than by
 designing a schema up front.
 
 **I2 — The kill/stop distinction is universal and cheap.** Every tool in this

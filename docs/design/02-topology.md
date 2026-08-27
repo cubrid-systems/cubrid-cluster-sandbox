@@ -1,0 +1,179 @@
+---
+title: cluster-sandbox — Topology model
+category: design
+project: cluster-sandbox
+summary: What a topology is, in this tool. A named preset plus a count plus per-node overrides, with a declarative document deferred until the catalogue outgrows flags. Fixes the name-derived identifiers, the engine-source model, and the schema of the describe artifact.
+created: 2026-08-28
+updated: 2026-08-28
+lang: en
+---
+
+# Topology model
+
+Layer 1 of [`../DESIGN.md`](../DESIGN.md) §4. It answers the survey's first
+decision — *what is a topology?* — and every other layer takes its input from
+here.
+
+## 1. Presets, not a schema — for now
+
+A topology is **a named preset, a node count, and per-node overrides**. There is
+no configuration document in phase 1, and that is a decision with an expiry
+date rather than a principle.
+
+The reason to start with flags: MongoDB's `mlaunch` expresses a sharded,
+multi-router, three-config-node cluster in flags (`../survey/01-03-mongodb.md`
+§2), which puts CUBRID's near-term catalogue — one HA pair — well inside what
+presets carry. Designing a document first would spend the budget before the
+catalogue is known.
+
+The reason it will not last: replica nodes, broker/CAS tiers, shard
+configurations and CDC consumers each bring their own configuration surface and
+their own fault verbs. **The migration trigger is the first topology a user asks
+for that the preset vocabulary cannot express** ([`../DESIGN.md`](../DESIGN.md)
+§9 OQ5). `describe` (§4 below) is deliberately the shape that document will take,
+so the migration is a promotion of an existing output rather than a new design.
+
+### Presets
+
+| Preset | Nodes | What it is |
+|---|---|---|
+| `ha` | 2 (default) | one master, one standby. The case that motivated the project |
+| `single` | 1 | `ha_mode=off`, one server. For the many bugs that are not HA bugs |
+
+`replica`, `broker`, and `shard` are phase 3. `single` is in phase 1 because a
+tool that can only make clusters is the wrong tool for most of the work, and
+because it is the likely shape of the `cubrid-contrib/sandbox` build-shell case
+if that turns out to be a one-node topology with a `build` role
+([`../DESIGN.md`](../DESIGN.md) §9 OQ1).
+
+## 2. Identity
+
+A cluster has a **name**, and everything else is derived from it. This is not
+cosmetic: the assembly has two hard constraints that only a naming rule can
+satisfy.
+
+```
+cluster name          hadb                 (default: the database name)
+node names            hadb-n1, hadb-n2     (also the container hostnames)
+network               hadb-net
+database directory    /db                  INSIDE every container, identically
+host work directory   <workdir>/<node>/
+```
+
+**Hostname = node name = container name.** The heartbeat resolves peers by
+hostname, and `ha_node_list` is a list of hostnames; a container whose hostname
+does not match its name is a debugging session nobody needs.
+
+**Every node mounts its database directory at the *same* container path.**
+`${DB}_vinf` stores **absolute** volume paths, so a node whose directory sits
+elsewhere mounts the *other* node's files and dies with "is in use by … on host
+&lt;peer&gt;". This was paid for in N54's WU-51b harness and is inherited rather
+than rediscovered.
+
+The build tree is mounted at **the same path inside and outside** the container,
+which keeps compiler paths, core dumps, and debugger paths valid on both sides —
+the second convention taken from `cubrid-contrib/sandbox`.
+
+## 3. Where the engine comes from
+
+Two sources, and the tool must not care which beyond resolving it:
+
+```
+--build /path/to/install.out     a developer's own tree, bind-mounted read-only
+--version 11.5.0                 a released version the tool fetches
+```
+
+`--build` is the case that matters for engine work and the one most comparable
+tools treat as an afterthought — though three of the four surveyed document it
+(`install_path`, `--binarypath`, `--{comp}.binpath`), so it sits inside
+precedent (`../survey/01-00-overview.md` §5.1 DI2).
+
+It also costs almost nothing. CUBRID's binaries link only against libc, libm,
+libgcc_s and libstdc++ plus what the install tree ships, so a host build runs
+unmodified in a stock `ubuntu:24.04` container with the tree bind-mounted. There
+is no image build in the `--build` path — a writable `$CUBRID` is assembled over
+the read-only tree out of symlinks.
+
+**The failure mode this creates is real and must be caught, not debugged.** A
+tree built on a different distribution fails to load in the container. The tool
+checks the base image's libc against the build's requirements *before* starting
+a server, and fails with that sentence rather than with a linker error
+([`../DESIGN.md`](../DESIGN.md) §7).
+
+## 4. The `describe` artifact
+
+The output of `csb cluster describe`, and the input to `csb cluster create
+--from`. Its job is that a second person reproduces the *same* cluster — which
+is one of the two things worth measuring for adoption
+(`../survey/01-05-cubrid-gap.md` §3).
+
+```yaml
+schema: csb/v1
+cluster: hadb
+preset: ha
+nodes:
+  - name: hadb-n1
+    role: master          # the role at create time, not now
+    overrides:
+      ha_copy_sync_mode: sync
+  - name: hadb-n2
+    role: slave
+engine:
+  kind: build
+  path: /data/workspace/cubrid/install.out
+  identity:               # a build tree is not portable; its identity is
+    commit: 4dbff6ba0
+    built_on: ubuntu-24.04
+    built_at: 2026-08-26T16:05:00Z
+parameters:               # every non-default, both files, per scope
+  common:
+    ha_mode: on
+    ha_ping_hosts: ping-host
+faults:                   # WHAT IS CURRENTLY IN FORCE
+  - kind: lag
+    target: slave
+    stage: apply
+    mechanism: suspend
+    since: 2026-08-28T07:12:00Z
+```
+
+Three things about this schema are load-bearing.
+
+**`engine.identity` rather than `engine.path`.** A build tree does not travel,
+so recording its path alone reproduces nothing. Recording the commit and the
+build environment lets the second person produce an equivalent tree, and lets
+the tool *tell them* when theirs is not.
+
+**`role` is the role at create time.** After a failover the roles have swapped,
+and an artifact that recorded the current roles would recreate the cluster
+post-failover — which is a different cluster. Roles at create time plus the
+fault list is what reproduces the situation.
+
+**`faults` is not optional.** A `describe` taken during a partition that omits
+the partition hands the next person a healthy cluster and a bug that does not
+reproduce. This is the field a naive implementation drops.
+
+## 5. Parameters
+
+Overrides land in one of two files and the user should not have to know which:
+
+```
+csb cluster create --set ha_ping_hosts=ping-host --set max_clients=200
+```
+
+The tool routes each key to `cubrid.conf` or `cubrid_ha.conf` by looking it up,
+and refuses an unknown key rather than writing a file the engine will silently
+ignore — "silent config divergence" is a named failure mode
+([`../DESIGN.md`](../DESIGN.md) §7).
+
+Two parameters are special and are handled by construction rather than by the
+user:
+
+- **`ha_copy_sync_mode` is left unset.** It takes one colon-separated entry per
+  node in `ha_node_list`, so a value correct for one node is a hard
+  `Invalid Parameter` startup failure for two. Unset, every node defaults to
+  `sync` and the value cannot go out of step with the node count.
+- **`ha_ping_hosts` is set by default**, because a cluster without it cannot
+  diagnose a partition at all. A scenario may ask for it to be unset — that is
+  one of the two split-brain flavours — and when it does, the deviation is named
+  and travels in `describe` (principle 6 in [`README.md`](README.md)).
