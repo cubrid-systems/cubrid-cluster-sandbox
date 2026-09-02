@@ -206,7 +206,8 @@ nothing parses `cubrid applyinfo` text, whose first sample prints `-` because
 ## 4. Proposed Design
 
 Five layers, each answering one of the decisions the survey found every
-provisioner has to make (`survey/01-00-overview.md` §3). This section fixes the
+provisioner has to make (`survey/01-00-overview.md` §3), **plus a sixth
+component the survey did not predict** (item 6). This section fixes the
 **boundaries**; the interfaces across them are specified in
 [`design/`](design/).
 
@@ -299,6 +300,28 @@ provisioner has to make (`survey/01-00-overview.md` §3). This section fixes the
    itself rather than parsing applyinfo's output. Tier 3 is a
    **seam**: a documented attachment point for a scraper once N20 and N64 W1
    provide a contract, with nothing in this project parsing `statdump`.
+
+6. **Load driver — not one of the survey's five decisions, and required
+   anyway.** No comparable tool ships one, which is why the survey never
+   surfaced it; and the two requirements that matter most in phase 2 cannot be
+   met without it. The field's reproduction of its own failover loop is *host
+   contention* — a compile with 20–40 threads — not database traffic, and the
+   threshold sweep needs a load identical on every run or it measures the load's
+   variance instead of the threshold. Two kinds, therefore, deliberately not one
+   scale: transactions against the master, and contention on the node. The
+   contract that makes it a component rather than a script is that the driver
+   **states a rate, holds it, and reports when it could not** — this project's
+   own lag figures are uncalibrated precisely because its phase-0 driver was
+   open-loop, so every injected number is a delta on an already-saturated
+   pipeline ([`design/06-load.md`](design/06-load.md)).
+
+   Its artifact pair is the **run record** — `describe` says what cluster this
+   was, the record says what happened to it, including for every role change
+   both the measured interval and the one the settings in force predict. It
+   exists because a threshold-caused switchover may leave nothing in the engine
+   log, which the field has asked to have fixed and which is not fixed yet, so
+   until then the *inputs* are the evidence
+   ([`design/07-record.md`](design/07-record.md)).
 
 **Consumers.** The CLI is the primary surface. `cubrid-testkit` consumes the
 same non-interactive surface as a dependency (decided, §9 OQ3). A web front end
@@ -584,7 +607,7 @@ operational alarm is `fail_counter`, whose diagnostics the team has separately
 asked to be improved; and the failback that actually costs them is not a
 deliberate return at all but a **loop** — four sites reporting ten or more
 failover/split-brain/failback cycles a day under load, with no network fault
-(RND-49).
+(the failover-loop report, 2016).
 
 *Still unknown, and the reason to send the script*: the threshold for "caught up
 enough"; whether and how write traffic is quiesced first; who authorises a
@@ -595,10 +618,35 @@ all, or whether sites simply run on whichever node holds the service.
 four edits listed in §7 of that document — the tracker already answers what they
 would otherwise be asked, and this gets one round of their attention.
 
-**A second requirement arrived unasked** and is not about failback: RND-1509
-wants the settings that can trigger a switchover documented and **validated in a
-user's environment**, and says explicitly that developers cannot do it. That is
-a commission for this tool; [`ROADMAP.md`](ROADMAP.md) M2.5 carries it.
+**A second requirement arrived unasked** and is not about failback: a 2021
+ticket wants the settings that can trigger a switchover documented and
+**validated in a user's environment**, and says explicitly that developers
+cannot do it. That is a commission for this tool;
+[`ROADMAP.md`](ROADMAP.md) M2.5 carries it.
+
+**Reframed 2026-08-28 — the question has been asked in the wrong word.** A second
+pass over the tracker
+([`requirements/02-ha-role-transition-field-evidence.md`](requirements/02-ha-role-transition-field-evidence.md))
+searched its vocabulary rather than this project's. **`failback` means
+demotion** — "Fail Back은 마스터 노드가 슬레이브 노드가 되는 것", from the
+team's own HA study notes, which is also what every `[Failback]` line this
+project measured says. The tracker has
+**no term** for returning service to the original master, which is consistent
+with there being no engine path for it: nobody files tickets about an operation
+that has neither a mechanism nor a name. So OQ8 stands, but it must be asked as
+*return-to-original-master*, and that is a fifth edit to `failback.sh` ahead of
+the four already listed.
+
+The same pass found the switchover-threshold work is **not missing but stalled**:
+a hidden-parameter test, open since 2022 and blocking the settings ticket above,
+measured a role change at 8–11 s against an arithmetic 2.5 s, found
+`ha_max_heartbeat_gap` apparently inert, and reported an **Active-Active
+window** after the network heals — all three unresolved because a VM pair could
+not separate engine behaviour from test artefact. And it found a failover that
+**stops half-finished**: a node held `to_be_active` from 01:00 to 09:00,
+refusing writes, because the applier was looking for a deleted archive log.
+Both are constructible here, and they change §4 layer 4 and layer 5 rather than
+adding to them.
 
 **OQ9 — Does split brain need a deliberately broken configuration? → Answered
 2026-08-27. No.** Run on a two-node containerised pair in three arms, cutting
@@ -634,6 +682,16 @@ decides who steps down), while **arm C never recovered** — 45 s after the
 network healed the roles were still swapped, and they stay swapped. CUBRID has
 no engine path back to the original master after a clean failover.
 *Artifacts*: `findings/split-brain.md` in the harness (§10).
+
+**OQ10 — is the reported Active-Active window real?** *Owner*: this project.
+*Verification*: reproduce the hidden-parameter test's configuration and watch
+the direction of
+replication after the heal. The two split-brain flavours this project measured
+give two masters with replication running **one** way; the test reports
+bidirectional sync for the length of `ha_calc_score_interval_in_msecs`. If that
+holds, it is a third anomaly rather than a third flavour of one, and
+[`design/04-faults.md`](design/04-faults.md) §5 carries it as an unverified claim
+until then.
 
 ## 10. References
 
@@ -745,6 +803,35 @@ Two more findings: `cubrid heartbeat stop` hangs when the node's HA processes
 cannot be reaped — hence `--init` alongside `NET_ADMIN` in §4 layer 3 — and a
 just-demoted node has no `db_ha_apply_info` row at all, which is the third
 distinct way that view misleads.
+
+**2026-08-28 — load and the record are components, not scenario furniture.**
+Designing the six gaps the requirements pass left produced one architectural
+change and four vocabulary ones. §4 gains a **sixth component**, the load
+driver, with a rate contract; and the **run record** becomes an artifact
+alongside `describe`, on the principle that a measurement which cannot state its
+inputs is not a measurement — the field's four-year-old stalled test is the
+evidence for that, not a hypothetical. In the vocabulary: `quiesce` is an
+operational condition rather than a fault, and its mechanism is the broker's
+`ACCESS_MODE`, which means the `ha` preset gains an optional broker because a
+cluster without one has no door to close; `failcount` is the first fault whose
+reversal is a **repair** (`ha resync`, three paths) rather than a toggle;
+`ping-unavailable` separates "cannot reach the ping host" from "cannot ask at
+all"; and `--set-hidden` resolves a contradiction the previous round created —
+the three parameters that decide when a failover happens are absent from
+`paramdump`, so a rule that refuses every key it cannot look up refused the
+entire subject of M2.5.
+
+**2026-08-28 — the word was wrong.** `failback` means *demotion* to the engine
+and to the technical team: their own HA study notes say so, and so does every
+`[Failback]` log line this project captured. The operation this project has been
+calling failback — returning service to the original master — has no name in the
+tracker and no engine path, and the two facts are the same fact. §9 OQ8 keeps
+its substance and changes its vocabulary; `design/04-faults.md` §7 is retitled.
+Found by searching the tracker's language instead of this project's, which also
+turned up the switchover-threshold measurement — stalled on reproducibility
+rather than knowledge, now OQ10 and M2.5's acceptance target — and a field
+report of `to_be_active` held for eight hours, which makes it a role the
+inspector reports rather than a transition it waits out.
 
 **2026-08-27 — three requirements that only appeared by running it.** The
 partition must be a **route-level** cut, because cutting an interface cannot

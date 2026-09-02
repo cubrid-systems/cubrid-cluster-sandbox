@@ -31,7 +31,7 @@ second collector here would be building the wrong half of it
 ## 2. What T2 reads
 
 ```
-cubrid changemode <db>            active | standby | maintenance, per node
+cubrid changemode <db>            active | standby | to-be-active | maintenance
 cubrid heartbeat status           group membership, priorities, process registry
 SELECT … FROM db_ha_apply_info    replication position on a standby
 ```
@@ -83,9 +83,28 @@ when they need it ([`../findings/failback.md`](../findings/failback.md)).
    wrote four seconds ago is reported as four seconds old, because during an
    apply stall a stale row looks perfectly healthy.
 4. **Absence is `null` with a reason, never zero.** `no_master_reference`,
-   `stale_apply_info`, `no_apply_info_row` are note codes
+   `stale_apply_info`, `no_apply_info_row`, `ambiguous_apply_info` are note codes
    ([`01-cli.md`](01-cli.md) §4), and each corresponds to something that was
    observed.
+
+### And the sources have defects of their own
+
+The three above are about what `db_ha_apply_info` *means*. The field's tracker
+adds a fourth category, independent of meaning: the readings are sometimes
+simply wrong.
+
+| Reported | Source | Defect |
+|---|---|---|
+| 2024 | `db_ha_apply_info` | **two rows** for one database, after `ha_copy_log_base` changed without the old row being removed |
+| 2025 | `cubrid applyinfo` | output malformed once a dba password is set |
+| 2025 | `cubrid hb status` | a replica's HA-Process Info state displayed wrongly |
+| 2022 | `cubrid hb status` | the manual's description of the applylogdb/copylogdb fields was itself wrong |
+
+The duplicate-row case is the load-bearing one: a reader that assumes one row
+per database silently takes whichever it is handed. **T2 counts rows and reports
+`ambiguous_apply_info` rather than choosing one**, which is the same rule as §3
+applied one level down — do not report a figure whose provenance is ambiguous
+([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §7).
 
 This is the finding with the widest blast radius, and it is not only this
 project's problem: any CUBRID monitoring product that publishes `eof - final` as
@@ -122,3 +141,22 @@ hadb-n2    yes   standby   registered_and_standby    0 pages   1,063 p   lag(app
 `—` for the master's replication columns is deliberate: a master has no
 replication position to report, and printing `0` there would be the same class of
 lie as §3.
+
+**`to_be_active` is a fourth role, not a transition.** This design has treated it
+as a window a few seconds wide — [`03-assembly.md`](03-assembly.md) T5 waits it
+out. The field has seen a node hold it from **01:00 to 09:00**, live, holding the
+service, and refusing every write, because a wrong `db_ha_apply_info` row sent
+the applier looking for an archive log that had been deleted. The
+promotion completes only when `applylogdb` reaches the `dead` record `copylogdb`
+writes on detecting the peer's death, so what an operator needs alongside the
+role is **the applier's position and whether the log it wants still exists** —
+and the engine will not shortcut it, deliberately: forcing `active` would apply
+replication log over data written after the switch.
+
+So `HA ROLE` carries `to_be_active` as a value of its own, and a node in it is
+reported as neither healthy nor failed over. **`FAULTS` carries `quiesce(broker)`
+the same way**, because "writes are blocked, by this mechanism" changes what
+every other column means and a reader who cannot see it will read an idle cluster
+as a healthy one ([`04-faults.md`](04-faults.md) §9). Reproducing the state is a scenario
+([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §3);
+reporting it honestly is this layer's job.

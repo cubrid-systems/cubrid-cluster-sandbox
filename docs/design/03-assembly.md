@@ -49,9 +49,9 @@ the world, not from a lock file.
 
 ## 2. The traps this layer owns
 
-Six, in the order the assembly hits them. Five were paid for by hand during the
-CBRD-26983 verification and N54's WU-51b work; the sixth was found by this
-project's own runs.
+Seven, in the order the assembly hits them. Five were paid for by hand during
+the CBRD-26983 verification and N54's WU-51b work; the sixth was found by this
+project's own runs; the seventh comes from the field's tracker.
 
 **T1 — `ha_copy_sync_mode` needs one entry per node.** `util_common.c:894`
 iterates `num_ha_nodes`, so a value that is correct for one node is a hard
@@ -87,6 +87,25 @@ dies with `fetching deallocated pageid … of volume "/db/hadb"` →
 `LOG FATAL ERROR: log_recovery:locator_initialize` (`log_recovery.c:953`).
 Measured 2026-08-27. *The tool waits for an explicit completion signal.*
 
+**T7 — a mixed HA / non-HA configuration makes `cubrid service start` skip HA,
+silently.** With one HA database and one `ha_mode=off` database in the same
+`cubrid.conf`, the local server starts first and the per-database
+`[@dbname] ha_mode=off` section it applied is never restored; the heartbeat
+starts **last**, reads `ha_mode=off`, prints `The server was not configured for
+HA.` and declines. `cubrid hb start` afterwards works. Filed upstream as
+CBRD-20568, **rejected as not a product issue**, and closed for 10.1
+compatibility in 2017 — so it is current behaviour. *The tool never
+writes `[@dbname]` sections carrying `ha_mode`, and starts the heartbeat
+explicitly rather than through `cubrid service start`.* This one costs nothing
+today and will cost something the moment a `single` and an `ha` cluster share a
+configuration
+([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §5).
+
+**A master must also be able to start alone.** Until 11.0 it could not, if the
+slave's network had no route to it — `copylogdb` exited on the timeout and took
+`heartbeat start` with it (fixed as CBRD-23692). The happy path never
+exercises this; `node start master` on a partitioned cluster does.
+
 T6 is the one worth dwelling on: T1–T5 all produce a **failed start**, which is
 loud. T6 produces a **corrupt slave**, which is quiet, and N54's harness has the
 same race and got away with it. A provisioner that only fixes the loud traps is
@@ -117,14 +136,17 @@ Not preferences; each one is load-bearing.
 |---|---|
 | `--cap-add=NET_ADMIN` | both fault mechanisms are route/qdisc operations ([`04-faults.md`](04-faults.md)) |
 | `--init` | without a reaping PID 1, `cubrid heartbeat stop` never returns |
-| `ping` in the image | `hb_check_ping` runs `popen("ping -w 1 -c 1 <host> …; echo $?")`. No binary → 127 → read as `HB_PING_FAILURE`, indistinguishable from a partitioned ping host, so **every master demotes itself on any heartbeat loss** |
+| `ping` in the image | `hb_check_ping` runs `popen("ping -w 1 -c 1 <host> …; echo $?")`. No binary → 127 → read as `HB_PING_FAILURE`, indistinguishable from a partitioned ping host, so **every master demotes itself on any heartbeat loss**. Its *absence* is now also a verb ([`04-faults.md`](04-faults.md) §10) |
+| `--cpus` set explicitly | a `host-cpu` load profile is only reproducible against a stated core count ([`06-load.md`](06-load.md) §5) |
 | run as the invoking user | files written to the mounted work directory stay editable on the host; the CBRD-26983 assembly lost time to a root-owned `backupdb` output |
 | one user-defined network | hostname resolution between peers, and a place to cut |
 | `--shm-size` raised | CUBRID's shared memory does not fit the 64 MB default |
 
 The base image needs nothing else. `ubuntu:24.04` with `python3`, `iproute2`,
 `iputils-ping` and `procps` is the whole of it — no Dockerfile is needed for the
-engine itself, because the build is bind-mounted.
+engine itself, because the build is bind-mounted. `python3` earns its place
+twice: the seeding step already needs it, and the load driver runs inside the
+node rather than on the host ([`06-load.md`](06-load.md) §6).
 
 **What does not carry over from `cubrid-contrib/sandbox` is its image.** That is
 a *build* image — devtoolset-8, cmake, ant, bison — on a base that reached end of
@@ -145,3 +167,32 @@ Per node, two files, from the topology model:
 An unknown `--set` key is refused rather than written, because the engine
 accepts a file with a key it ignores and the divergence is then silent
 ([`02-topology.md`](02-topology.md) §5).
+
+## 6. The broker, when the topology has one
+
+**Nothing in the assembly starts a broker today**, and that is a gap rather than
+a decision. `csql` on the node reaches `cub_server` directly, so the four-step
+assembly needs no broker and the harness never started one — but the field's way
+of blocking writes is to move the broker's `ACCESS_MODE`, and a cluster with no
+broker has no door to close
+([`04-faults.md`](04-faults.md) §9,
+[`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §4).
+
+`--with-broker` ([`02-topology.md`](02-topology.md) §1) therefore adds:
+
+- **A third configuration file**, `cubrid_broker.conf`, with `ACCESS_MODE` as a
+  parameter the tool owns rather than a `--set` key — `quiesce` writes it, so a
+  user setting it by hand would be fighting a verb.
+- **One more start step, after `serving`.** The broker starts once a master is
+  `registered_and_active`, not before: a broker in front of a server that is
+  still `registered_and_to_be_active` accepts a connection and fails the first
+  write, which is trap T5 wearing a different hat.
+- **Nothing on the host.** No published ports — access stays `node exec` and
+  `node shell`, which is what keeps port bookkeeping absent
+  ([`../DESIGN.md`](../DESIGN.md) §6). The open question is whether
+  `cubrid-testkit` can live with that (§9 OQ3 consumers, M2.4); if it cannot,
+  the bookkeeping comes back and it comes back here.
+
+The broker is **off by default**, because every phase-1 scenario runs without one
+and a component that is started but unused is a component that fails in ways
+nobody is looking at.

@@ -21,9 +21,17 @@ which is what has to exist before anything is built.
 | [`03-assembly.md`](03-assembly.md) | 2, 3 | The state machine from empty directory to serving cluster, and every trap it owns on the user's behalf |
 | [`04-faults.md`](04-faults.md) | 4 | The verb vocabulary: events, conditions, and what it means to clear one |
 | [`05-inspect.md`](05-inspect.md) | 5 | What the inspector reads, and what it is not allowed to claim |
+| [`06-load.md`](06-load.md) | **6** | The workload driver — two kinds of load, and the rate contract that decides whether a measurement means anything |
+| [`07-record.md`](07-record.md) | — | The evidence artifact: what happened to the cluster, and both intervals for every role change |
 | [`ADR-001-implementation-language.md`](ADR-001-implementation-language.md) | — | Python for the provisioner, shell for the operator-facing scripts. **Proposed** |
 
-## Six principles, and where each came from
+[`../DESIGN.md`](../DESIGN.md) §4 named five layers. **Load is a sixth**, and it
+is a late addition: phase 0 assumed a scenario brings its own traffic. The
+requirements pass showed that assumption is what left the field's own threshold
+measurement unusable for four years, so the driver is a component with a
+contract rather than a loop in each scenario's shell script.
+
+## Seven principles, and where each came from
 
 These are not preferences. Each is a conclusion from either the survey or from
 running the thing, and each one rules something out.
@@ -60,6 +68,16 @@ a wrong one — that deviation belongs to the scenario, is named, and travels in
 `describe`, or the artifact reproduces a different cluster than the one that
 found the bug.
 
+**7. A measurement that cannot state its inputs is not a measurement.** The
+field measured a role change at 8–11 s against an arithmetic 2.5 s, three times,
+and could not say whether it was the engine, the parameter, or the network that
+afternoon — so the ticket is still open four years later. Everything that follows
+from that is structural, not diligence: the load has a stated rate and reports
+whether it held it, the role change records both intervals and the settings that
+decide them, and a run whose inputs were not what was asked for is marked
+invalid rather than published ([`06-load.md`](06-load.md),
+[`07-record.md`](07-record.md)).
+
 ## Not yet decided
 
 **Implementation language — proposed, not accepted.**
@@ -68,6 +86,12 @@ provisioner and shell for anything an operator reads, edits, or runs on a real
 host. Go wins on distribution and is rejected on ecosystem grounds; the
 reasoning and the conditions for reopening it are in the ADR. Decide before
 M1.1.
+
+**Whether `cubrid-testkit` can consume a cluster with no host-facing port.**
+Access is `node exec` and `node shell`, which is what keeps port bookkeeping
+absent ([`../DESIGN.md`](../DESIGN.md) §6). If testkit needs a socket instead,
+the bookkeeping returns and [`03-assembly.md`](03-assembly.md) §6 is where it
+lands. M2.4 decides.
 
 **Whether `cubrid-contrib/sandbox`'s build-shell use case is a one-node topology
 with a `build` role.** If it is, this project eventually subsumes it

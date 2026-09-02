@@ -40,7 +40,14 @@ so the migration is a promotion of an existing output rather than a new design.
 | `ha` | 2 (default) | one master, one standby. The case that motivated the project |
 | `single` | 1 | `ha_mode=off`, one server. For the many bugs that are not HA bugs |
 
-`replica`, `broker`, and `shard` are phase 3. `single` is in phase 1 because a
+`replica`, `broker`, and `shard` are phase 3 **as topology shapes**. A single
+broker in front of the `ha` preset is not a shape and arrives earlier, as
+`--with-broker`: the field's way of blocking writes before it touches replicated
+data is to move the broker's `ACCESS_MODE` to RO/SO
+([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §4),
+and a cluster with no broker has no door to close ([`04-faults.md`](04-faults.md)
+§9). The assembly does not start one today
+([`03-assembly.md`](03-assembly.md) §6). `single` is in phase 1 because a
 tool that can only make clusters is the wrong tool for most of the work, and
 because it is the likely shape of the `cubrid-contrib/sandbox` build-shell case
 if that turns out to be a one-node topology with a `build` role
@@ -129,15 +136,27 @@ parameters:               # every non-default, both files, per scope
   common:
     ha_mode: on
     ha_ping_hosts: ping-host
+resources:                # what "saturated" means on this machine
+  cpus: 4
+  shm_size: 512m
 faults:                   # WHAT IS CURRENTLY IN FORCE
   - kind: lag
     target: slave
     stage: apply
     mechanism: suspend
     since: 2026-08-28T07:12:00Z
+load:                     # the spec in force, not the achieved rate
+  profile: insert
+  rate: 2000/s
+  concurrency: 4
+  seed: 42
+quiesce:                  # absent when writes are not blocked
+  mechanism: broker
+  mode: ro
+  since: 2026-08-28T07:15:30Z
 ```
 
-Three things about this schema are load-bearing.
+Five things about this schema are load-bearing.
 
 **`engine.identity` rather than `engine.path`.** A build tree does not travel,
 so recording its path alone reproduces nothing. Recording the commit and the
@@ -153,6 +172,18 @@ fault list is what reproduces the situation.
 the partition hands the next person a healthy cluster and a bug that does not
 reproduce. This is the field a naive implementation drops.
 
+**`load` and `quiesce` are in that same category.** A cluster reproducing a bug
+under 2000 inserts a second is not the same cluster as an idle one, and a
+cluster whose broker is read-only is not the same cluster as one taking writes.
+Both are states a person can be in the middle of when they hit something worth
+sharing ([`06-load.md`](06-load.md) §7, [`04-faults.md`](04-faults.md) §9).
+
+**`resources` is here because `host-cpu` load is meaningless without it.**
+"Saturated" on a 32-core workstation and on a 4-core CI runner are different
+experiments; the node's CPU quota is what makes *N threads against M cores* a
+reproducible statement rather than a coincidence
+([`06-load.md`](06-load.md) §5).
+
 ## 5. Parameters
 
 Overrides land in one of two files and the user should not have to know which:
@@ -165,6 +196,68 @@ The tool routes each key to `cubrid.conf` or `cubrid_ha.conf` by looking it up,
 and refuses an unknown key rather than writing a file the engine will silently
 ignore — "silent config divergence" is a named failure mode
 ([`../DESIGN.md`](../DESIGN.md) §7).
+
+### Hidden parameters, and the hole that lookup rule leaves
+
+**The three parameters that decide when a failover happens are not in the lookup
+table, because they are not in `paramdump`.**
+`ha_heartbeat_interval_in_msecs`, `ha_max_heartbeat_gap` and
+`ha_calc_score_interval_in_msecs` are hidden; the lab confirmed as much when a
+customer asked how failover is triggered, and the field's stalled threshold test
+is a test *of these three*
+([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §2).
+A rule that refuses every key it cannot look up refuses the entire subject of
+M2.5.
+
+Two tiers, then, and the second one is opt-in rather than lenient:
+
+```
+--set     key=value      known key; validated against the lookup table
+--set-hidden key=value   a parameter the engine does not advertise
+```
+
+`--set` keeps its refusal, so a typo stays an error. `--set-hidden` writes
+without validation, and everything written that way is **flagged in `describe`**:
+
+```yaml
+parameters:
+  common:
+    ha_mode: on
+  hidden:                 # written unvalidated, on request
+    ha_calc_score_interval_in_msecs: 300000
+```
+
+The flag is not bookkeeping. A cluster carrying a hidden parameter may be in a
+state the engine's own documentation does not describe — the field reports an
+Active-Active window under a raised `ha_calc_score_interval_in_msecs`
+([`04-faults.md`](04-faults.md) §5) — and the next person to read the artifact
+needs to know that before they trust anything measured on it. The lookup table
+also cannot say whether a hidden key exists at all, so a misspelled
+`--set-hidden` produces a file the engine ignores: `describe` showing a hidden
+key that `paramdump` cannot confirm is the only warning available, and the tool
+prints it as one.
+
+### The ping mechanism is a topology choice, not a parameter detail
+
+```
+--ping-mode icmp|tcp|none        default: icmp
+```
+
+Three states, because the field has met all three and they fail differently
+([`../requirements/01-failback-field-evidence.md`](../requirements/01-failback-field-evidence.md) §2):
+`icmp` sets `ha_ping_hosts`, `tcp` sets `ha_tcp_ping_hosts` — which exists in the
+engine because ICMP is denied to the DB account at some sites, where setting
+`ha_ping_hosts` makes the engine fail to start — and `none` leaves both unset,
+which is the default a real deployment starts from and one of the split-brain
+flavours.
+
+`--ping-mode` is a topology input rather than a `--set` key because it decides
+*which* parameter is written, and because the container needs a different image
+guarantee for each: `icmp` requires `ping` in the image, and its absence returns
+127, which the caller reads as a failed ping
+([`03-assembly.md`](03-assembly.md) §4). "The ping mechanism is unavailable" is
+then a reproducible condition rather than an accident
+([`04-faults.md`](04-faults.md) §10).
 
 Two parameters are special and are handled by construction rather than by the
 user:

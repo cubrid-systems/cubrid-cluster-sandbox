@@ -2,14 +2,12 @@
 title: Failback — what the field actually asks for
 category: requirements
 project: cluster-sandbox
-summary: Requirements gathered from CUBRID's internal RND tracker (jira.cubrid.com) for DESIGN.md §9 OQ8. The engine-level return-to-original-master this project modelled is the smaller half; the field's failback problems are repeated unnecessary failover under load, a ping-host setting with three states and three different failure modes, and a slave-rebuild script with a long history of trouble. One ticket is a direct commission for this project.
+summary: Requirements gathered from CUBRID's internal tracker for DESIGN.md §9 OQ8. The engine-level return-to-original-master this project modelled is the smaller half; the field's failback problems are repeated unnecessary failover under load, a ping-host setting with three states and three different failure modes, and a slave-rebuild script with a long history of trouble. One ticket is a direct commission for this project.
 created: 2026-08-28
 updated: 2026-08-28
 lang: en
 sources:
-  - RND-49, RND-1509, RND-1766, RND-2518, RND-1809, RND-2504, RND-2244, RND-2236, RND-2712, RND-1491, RND-1808, RND-2647 (jira.cubrid.com)
-  - CUBRID-2275, CUBRID-2323 (operations tickets, same tracker)
-  - OFFICE-281, OFFICE-299, OFFICE-418, OFFICE-434, OFFICE-458 (same tracker)
+  - CUBRID's internal tracker — thirteen development tickets, five QA and operations records and two support cases, on unnecessary failover, the ping-host setting, the online rebuild script and fail counts. Identifiers are deliberately omitted; see the handling note
 ---
 
 # Failback — what the field actually asks for
@@ -17,19 +15,22 @@ sources:
 [`../DESIGN.md`](../DESIGN.md) §9 OQ8 says this project does not know what the
 technical team requires of failback, and that
 [`../../harness/failback.sh`](../../harness/failback.sh) is the instrument for
-asking. Before sending it, the internal RND tracker was searched for what the
+asking. Before sending it, the internal tracker was searched for what the
 team has already written down. It has written down a great deal.
 
-> **Handling note.** These are internal tickets. Only ticket identifiers and
-> technical content are reproduced here — customer contact details and the
-> credentials that appear in some comment threads are deliberately excluded.
+> **Handling note.** These are internal tickets, and this repository is not.
+> Only technical content is reproduced here: **ticket identifiers are omitted**,
+> and so are customer and site names, the people named in the threads, and the
+> credentials that appear in some of them. Each record is cited by what it is
+> about and when it was filed, which is enough to tell two of them apart and to
+> find either one again from inside the tracker.
 
 **The headline: the operation this project modelled is not the one that hurts.**
 `failback.sh` models a *deliberate* return to the original master after a clean
 failover. The field's failback pain is (1) failover that should never have
 happened, repeatedly, and (2) getting a slave back into the group afterwards.
 
-## 1. Unnecessary failover, in a loop — RND-49
+## 1. Unnecessary failover, in a loop — the failover-loop report (2016)
 
 Four customer sites reported *frequent* failover and consequent failback.
 
@@ -54,15 +55,15 @@ scenario, not a bug report, and it is one `cluster-sandbox` should ship.
 decision window and the polling count. Which means the thing that has to be
 *varied and measured* is configuration — see §3.
 
-## 2. `ha_ping_hosts` has three states and all three fail — CUBRID-2275, RND-1766, and this project's own measurement
+## 2. `ha_ping_hosts` has three states and all three fail — two field records, and this project's own measurement
 
 | State | Outcome | Evidence |
 |---|---|---|
-| **Unreachable** host | after a failover the slave **cannot promote** — both nodes standby, **service down** | CUBRID-2275 |
-| **Unset** | partition is never diagnosed → **split brain**, persisting until an operator intervenes | RND-1766 states this is why it must be set; measured here at 13 s |
+| **Unreachable** host | after a failover the slave **cannot promote** — both nodes standby, **service down** | the ping-host support case, 2018 |
+| **Unset** | partition is never diagnosed → **split brain**, persisting until an operator intervenes | the ping-permission ticket states this is why it must be set; measured here at 13 s |
 | **Set and reachable** | **split brain anyway**, when the ping host survives the partition | measured here at 9 s ([`../findings/split-brain.md`](../findings/split-brain.md)) |
 
-CUBRID-2275's resolution is worth quoting because it is what a support engineer
+That case's resolution is worth quoting because it is what a support engineer
 actually did:
 
 > ping_host 설정이 ping이 되지 않는 ip로 설정되어 있어 failover 이후 slave에서
@@ -79,11 +80,11 @@ to produce all of them and tell them apart. Outcome alone cannot: rows 2 and 3
 both give two masters, and only the `[Failback] [Cancelled]` reason
 distinguishes them ([`../design/04-faults.md`](../design/04-faults.md) §5).
 
-### `ping` is an OS permission, and it has blocked deployments — RND-1766
+### `ping` is an OS permission, and it has blocked deployments — the ping-permission ticket (2022)
 
 At sites where security policy denies the DB account permission to run `ping`,
 setting `ha_ping_hosts` makes the engine **fail to start** — reported from a
-Daegu platform deployment, with the customer stating that further CUBRID
+public-sector platform deployment, with the customer stating that further CUBRID
 adoption needs a non-ICMP path. `hb_check_ping` hardcodes the command
 (`popen("ping …")`), and the ticket's proposed workaround was `tcping`;
 `ha_tcp_ping_hosts` exists in the engine today.
@@ -97,7 +98,7 @@ Same root cause, two environments.
 `ha_tcp_ping_hosts`) and make "the ping mechanism is unavailable" a reproducible
 condition, not an accident.
 
-## 3. The settings that cause a switchover are legacy, unvalidated, and mostly unlogged — RND-1509
+## 3. The settings that cause a switchover are legacy, unvalidated, and mostly unlogged — the switchover-settings ticket (2021)
 
 This is the team's own requirement, and part of it is addressed to a tool that
 did not exist when it was written. The trigger: with a 2 GB `data_buffer`, a
@@ -139,15 +140,15 @@ the outcome, or a reproduced switchover is unattributable.
 diverged before rejoining it, and what do you do when it has?"* The field's
 answer is the online HA rebuild script, and the tracker shows it is fragile:
 
-| Ticket | What goes wrong |
+| First reported | What goes wrong |
 |---|---|
-| OFFICE-458 | `backup_dest_path` / `backup_option` not applied; port 22 unusable and the port is awkward to change; `ssh`-then-`cubrid` on the master unreliable — so a **manual** rebuild procedure was needed |
-| OFFICE-299 | the SSH port is hardcoded across `ha_make_slavedb.sh` and its `expect` helpers (`scp_from.exp`, `scp_to.exp`, `ssh.exp`) |
-| OFFICE-418, RND-1809 | online rebuild applies transaction logs it should not, producing **Fail Count** |
-| RND-2504 | apply delay after an online rebuild |
-| RND-2244 | a second slave built with the script is recognised as a *replica* |
-| RND-2236, RND-2712, RND-1491, RND-1808 | multi-DB argument handling, archive copy errors, backup directory misconfiguration |
-| RND-2647 | multi-slave / multi-replica rebuild was never in scope; a spec is being written |
+| 2021 | `backup_dest_path` / `backup_option` not applied; port 22 unusable and the port is awkward to change; `ssh`-then-`cubrid` on the master unreliable — so a **manual** rebuild procedure was needed |
+| 2020 | the SSH port is hardcoded across `ha_make_slavedb.sh` and its `expect` helpers (`scp_from.exp`, `scp_to.exp`, `ssh.exp`) |
+| 2021, again 2023 | online rebuild applies transaction logs it should not, producing **Fail Count** |
+| 2025 | apply delay after an online rebuild |
+| 2024 | a second slave built with the script is recognised as a *replica* |
+| 2021, 2023, 2024, 2026 | multi-DB argument handling, archive copy errors, backup directory misconfiguration |
+| 2025 | multi-slave / multi-replica rebuild was never in scope; a spec is being written |
 
 **This is the same operation as `cluster-sandbox`'s assembly.**
 [`../design/03-assembly.md`](../design/03-assembly.md) builds a slave from the
@@ -159,16 +160,16 @@ SSH on real hosts. The overlap is not accidental and should be deliberate:
   or rebuild — and must say how it decided.
 - The known rebuild failure modes above are **scenarios worth reproducing**,
   because a sandbox is where you can afford to break a rebuild.
-- Ports and paths that OFFICE-299 had to patch by hand in the field are exactly
+- Ports and paths that the rebuild-script review had to patch by hand in the field are exactly
   the parameters the topology model already treats as configuration
   ([`../design/02-topology.md`](../design/02-topology.md) §5).
 
 ## 5. Fail count is the alarm, and its diagnostics are thin
 
-OFFICE-281 asks for **detailed `applylogdb` error records so that a Fail Count
-can be acted on quickly**. RND-2518 (still in progress) tracks fail-count growth
-after an abnormal shutdown; RND-1809 and OFFICE-418 tie fail counts to online
-rebuilds; RND-1516 records an `applylogdb` core that broke synchronisation
+A 2020 QA request asks for **detailed `applylogdb` error records so that a Fail
+Count can be acted on quickly**. A 2025 ticket, still in progress, tracks
+fail-count growth after an abnormal shutdown; two more tie fail counts to online
+rebuilds; another records an `applylogdb` core that broke synchronisation
 outright.
 
 This confirms the choice in [`../design/05-inspect.md`](../design/05-inspect.md)
@@ -176,9 +177,9 @@ This confirms the choice in [`../design/05-inspect.md`](../design/05-inspect.md)
 
 **Requirement.** When `fail_counter` moves, the tool surfaces **why**, by
 pulling the applier's error log alongside the counter. A number that has gone up
-with no reason attached is the state OFFICE-281 is complaining about.
+with no reason attached is the state that QA request is complaining about.
 
-## 6. Bulk load outrunning the applier is a field case with a written repro — OFFICE-434
+## 6. Bulk load outrunning the applier is a field case with a written repro
 
 `loaddb` on the active node produced apply delay on the standby at a real site.
 The ticket carries the full reproduction procedure and `applyinfo` output as the
@@ -199,15 +200,15 @@ The script goes to the technical team either way; these are the edits to make
 first, because the tracker already answers them and asking again wastes the one
 round of attention this gets.
 
-1. **Add a step 0: "should this failback be happening at all?"** RND-49 says the
-   most common failback is one that should never have started. Ask what triggered
-   the failover, and whether it recurs.
+1. **Add a step 0: "should this failback be happening at all?"** The
+   failover-loop report says the most common failback is one that should never
+   have started. Ask what triggered the failover, and whether it recurs.
 2. **Step 2's "is the target caught up" must read `fail_counter`, not only lag**
    (§5), and must say that a just-demoted node has no row at all — which this
    project measured and which the script currently reports as `<none>`.
 3. **Step 6 must name the rebuild path explicitly** (`ha_make_slavedb.sh`) and
-   ask which of the OFFICE-458 problems the team hits, rather than asking the
-   open-ended "how do you detect divergence".
+   ask which of the manual-rebuild note's problems the team hits, rather than
+   asking the open-ended "how do you detect divergence".
 4. **Add a ping-host question.** Given §2, the team has met at least two of the
    three states in production; which, and what did they do.
 

@@ -26,7 +26,7 @@ The `<noun> <verb>` shape is inherited from `cubrid-contrib/sandbox`
 (`img new|rm|ls`, `pod run|rm|ls`) rather than reinvented — one of the three
 conventions [`../DESIGN.md`](../DESIGN.md) §9 OQ1 found worth taking.
 
-Five nouns, one per thing a user can hold in their head:
+Seven nouns, one per thing a user can hold in their head:
 
 | Noun | What it addresses |
 |---|---|
@@ -35,6 +35,13 @@ Five nouns, one per thing a user can hold in their head:
 | `fault` | the failure vocabulary |
 | `repl` | replication, as an observable |
 | `ha` | role transitions |
+| `load` | the workload driver ([`06-load.md`](06-load.md)) |
+| `record` | what happened to this cluster ([`07-record.md`](07-record.md)) |
+
+The last two are late additions and the reason is worth keeping: phase 0 assumed
+a scenario brings its own traffic and leaves its own notes. The field's tracker
+showed that assumption is what left its threshold measurement unusable for four
+years — a load nobody specified, and a result nobody could attribute.
 
 ## 2. Selectors
 
@@ -63,13 +70,17 @@ Name-based selection stays available because some scenarios mean "the node that
 
 ```
 csb cluster create [--preset ha] [--nodes N] [--name NAME]
-                   [--build PATH | --version V] [--set key=value]...
-                   [--from FILE]
+                   [--build PATH | --version V]
+                   [--set key=value]... [--set-hidden key=value]...
+                   [--ping-mode icmp|tcp|none] [--with-broker]
+                   [--cpus N] [--from FILE]
 csb cluster up                 start everything, in the order that works
 csb cluster down               graceful stop, servers flushed
 csb cluster destroy            containers, network, volumes
 csb cluster status             per-node liveness, HA role, process state
 csb cluster describe           the reproducible artifact (§5)
+csb cluster quiesce [--mode ro|so] [--mechanism broker|load]
+csb cluster resume
 csb cluster ls                 clusters on this machine
 ```
 
@@ -77,6 +88,11 @@ csb cluster ls                 clusters on this machine
 exists; `down` is graceful — it runs the shutdown flush, which is a distinct
 scenario from `node kill` and produces different engine behaviour
 ([`04-faults.md`](04-faults.md) §2).
+
+`quiesce` blocks writes and `resume` releases them. It sits on `cluster` rather
+than under `fault` because it is an operational state the tool enters on purpose,
+not an anomaly — and it refuses rather than half-succeeding when the topology has
+no broker to close ([`04-faults.md`](04-faults.md) §9).
 
 ### `node`
 
@@ -99,15 +115,20 @@ know that naming to read a failure.
 
 ```
 csb fault partition <selector> [--from <selector>] [--keep <selector>]
+                               [--mechanism blackhole|drop]
 csb fault lag       <selector> [--stage copy|apply] [--mechanism suspend|delay]
                                [--delay 200ms]
-csb fault splitbrain           [--flavour ping-survives|no-ping-hosts]
+csb fault splitbrain           [--flavour ping-survives|no-ping-hosts|calc-score-window]
+csb fault failcount <selector> [--table t] [--rows N]
+csb fault ping-unavailable <selector> [--mechanism binary|icmp]
 csb fault clear     [<selector>] [--all]
 csb fault ls                   what is currently in force
 ```
 
 Semantics, the two shapes, and why `--keep` has to exist are
-[`04-faults.md`](04-faults.md). `fault ls` is not decoration: a condition that
+[`04-faults.md`](04-faults.md). **`failcount` is the one verb `clear` cannot
+reverse** — its damage is data — so it exits 3 there and points at `ha resync`
+([`04-faults.md`](04-faults.md) §8). `fault ls` is not decoration: a condition that
 outlives its scenario silently poisons the next one, and that is a named failure
 mode ([`../DESIGN.md`](../DESIGN.md) §7).
 
@@ -132,6 +153,7 @@ and on which stage" is answerable after the episode rather than only during it.
 csb ha status
 csb ha promote  <selector>
 csb ha failback --to <selector> [--yes] [--dry-run]
+csb ha resync   [<selector>] [--path resume|table|slave] [--dry-run]
 ```
 
 `ha failback` is deliberately not symmetric with the others. CUBRID's engine
@@ -144,6 +166,38 @@ the evidence for each decision, and `--yes` is for scripts that have already
 decided. The decision points themselves are still open —
 [`../DESIGN.md`](../DESIGN.md) §9 OQ8, and the current guess is
 [`../../harness/failback.sh`](../../harness/failback.sh).
+
+`ha resync` is the repair half: three paths — resume, rebuild the table, rebuild
+the slave — chosen the way the field chooses between them, and reported rather
+than assumed ([`04-faults.md`](04-faults.md) §8). It is on `ha` rather than under
+`fault clear` because it changes data, and every verb that changes data should be
+where a reader expects to find a decision.
+
+### `load`
+
+```
+csb load start [--profile insert|update|mixed|bulkload|host-cpu|host-io]
+               [--rate 2000/s] [--concurrency 4] [--for 60s]
+               [--table t] [--seed 42] [--require-rate]
+csb load stop
+csb load status                requested rate, achieved rate, and whether it held
+```
+
+The profiles, the two kinds of load and why the rate is part of the contract are
+[`06-load.md`](06-load.md). One thing belongs here because it is a CLI promise:
+**`load status` always reports achieved next to requested**, and
+`--require-rate` turns a miss into exit 1. A driver that quietly under-delivers
+turns every figure measured beside it into a figure about the driver.
+
+### `record`
+
+```
+csb record show   [--since 5m] [--json]
+csb record export --out FILE   the timeline plus the describe that opened it
+```
+
+There is no `record start`: every command that changes cluster state appends,
+from `cluster create` onward ([`07-record.md`](07-record.md) §2).
 
 ## 4. Output contract
 
@@ -168,8 +222,10 @@ Three rules that come from measurement rather than taste:
   the copy stage cannot be measured because the master is unreachable, the field
   is `null` and `notes` says why. It is never zero.
 - **`notes` is machine-readable too** — a list of `{code, severity, message}`,
-  not prose. `stale_apply_info`, `no_master_reference`, `fault_active` are the
-  first three codes, and each corresponds to something that was observed.
+  not prose. `stale_apply_info`, `no_master_reference`, `fault_active`,
+  `ambiguous_apply_info`, `load_rate_not_held`, `quiesce_active`,
+  `hidden_parameter_set` and `clock_skew` are the codes so far, and each
+  corresponds to something that was observed or measured.
 - **Timestamps are the sample's, not the report's.** A `repl status` that
   reports a row `applylogdb` wrote four seconds ago says so, because during an
   apply stall that row stops moving while looking perfectly healthy.
