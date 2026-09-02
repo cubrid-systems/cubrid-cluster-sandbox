@@ -15,15 +15,23 @@ says what order they get built in and where the project is.
 
 ## Where it is
 
-**Phase 0 complete (2026-08-27). Phase 1 started 2026-09-02**; M1.1 through M1.6
-are done. One command builds a two-node HA pair and reaches `serving`, the three
-failure verbs the CBRD-26983 verification needed work and are addressed by role,
-and the cluster answers what state it is in without anything parsing
-human-formatted text. **Phase 1 is done.** The scenario that started the project replays through the
-tool unattended and reproduces its measured id sequence. Phase 2 starts with the
-load driver, because everything else in it measures something under load. One external
-dependency is outstanding and it shapes phase 1 rather than blocking it — see
-*Open* below.
+**Phases 0, 1 and 2 are complete** — 0 on 2026-08-27, and 1 and 2 on 2026-09-02.
+
+One command builds a two-node HA pair and reaches `serving`. The failure
+scenarios are verbs addressed by role, and the scenario that started the project
+replays through them unattended and reproduces its measured id sequence. The
+cluster answers what state it is in without anything parsing human-formatted
+text, and it says so when a figure's source cannot support it. A workload states
+a rate and admits when it misses one. A run writes down what happened to it,
+including both intervals for every role change, without being asked.
+
+What that apparatus was for: the switchover threshold the field asked to have
+validated in 2021 and could not measure has been measured
+([`findings/switchover-threshold.md`](findings/switchover-threshold.md)).
+
+Two things are outstanding and neither is blocked work. **M3.1** needs a consumer
+that does not exist yet. And the failback script still needs one round of the
+technical team's attention — see *Open* below.
 
 ## Phase 0 — baseline, spike, and the question for the technical team ✅
 
@@ -57,7 +65,10 @@ verification needed, and can ask it what state it is in.
 | M1.6 | Inspector tier 1 + tier 2 (`design/05-inspect.md`) | **done 2026-09-02** — `cluster status`, `node status`, `ha status`, `repl status`. Liveness from the runtime, role and process state from `changemode` and `heartbeat status`, replication position from `db_ha_apply_info` over SQL. Copy progress is *not* reported: it needs a master-side reference, which is M2.2, and until then the note says so rather than the number lying |
 | M1.7 | The run record (`design/07-record.md`) | **done 2026-09-02** — every state-changing command appends without being asked, the engine's own HA lines are harvested into the same timeline under a separate actor, `export` carries the `describe` as it stood when the record opened, and every role change is reported with both intervals. First run: a promotion **5.9 s** after `node kill`, against the **2.5 s** the settings predict, with those settings in the document |
 
-## Phase 2 — the anomalies, and the second consumer
+## Phase 2 — the anomalies ✅
+
+**Complete 2026-09-02**, except the second consumer, which moved to phase 3 for a
+reason rather than for lack of time: see M3.1.
 
 G5, G6, G7, G9.
 
@@ -66,7 +77,6 @@ G5, G6, G7, G9.
 | M2.1 | Condition verbs — `lag`, `splitbrain`, held until `heal` (`design/04-faults.md`) | **done 2026-09-02**. `fault lag --stage copy\|apply --mechanism suspend\|delay` suspends the named stage and `clear` resumes it; `fault splitbrain` induces two masters and reports the engine's own cancel reason, refusing a flavour the cluster's configuration cannot produce; `fault failcount` moves `fail_counter` by the field's own recipe and says that `clear` cannot reverse it. Measured: a suspended applier freezes `db_ha_apply_info` at a healthy-looking `lag=13`, and clearing it moves to `lag=2718` in one step — the lie and the truth, on demand |
 | M2.2 | Replication observability with a master-side reference | **done 2026-09-02**. `repl status` reports two stages with two provenances: apply from `db_ha_apply_info`, copy against the master's `Append LSA`. All three cases hold — an apply stall freezes `apply_lag` at 3 while `copy_lag` climbs to 5188, a copy stall reads `apply_lag=0` while `copy_lag` climbs to 10,482, and a node with no row is a note rather than a zero. The reference is one parsed line from `applyinfo -r`, which amends `design/05-inspect.md` §3 and says why |
 | M2.3 | `describe` as a shareable artifact | **done 2026-09-02** — `describe --out` writes **976 bytes** for a two-node cluster with a non-default parameter, a hidden one, a CPU quota and a fault in force, and `create --from` rebuilds it through the same path an ordinary create takes. Verified by round trip: rebuilt under a different name, the topology and the engine build compare identical; an artifact from a build this machine lacks refuses with that build's identity; a different build is a warning rather than a silent substitution |
-| M2.4 | The surface `cubrid-testkit` provisions through | testkit calls it to set up and tear down without screen-scraping |
 | M2.6 | **Load driver**, both kinds (`design/06-load.md`) | **done 2026-09-02** — `insert`, `update`, `mixed`, `host-cpu`, `host-io`, running inside the node in stdlib Python. Measured: 20/s held exactly; 500/s refused and reported at 85.6/s with `--require-rate` exiting 1; `--batch 200` at 100 statements/s produces 14,141 rows/s. `bulkload` stays unimplemented on purpose — it is a named field case, not the general driver |
 | M2.7 | `cluster quiesce` / `ha resync` (`design/04-faults.md` §8–§9) | **done 2026-09-02**. `--with-broker` starts a broker the assembly never had; `quiesce` moves its `ACCESS_MODE` with `broker_changer` and is verified through the door — a write returns `FAIL(-581)` while a read returns `OK`, and `resume` reopens it. `ha resync` chooses among resume, table and slave from `fail_counter` and the applier's log, and reports the reason. The `table` path compares row counts rather than repairing: seven induced failures came back `master=0 standby=0`, a scar rather than a divergence, which is the field's common case. A real divergence is refused by name rather than pretended |
 | M2.5 | **Switchover-threshold validation** — vary one HA setting under load and observe whether the cluster switches over | **done 2026-09-02** — seven runs, one variable each, under load ([`findings/switchover-threshold.md`](findings/switchover-threshold.md)). The documented arithmetic does not describe the transition: `ha_max_heartbeat_gap` fourfold and `ha_heartbeat_interval_in_msecs` fourfold move nothing, while `ha_calc_score_interval_in_msecs` takes it from 6.9 s to 18.9 s. That discriminates the three explanations the field's stalled test could not separate |
@@ -86,7 +96,31 @@ every other threshold value is **one cluster** —
 [`requirements/02-ha-role-transition-field-evidence.md`](requirements/02-ha-role-transition-field-evidence.md)
 §2 and §6.
 
-## Phase 3 — skeletal
+## Phase 3
+
+| # | Item | Acceptance |
+|---|---|---|
+| M3.1 | **The surface `cubrid-testkit` provisions through** (was M2.4) | testkit calls it to set up and tear down without screen-scraping |
+
+**Why it moved.** Its acceptance is a sentence about a consumer, and that
+consumer does not exist yet — `cubrid-testkit` is docs and an empty `impl/`. The
+surface it would call is built and machine-readable, so nothing here is blocked;
+what is missing is somebody on the other side to be wrong about it. Two things
+have to be decided *with* testkit rather than guessed at ahead of it:
+
+- **Whether a cluster with no host-facing port is usable.** Access is
+  `node exec` and `node shell`, which is what keeps port bookkeeping absent
+  ([`DESIGN.md`](DESIGN.md) §6). If testkit needs a socket, the bookkeeping comes
+  back and [`design/03-assembly.md`](design/03-assembly.md) §6 is where it lands.
+- **Whether the JSON is enough.** It is the contract, and
+  [`design/ADR-001`](design/ADR-001-implementation-language.md) forbids handing
+  testkit a Go package instead — sharing a language must not turn a process
+  boundary into a build-time dependency. Whether the contract as it stands
+  carries what a harness needs is a question its first real call answers.
+
+Building against an imagined consumer is how a surface ends up fitting nobody.
+
+### Also phase 3 — skeletal
 
 Web front end over the same surface. A wider topology catalogue: replica nodes,
 broker/CAS tiers, shard configurations, CDC consumers — each brings its own

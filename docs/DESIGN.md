@@ -532,7 +532,11 @@ T3 as a seam.
 **testkit consumes this tool.** This project owns provisioning; testkit owns
 suites, dispatch, and reporting. The consequence is G6: the surface testkit
 calls has to be non-interactive and machine-readable from phase 2, which is
-earlier than a CLI-only tool would need it. `01-01` §4 I1 records the failure
+earlier than a CLI-only tool would need it. **Built on that schedule and
+validated later** — the surface was finished in phase 2 and its acceptance moved
+to phase 3, because testkit is still docs and an empty `impl/` and a consumer
+surface cannot be validated against a consumer that does not exist
+([`ROADMAP.md`](ROADMAP.md) M3.1). `01-01` §4 I1 records the failure
 mode this avoids — PostgreSQL's harness owns every primitive and surfaces none
 of them.
 
