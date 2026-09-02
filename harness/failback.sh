@@ -1,5 +1,6 @@
 #!/bin/bash
-# N65 G8 — semi-automatic failback: return a CUBRID HA cluster to its ORIGINAL master.
+# N65 G8 — return a CUBRID HA cluster to its ORIGINAL master, semi-automatically.
+#          Your word for this is not "failback" -- see the vocabulary note below.
 #
 # ============================================================================
 #  THIS SCRIPT IS A QUESTION, NOT AN ANSWER.
@@ -9,7 +10,7 @@
 #  know what you actually do. Please mark them up: change the default, add a
 #  step we missed, delete a step you would never take, and say why. The marks
 #  are the requirement set -- the script is only the paper it is written on.
-#  -- CUBRID Systems Research, N65 cluster-sandbox, 2026-08-27
+#  -- CUBRID Systems Research, N65 cluster-sandbox, 2026-08-27 (revised 2026-08-28)
 # ============================================================================
 #
 # Why this script exists at all. CUBRID's engine already has something it calls
@@ -26,6 +27,15 @@
 #   * An operator cannot simply demote the current master: cubrid changemode
 #     refuses an active->standby transition the heartbeat did not drive
 #     (server_support.c:1558).
+#
+# VOCABULARY -- please read this before answering anything below.
+#   In your own material, "Fail Back" means what the engine means by it:
+#   마스터 노드가 슬레이브 노드가 되는 것 -- a master stepping down. THIS SCRIPT
+#   IS NOT THAT. It is the operation of putting the service back on the node that
+#   was master before the failover. We could find no term for that operation
+#   anywhere in the tracker, and there is no engine path for it either, which we
+#   think are the same fact. Where this script says "failback" it means the return
+#   trip, and every question below is about the return trip.
 #
 # So the operational return trip is manual, and it is the manual part that this
 # project knows nothing about. Hence the DECIDE blocks.
@@ -78,6 +88,23 @@ echo " CUBRID HA failback — $CUR (current master)  ->  $TGT (original master)"
 echo " db=$DB  transport=$EXECMODE  auto=$AUTO"
 echo "════════════════════════════════════════════════════════════════════"
 
+echo; echo "── STEP 0 ── Should this be happening at all?"
+NOTE "The failback that costs the field most is not a deliberate return: four sites"
+NOTE "reported ten or more failover / split-brain / failback cycles A DAY under load,"
+NOTE "with no PING failure in the logs. If this is one of those, moving the service"
+NOTE "back to $TGT fixes nothing and the cycle repeats tonight."
+NOTE ""
+NOTE "ha_ping_hosts has three states and all three have failed in production:"
+NOTE "  unreachable host   -> the slave cannot promote at all; the service stays down"
+NOTE "  unset              -> a partition is never diagnosed, so: split brain"
+NOTE "  set and reachable  -> split brain anyway, when the ping host survives the cut"
+NOTE "                        (measured here: two masters in 9 s)"
+DECIDE "Do you know what triggered the failover, and is it a one-off?" y \
+  "If it recurs, the thing to fix is the trigger, not the roles." \
+  "Which of the three ha_ping_hosts states are your clusters in?" \
+  "Which of them have you met in production, and what did you do about it?" \
+  || NOTE "-> then this may be the wrong operation today. Continuing anyway."
+
 STEP "Confirm which node is actually master right now"
 NOTE "$CUR : $(mode $CUR)"; NOTE "$TGT : $(mode $TGT)"
 if [ "$(mode $CUR)" != active ]; then
@@ -95,6 +122,9 @@ fi
 
 STEP "Check that the target has applied everything it has been sent"
 A=$(applied "$TGT"); NOTE "db_ha_apply_info on $TGT (eof / final / lag / fail): ${A:-<none>}"
+NOTE "If that reads <none>: a JUST-DEMOTED node has no db_ha_apply_info row at all"
+NOTE "      until its applier writes one. Expected here, not an error -- and it is the"
+NOTE "      third distinct way this view misleads (measured 2026-08-27)."
 LAG=$(echo "$A" | awk '{print $3}'); FAIL=$(echo "$A" | awk '{print $4}')
 NOTE "apply lag = ${LAG:-?} log pages   fail_counter = ${FAIL:-?}"
 NOTE "NOTE: this number is blind to a COPY stall. eof_lsa is how far copylogdb has"
@@ -105,7 +135,10 @@ DECIDE "Is the target caught up enough to take over?" y \
   "A non-zero lag means the writes not yet applied are lost when $CUR steps down." \
   "A non-zero fail_counter means replication is BROKEN, not merely behind, and" \
   "failing back onto it will not fix itself." \
-  "We do not know your threshold. Zero? A page? A second of business time?" || exit 3
+  "We know what you do about a fail count once it exists -- repair the affected" \
+  "table, or rebuild the slave, with the changeover somewhere around a thousand" \
+  "rows. What we do not know is the threshold HERE: zero pages? one? a second of" \
+  "business time? And do you read fail_counter before failing back at all?" || exit 3
 
 STEP "Decide what happens to the application during the switch"
 NOTE "Stopping the heartbeat on $CUR takes its SERVER down with it -- clients on"
@@ -113,8 +146,11 @@ NOTE "$CUR are disconnected, and there is a window with no master at all."
 DECIDE "Has write traffic been quiesced / drained?" y \
   "CUBRID has no read-only mode to hold a master still while replication catches up." \
   "Anything committed on $CUR after the lag reading above is at risk." \
-  "How do you actually do this -- connection draining at the broker, at the app," \
-  "or do you simply accept the loss?" || exit 3
+  "The tracker says your answer is the BROKER: ACCESS_MODE moved to RO or SO before" \
+  "anyone touches replicated data. Is that what you do here too?" \
+  "If so: before or after STEP 2's reading, and who puts it back afterwards?" \
+  "If you do not quiesce at all, say so -- that is an answer, and we will design" \
+  "for it rather than around it." || exit 3
 
 STEP "Stop the heartbeat on the current master ($CUR)"
 NOTE "This is the switch. With $CUR out of the group, $TGT is the only node left"
@@ -153,8 +189,14 @@ NOTE "      \"CUBRID heartbeat feature is being deactivated\". A full service"
 NOTE "      stop/start is required first (measured in the CBRD-26983 session)."
 DECIDE "Run: cubrid service stop; cubrid service start; on $CUR ?" y \
   "If $CUR's log diverged -- it accepted writes $TGT never received -- rejoining" \
-  "may not be possible at all, and it needs a fresh backupdb/restoreslave instead." \
-  "Do you check for divergence before rejoining, and how?" || exit 3
+  "may not be possible at all, and your path back is the online rebuild script," \
+  "ha_make_slavedb.sh." \
+  "Which of its known problems do you actually hit: the hardcoded SSH port, the" \
+  "backup_dest_path / backup_option settings not being applied, transaction logs" \
+  "applied that should not be (Fail Count), apply delay after the rebuild, or a" \
+  "second slave coming up as a replica?" \
+  "And do you rebuild every time, or only when something tells you it diverged --" \
+  "in which case, what tells you?" || exit 3
 on "$CUR" "cubrid service stop"  2>&1 | tail -3 | sed 's/^/     /'
 on "$CUR" "cubrid service start" 2>&1 | tail -3 | sed 's/^/     /'
 sleep 5
@@ -176,11 +218,14 @@ cat <<'EOT'
  What we still do not know, and would like you to write in:
    1. Your threshold for "caught up" at STEP 2, and what you do when it
       is not met.
-   2. How write traffic is actually quiesced at STEP 3 -- or whether it
-      simply is not.
-   3. Whether STEP 5's heartbeat stop is what you use, or something else.
-   4. How you detect that the old master's log diverged before rejoining
-      it at STEP 6, and what you do when it has.
-   5. Every step we did not write down.
+   2. Whether the broker's ACCESS_MODE is how you quiesce at STEP 3, and
+      who puts it back afterwards.
+   3. Whether STEP 4's heartbeat stop is what you use, or something else.
+   4. At STEP 6: do you resume replication, rebuild the affected table, or
+      rebuild the slave outright -- and what decides which?
+   5. Who authorises this operation, and on what evidence.
+   6. Whether the original master is preferred at all, or whether you
+      simply run on whichever node currently holds the service.
+   7. Every step we did not write down.
 ────────────────────────────────────────────────────────────────────
 EOT
