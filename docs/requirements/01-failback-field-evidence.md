@@ -155,6 +155,48 @@ answer is the online HA rebuild script, and the tracker shows it is fragile:
 master's volumes and owns the ordering traps; `ha_make_slavedb.sh` does it over
 SSH on real hosts. The overlap is not accidental and should be deliberate:
 
+### The procedures exist, as attachments
+
+The first pass searched ticket text and missed them. Five records carry the
+rebuild as **files**: a 2021 QA record attaches the manual order, a 2025
+maintenance ticket attaches two procedure documents and an updated
+`ha_make_slavedb.sh`, a 2019 record attaches a diff of that script, and a 2020
+test record attaches manual and scripted rebuild write-ups. What they say is
+worth more than what the tickets say about them.
+
+**The manual order is seventeen steps, and step thirteen is the one to notice.**
+The slave's `db_ha_apply_info` row is **hand-written**, with LSA values read out
+of the backup log (`HA apply info: <db> <creation> <page> <offset>`), after the
+master's row has been deleted and the replication logs on both sides removed.
+That is the row every lag figure in this project is read from, inserted by an
+operator from a log line — and a wrong one is precisely the condition the
+to-be-active report describes, an applier looking for an archive that is not
+there ([`02-ha-role-transition-field-evidence.md`](02-ha-role-transition-field-evidence.md) §3).
+The order also pauses replication with `cubrid heartbeat deregister <pid>` rather
+than by signalling the process, which is a fifth mechanism this project's `lag`
+verb does not model.
+
+**The 2025 procedure is an eleven-hour change window**, and it is costed per step
+in the document itself: 4 hours to back up, 6 to restore, 1 to copy the
+replication logs, then ten to fifteen minutes each for the configuration change,
+the service start and the heartbeat restart. It avoids disturbing the master by
+taking the backup **from a replica**, and it changes `ha_node_list` with
+`cubrid heartbeat reload` — which is one of the four parameters that reload
+actually applies ([`02-ha-role-transition-field-evidence.md`](02-ha-role-transition-field-evidence.md) §6).
+
+**And it answers "caught up enough", as a method rather than a number.**
+Verification is `cubrid applyinfo -r <master> -L <copylog dir> -a` **plus a
+canary**: create and insert into a `repl_test` table and confirm it arrives. So
+the field does not read a threshold off a gauge; it asks the pipeline to carry
+something and watches it land.
+
+Two consequences for this project. `ha resync --path slave` being unbuilt matters
+less than it looked: in the field the slave rebuild is not a command, it is a
+change window with a backup window inside it. And the canary is a verb worth
+having — it is cheap, it is what an operator actually trusts, and it tests the
+path end to end rather than reading the view that
+[`../design/05-inspect.md`](../design/05-inspect.md) §3 says cannot be trusted alone.
+
 **Requirements.**
 - The failback script's rejoin step must offer *both* paths — resume replication,
   or rebuild — and must say how it decided.

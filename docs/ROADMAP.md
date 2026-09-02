@@ -120,14 +120,28 @@ have to be decided *with* testkit rather than guessed at ahead of it:
 
 Building against an imagined consumer is how a surface ends up fitting nobody.
 
+| M3.2 | **Replication canary** — `repl check`, a write that has to arrive | the field verifies a rebuilt slave with `applyinfo -r … -a` and a `repl_test` table it creates and inserts into, rather than by reading a threshold off a gauge ([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §4). It is cheap, it is what an operator actually trusts, and it tests the path end to end rather than the view §3 of `design/05-inspect.md` says cannot be trusted alone |
+
 ### Also phase 3 — skeletal
 
-Web front end over the same surface. A wider topology catalogue: replica nodes,
+**A web front end over the same surface**, and the reason to expect it is that
+the two artifacts this tool produces are already documents somebody reads: a
+`describe` small enough to paste into an issue, and a run record with a timeline
+and two intervals per role change. Rendering those is most of a UI, and it is a
+client of the same JSON the CLI emits rather than a parallel path (§9 OQ6). What
+it must not become is a second surface with its own way of asking. A wider topology catalogue: replica nodes,
 broker/CAS tiers, shard configurations, CDC consumers — each brings its own
 configuration surface and its own fault verbs, and the migration from presets to
-a declarative document is triggered here. A Kubernetes backend behind the same
-topology model, and `cubrid-operator` as a component under test once operational
-testing is a real use case. The tier-3 monitoring seam, once the engine has a
+a declarative document is triggered here. **A Kubernetes backend behind the same topology model — and it is `cubrid-operator`
+that is on the other side of it.** The operator already has a `CubridDB` CRD that
+deploys, configures HA, schedules backups, scales and reports status, which is
+the same topology this project models against a different backend. Two ways they
+could meet, and they are not the same thing: the operator becomes **a second
+backend** behind `02-topology.md`'s model, or it becomes **a component under
+test** that this tool stands up and breaks. §9 OQ4 deferred the choice and it is
+still deferred — but the language decision changed the cost of it, since both
+projects are now Go and a shared topology model is the ADR's own named condition
+for reopening how far that sharing goes. The tier-3 monitoring seam, once the engine has a
 machine-readable metrics contract.
 
 ## Open
