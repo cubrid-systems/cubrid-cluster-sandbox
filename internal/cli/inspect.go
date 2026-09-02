@@ -14,6 +14,7 @@ import (
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/inspect"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/load"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
 
 func faultsOf(c *Ctx) map[string][]string {
@@ -250,6 +251,73 @@ func partitionFlags(fs *flag.FlagSet) {
 	fs.String("mechanism", "blackhole", "blackhole (no route) or drop (route intact, packets discarded)")
 }
 
+func pingFlags(fs *flag.FlagSet) {
+	fs.String("mechanism", "binary", "binary (the executable is not permitted) or icmp (it runs and fails)")
+}
+
+// cmdFaultPingUnavailable breaks the check rather than the network.
+//
+// The split-brain finding is entirely about the answer to one question, so
+// "the ping host is unreachable" (fault partition) and "the ping check is
+// broken" (this) are different scenarios that leave a similar-looking log
+// (docs/design/04-faults.md §10). The notes below exist because both mechanisms
+// can be in force while changing nothing the engine consults, and a fault that
+// silently does nothing is worse than one that refuses.
+func cmdFaultPingUnavailable(c *Ctx) (any, error) {
+	sel, err := selectorArg(c)
+	if err != nil {
+		return nil, err
+	}
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	names, rerr := a.Resolve(c.Ctx, sel)
+	if rerr != nil {
+		return nil, Precondition("unresolved_selector", "%v", rerr)
+	}
+	mech := c.str("mechanism")
+	if mech != "binary" && mech != "icmp" {
+		return nil, Usage("unknown --mechanism %q (binary or icmp)", mech)
+	}
+	set, ferr := fault.Open(c.Store.ClusterDir(c.Cluster))
+	if ferr != nil {
+		return nil, Failed("fault_state", "%v", ferr)
+	}
+	inj := &fault.Injector{D: a.D, T: t}
+	for _, n := range names {
+		if err := inj.PingUnavailable(c.Ctx, set, n, mech); err != nil {
+			return nil, Failed("ping_unavailable_failed", "%v", err)
+		}
+		if c.Record != nil {
+			_ = c.Record.Append(record.ActorTool, "fault.ping-unavailable",
+				map[string]any{"node": n, "mechanism": mech})
+		}
+		if !c.JSON && !c.Quiet {
+			fmt.Fprintf(c.Out, "ping unavailable on %s (%s)\n", n, mech)
+		}
+	}
+
+	switch t.PingMode {
+	case topology.PingNone:
+		c.Note("no_ping_hosts", SevWarn,
+			"this cluster has no ha_ping_hosts, so nothing consults ping: the condition is in force but the engine never asks")
+	case topology.PingTCP:
+		if mech == "icmp" {
+			c.Note("tcp_ping_hosts", SevWarn,
+				"this cluster pings over ha_tcp_ping_hosts, which is a TCP connect and not ICMP: dropping ICMP changes nothing the engine consults. --mechanism binary is the one that bites here")
+		}
+	}
+	if mech == "binary" {
+		c.Note("bites_at_start", SevInfo,
+			"an engine that cannot run ping with ha_ping_hosts set FAILS TO START; a running engine reads HB_PING_FAILURE on its next check, which is how every master ends up demoting itself on any heartbeat loss")
+	}
+	if !c.JSON && !c.Quiet {
+		printNotes(c)
+	}
+	return map[string]any{"nodes": names, "mechanism": mech}, nil
+}
+
 func cmdFaultPartition(c *Ctx) (any, error) {
 	sel, err := selectorArg(c)
 	if err != nil {
@@ -329,8 +397,18 @@ func cmdFaultClear(c *Ctx) (any, error) {
 	}
 	// Clearing is not the same as recovering: after a partition that caused a
 	// clean failover, nothing happens -- the roles stay swapped, indefinitely.
+	// The message names what was actually reversed, because "the network is
+	// restored" is not true of a fault that never touched the network.
+	kinds := map[string]bool{}
+	for _, a := range cleared {
+		kinds[a.Kind] = true
+	}
+	what := "the condition is reversed"
+	if kinds["partition"] {
+		what = "the network is restored"
+	}
 	c.Note("clear_is_not_recovery", SevInfo,
-		"the network is restored; cluster status afterwards may legitimately show a topology that is healthy and inverted")
+		what+"; cluster status afterwards may legitimately show a topology that is healthy and inverted")
 	if !c.JSON && !c.Quiet {
 		fmt.Fprintf(c.Out, "cleared %d condition(s)\n", len(cleared))
 		printNotes(c)

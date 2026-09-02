@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/backend"
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
 
@@ -28,7 +29,8 @@ type Active struct {
 	Stage     string   `json:"stage,omitempty"` // copy | apply | both
 	Pid       string   `json:"pid,omitempty"`   // the suspended process, so clear can resume it
 	Delay     string   `json:"delay,omitempty"`
-	Mode      string   `json:"mode,omitempty"` // quiesce: RO | SO
+	Mode      string   `json:"mode,omitempty"` // quiesce: RO|SO. ping-unavailable: the binary's original mode
+	Path      string   `json:"path,omitempty"` // ping-unavailable: the binary that was taken away
 	Since     string   `json:"since"`
 }
 
@@ -146,6 +148,9 @@ func (i *Injector) Clear(ctx context.Context, s *Set, target string) ([]Active, 
 		if a.Kind == "lag" {
 			i.clearLag(ctx, a)
 		}
+		if a.Kind == "ping-unavailable" {
+			i.restorePing(ctx, a)
+		}
 		if a.Kind == "partition" {
 			for _, p := range a.Cut {
 				ip, err := i.addr(ctx, p)
@@ -213,6 +218,86 @@ func (i *Injector) cut(ctx context.Context, from, to, ip, mechanism string, undo
 		return fmt.Errorf("%s on %s: %s", cmd, from, strings.TrimSpace(res.Stderr))
 	}
 	return nil
+}
+
+// asRoot runs a command inside a node as uid 0. Route rules, iptables and the
+// mode of a file the image installed are all root's, and the nodes otherwise run
+// as the invoking user.
+func (i *Injector) asRoot(ctx context.Context, node, cmd string) (*run.Result, error) {
+	return i.D.R.Run(ctx, "docker", "exec", "-u", "0", node, "sh", "-c", cmd)
+}
+
+// PingUnavailable breaks the check the engine decides with, which is not the
+// same thing as breaking the network.
+//
+// Partition changes what a node can reach; this changes whether it can ask at
+// all. The split-brain finding turns entirely on the answer to that question --
+// a master cancels its failback when its own ping SUCCEEDS, a slave cancels its
+// failover only when its own ping FAILS -- so "the ping host is unreachable" and
+// "the ping check is broken" are different scenarios that leave a similar-looking
+// log (docs/design/04-faults.md §10).
+//
+// This project met the binary case as an accident before it was a verb: an image
+// without iputils-ping returns 127, the caller reads HB_PING_FAILURE, and every
+// master demotes itself on any heartbeat loss.
+func (i *Injector) PingUnavailable(ctx context.Context, s *Set, node, mechanism string) error {
+	if mechanism == "" {
+		mechanism = "binary"
+	}
+	a := Active{Kind: "ping-unavailable", Target: node, Mechanism: mechanism,
+		Since: time.Now().UTC().Format(time.RFC3339)}
+	switch mechanism {
+	case "binary":
+		res, err := i.D.Exec(ctx, node, i.T.DB, "command -v ping")
+		if err != nil {
+			return err
+		}
+		a.Path = strings.TrimSpace(res.Stdout)
+		if a.Path == "" {
+			return fmt.Errorf("%s has no ping to take away", node)
+		}
+		// The original mode is read before it is changed, because ping is setuid
+		// and guessing 0755 on the way back would leave a binary that runs but
+		// cannot open a raw socket -- a third state, neither broken nor restored.
+		mres, err := i.asRoot(ctx, node, "stat -c %a "+a.Path)
+		if err != nil {
+			return err
+		}
+		a.Mode = strings.TrimSpace(mres.Stdout)
+		if a.Mode == "" {
+			return fmt.Errorf("%s: cannot read the mode of %s", node, a.Path)
+		}
+		res, err = i.asRoot(ctx, node, "chmod 000 "+a.Path)
+		if err != nil {
+			return err
+		}
+		if res.ExitCode != 0 {
+			return fmt.Errorf("%s: chmod 000 %s: %s", node, a.Path, strings.TrimSpace(res.Stderr))
+		}
+	case "icmp":
+		res, err := i.asRoot(ctx, node, "iptables -A OUTPUT -p icmp -j DROP")
+		if err != nil {
+			return err
+		}
+		if res.ExitCode != 0 {
+			return fmt.Errorf("%s: iptables: %s", node, strings.TrimSpace(res.Stderr))
+		}
+	default:
+		return fmt.Errorf("unknown mechanism %q (binary or icmp)", mechanism)
+	}
+	return s.add(a)
+}
+
+// restorePing is ordinary: put the binary back, drop the rule.
+func (i *Injector) restorePing(ctx context.Context, a Active) {
+	switch a.Mechanism {
+	case "icmp":
+		_, _ = i.asRoot(ctx, a.Target, "iptables -D OUTPUT -p icmp -j DROP")
+	default:
+		if a.Path != "" && a.Mode != "" {
+			_, _ = i.asRoot(ctx, a.Target, "chmod "+a.Mode+" "+a.Path)
+		}
+	}
 }
 
 // ---- conditions ----------------------------------------------------------

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
@@ -131,5 +132,11 @@ func (r *Record) Read(since time.Time) ([]Entry, error) {
 		}
 		out = append(out, e)
 	}
+	// The file is append-order, which is not time order: the engine's own lines
+	// are harvested after the fact and land in a block at the end, out of
+	// sequence with the tool's. Sorting here rather than in each caller is
+	// deliberate -- `record export` sorted and `record show` did not, so the two
+	// views of one run disagreed about what happened when.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].T < out[j].T })
 	return out, sc.Err()
 }

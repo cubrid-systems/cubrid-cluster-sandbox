@@ -52,6 +52,15 @@ heartbeat replacing the server process — the CBRD-26983 session watched
 `Process failure detected (pid:102, args:cub_server aitest)`. Any verb that
 appears to demote is really "make the heartbeat decide to", and the tool says so.
 
+**Measured 2026-09-03.** `ha promote slave` moved the role in **1.8 s**, and it
+emitted `stop_not_returned`: the roles had moved while `cubrid heartbeat stop`
+was still running. That is the phase-0 finding turned into behaviour rather than
+a warning in a document — the step is bounded, and it decides on the observed
+roles rather than on the command's exit status
+([`../findings/failback.md`](../findings/failback.md)). The verb refuses two
+states by name: a group with two masters is a split brain rather than one waiting
+for a promotion, and a group with no master has nothing to take away.
+
 ## 3. `partition` — and why it must cut routes, not interfaces
 
 ```
@@ -370,4 +379,24 @@ the image. As a verb it stops being a trap and becomes a scenario — and with
 `--ping-mode tcp` ([`02-topology.md`](02-topology.md) §5) the pair covers both
 ping mechanisms the engine has.
 
-Reversal is ordinary: restore the binary, drop the rule. `clear` handles it.
+Reversal is ordinary: restore the binary, drop the rule. `clear` handles it —
+and it restores the binary's **original** mode, read before the change, because
+ping is setuid and guessing `0755` on the way back leaves a third state that runs
+but cannot open a raw socket.
+
+**Measured 2026-09-03.** `--mechanism binary` on a running master produced
+`rc=126` from `ping`, and `clear` put it back to `rc=0`. `--mechanism icmp` on a
+standby took ping from `rc=0` to `rc=1` and back. The verb says what it cannot do
+as clearly as what it does: on a cluster with no `ha_ping_hosts` nothing consults
+ping, and on one using `ha_tcp_ping_hosts` the check is a TCP connect, so
+`--mechanism icmp` there changes nothing the engine asks. Both are notes rather
+than refusals, because the condition really is in force — it just is not being
+consulted.
+
+**Writing it found that the ICMP half could not run at all**, and neither could
+§3's `drop`: `iptables` was missing from the base image, so the packet-level half
+of both mechanisms had never executed since it was written. The recipe now
+carries it, and `partition --mechanism drop` — run for the first time on
+2026-09-03 — produced two masters in about twelve seconds with the route still in
+the table, which is the distinction §3 exists to make. A mechanism nobody has run
+is a mechanism nobody has.

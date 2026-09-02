@@ -182,6 +182,19 @@ collector.
 The retained series carries both stages and both provenances, or it inherits
 every problem in §3 with a timestamp attached.
 
+**Measured 2026-09-03.** With `fault lag --stage apply --mechanism suspend` in
+force, a ten-second series at one sample a second read
+`copy 0→16 (max 16) rose at +1.3s` against `apply 0→0 (max 0)`. The applier's own
+view sat flat and healthy for the whole window because the process that writes it
+was suspended; the copy stage, which has a master-side reference, showed the
+truth. The series does inherit §3's lie — and the tool says so at the top of the
+window rather than letting a flat line speak for itself, because it knows which
+process it suspended.
+
+`rose_after_seconds` is the retained answer to the question this section names:
+not the maximum, which a point sample reaches eventually too, but **when it
+started**. A stage that never moves reports no rise rather than inventing one.
+
 ## 6. `cluster status`
 
 One command, the whole topology, T1 and T2 together:

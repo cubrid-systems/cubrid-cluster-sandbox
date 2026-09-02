@@ -42,10 +42,11 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		{"too few arguments", []string{"cluster"}, ExitUsage},
 		{"a verb that needs a cluster and was given none", []string{"record", "show"}, ExitUsage},
 		{"a cluster that does not exist", []string{"record", "show", "--cluster", "nope"}, ExitPrecondition},
-		// Any verb the surface defines and this phase has not built. When repl
-		// watch lands, this line fails loudly and should be pointed at whatever is
-		// still unbuilt -- that is the test doing its job.
-		{"specified but not built", []string{"repl", "watch", "--cluster", "nope"}, ExitFailed},
+		// There is no longer a "specified but not built" case to put here: the
+		// surface names 30 verbs and all 30 are built. This line was pointed at
+		// repl watch and failed loudly the day it landed, which is the test
+		// doing its job.
+		{"a verb whose flags do not parse", []string{"repl", "watch", "--cluster", "nope", "--nonsense"}, ExitUsage},
 		{"a command that works", []string{"cluster", "ls", "--timeout", "5s"}, ExitOK},
 	}
 	for _, c := range cases {
@@ -88,15 +89,15 @@ func TestEnvelopeShape(t *testing.T) {
 func TestFailureIsStillTheEnvelope(t *testing.T) {
 	home := t.TempDir()
 	code, out, _ := invoke(t, home, "repl", "watch", "--cluster", "hadb", "--json")
-	if code != ExitFailed {
-		t.Fatalf("exit %d, want %d\n%s", code, ExitFailed, out)
+	if code != ExitPrecondition {
+		t.Fatalf("exit %d, want %d\n%s", code, ExitPrecondition, out)
 	}
 	e := decode(t, out)
 	if e.OK {
 		t.Error("ok must be false")
 	}
-	if len(e.Notes) != 1 || e.Notes[0].Code != "not_implemented" {
-		t.Fatalf("notes = %+v, want one not_implemented", e.Notes)
+	if len(e.Notes) != 1 || e.Notes[0].Code != "no_such_cluster" {
+		t.Fatalf("notes = %+v, want one no_such_cluster", e.Notes)
 	}
 	if e.Notes[0].Severity != SevError {
 		t.Errorf("severity = %q, want %q", e.Notes[0].Severity, SevError)
@@ -124,11 +125,13 @@ func TestDescribeAndRecordRoundTrip(t *testing.T) {
 		t.Fatalf("describe data = %#v", e.Data)
 	}
 
-	// A mutating verb opens the record without anyone switching it on. It fails
-	// (not built yet) and must still have recorded that it was asked for, which
-	// is why this one has to be both Mutates and unbuilt.
-	if code, _, _ := invoke(t, home, "ha", "promote", "master", "--cluster", "hadb"); code != ExitFailed {
-		t.Fatalf("expected the not-implemented failure, got %d", code)
+	// A mutating verb opens the record without anyone switching it on, and does
+	// it BEFORE running -- so a verb that fails must still have recorded that it
+	// was asked for. This describe has no nodes and there is no container here,
+	// so the verb cannot succeed; that it failed is the point, and which way it
+	// failed is not.
+	if code, _, _ := invoke(t, home, "ha", "promote", "master", "--cluster", "hadb"); code == ExitOK {
+		t.Fatal("ha promote succeeded against a cluster that does not exist")
 	}
 	code, out, _ = invoke(t, home, "record", "show", "--cluster", "hadb", "--json")
 	if code != ExitOK {

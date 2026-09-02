@@ -193,15 +193,18 @@ Not preferences; each one is load-bearing.
 | `--shm-size` raised | CUBRID's shared memory does not fit the 64 MB default |
 
 The base image needs nothing else. `ubuntu:24.04` with `python3`, `iproute2`,
-`iputils-ping` and `procps` is the whole of it. `python3` earns its place twice:
-the seeding step already needs it, and the load driver runs inside the node
-rather than on the host ([`06-load.md`](06-load.md) §6).
+`iptables`, `iputils-ping` and `procps` is the whole of it. `python3` earns its
+place twice: the seeding step already needs it, and the load driver runs inside
+the node rather than on the host ([`06-load.md`](06-load.md) §6). `iptables`
+arrived last and late — two fault mechanisms are packet-level rather than
+route-level, and neither had ever run
+([`04-faults.md`](04-faults.md) §10).
 
 **There is a base image, and there is never an engine image.** The distinction is
 the one that decides whether this tool is usable while you are changing the
 engine, so it is worth stating plainly:
 
-- The **base image** is those four packages. The tool builds it once from a
+- The **base image** is those five packages. The tool builds it once from a
   recipe it carries, tagged with the hash of that recipe — so an unchanged recipe
   is never rebuilt, and a changed one is a different image rather than a
   silently stale one.

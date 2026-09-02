@@ -29,11 +29,14 @@ import (
 // so an image without it makes every master demote itself on any heartbeat loss;
 // iproute2 because the partition is a route operation; procps because the
 // inspector reads process state; python3 because seeding and the load driver run
-// inside the node.
+// inside the node; iptables because two mechanisms are packet-level rather than
+// route-level -- `partition --mechanism drop` and `ping-unavailable --mechanism
+// icmp` -- and without it they fail at the point of use with "iptables: not
+// found", which is where this line came from.
 const baseDockerfile = `FROM ubuntu:24.04
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      iproute2 iputils-ping procps python3 ca-certificates \
+      iproute2 iptables iputils-ping procps python3 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 `
 

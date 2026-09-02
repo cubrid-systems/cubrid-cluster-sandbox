@@ -4,7 +4,7 @@ category: roadmap
 project: cluster-sandbox
 summary: Phases, milestones and current position. Phase 0 is complete; phase 1 is the CLI, the container backend and the HA preset. The one thing blocking design decisions rather than implementation is what the technical team requires of the return to the original master — a question that has to be asked in the team's own vocabulary, because "failback" already means something else to them.
 created: 2026-08-28
-updated: 2026-08-28
+updated: 2026-09-03
 lang: en
 ---
 
@@ -28,6 +28,12 @@ including both intervals for every role change, without being asked.
 What that apparatus was for: the switchover threshold the field asked to have
 validated in 2021 and could not measure has been measured
 ([`findings/switchover-threshold.md`](findings/switchover-threshold.md)).
+
+**The surface no longer promises anything it does not do.** Six verbs were
+specified and unbuilt through phases 1 and 2 — `node logs`, `node shell`,
+`fault ping-unavailable`, `repl watch`, `ha promote`, `ha failback` — and M3.3
+built all six. Thirty verbs across seven nouns, and the helper that answered
+`not_implemented` is gone because nothing calls it.
 
 Two things are outstanding and neither is blocked work. **M3.1** needs a consumer
 that does not exist yet. And the failback script still needs one round of the
@@ -60,7 +66,7 @@ verification needed, and can ask it what state it is in.
 | M1.1 | Command surface and machine-readable output (`design/01-cli.md`) | **done 2026-09-02** — every command has a `--json` form, the envelope is one type, and the exit codes are implemented and tested. The verbs behind the surface are M1.2–M1.7; until they land each exits 1 with a `not_implemented` note rather than pretending |
 | M1.2 | Topology model — the `ha` preset, node count, per-node overrides (`design/02-topology.md`) | **done 2026-09-02** — presets `ha` and `single`, everything derived from the cluster name, parameters routed by file with `--set-hidden` as the escape hatch, and the describe artifact is the same value the tool builds from |
 | M1.3 | Container backend — image, network, run-as-invoking-user, `NET_ADMIN`, `--init` | **done 2026-09-02** — a host-built `install.out` runs by path and is in no image; the base image is built once from a recipe tagged by its own hash. The engine's glibc floor is read from the ELF and checked against the image before anything starts |
-| M1.4 | Assembly — config generation, the slave chain, start ordering (`design/03-assembly.md`) | zero manual interventions; a first-time user needs no ordering knowledge |
+| M1.4 | Assembly — config generation, the slave chain, start ordering (`design/03-assembly.md`) | **done 2026-09-02** — one command from an empty directory to `serving`, eight ordering traps encoded, zero manual interventions and no ordering knowledge required of a first-time user |
 | M1.5 | Event verbs — `stop`, `kill`, `partition`, `heal`, `promote`, role-addressed | **done 2026-09-02** for `node stop` / `kill` / `start` and `fault partition` / `clear` / `ls`. Measured through the tool: a killed master fails over in 5 s, `master` then resolves to the other machine with no script change, a route-level partition produces two masters in 6 s, and clearing it lets the engine resolve the split brain — with the cancel reason in the log that tells the flavours apart. `promote` is M2. **The original acceptance is met**: the CBRD-26983 scenario set, replayed through these verbs, reproduces the id sequence `1, 2, 21, 22, 41, 42, 61` unattended ([`findings/scenario-cbrd26983.md`](findings/scenario-cbrd26983.md)) |
 | M1.6 | Inspector tier 1 + tier 2 (`design/05-inspect.md`) | **done 2026-09-02** — `cluster status`, `node status`, `ha status`, `repl status`. Liveness from the runtime, role and process state from `changemode` and `heartbeat status`, replication position from `db_ha_apply_info` over SQL. Copy progress is *not* reported: it needs a master-side reference, which is M2.2, and until then the note says so rather than the number lying |
 | M1.7 | The run record (`design/07-record.md`) | **done 2026-09-02** — every state-changing command appends without being asked, the engine's own HA lines are harvested into the same timeline under a separate actor, `export` carries the `describe` as it stood when the record opened, and every role change is reported with both intervals. First run: a promotion **5.9 s** after `node kill`, against the **2.5 s** the settings predict, with those settings in the document |
@@ -102,7 +108,16 @@ every other threshold value is **one cluster** —
 |---|---|---|
 | M3.1 | **The surface `cubrid-testkit` provisions through** (was M2.4) | testkit calls it to set up and tear down without screen-scraping |
 
-**Why it moved.** Its acceptance is a sentence about a consumer, and that
+| M3.3 | **The six verbs the surface named and had not built** | **done 2026-09-03** — measured on one cluster in a single unattended run. `ha promote` moved the role in **1.8 s** and reported that `cubrid heartbeat stop` had not returned yet, which is the phase-0 finding turned into a note: the roles are the evidence, not the exit status. `ha failback` returned service in **2.5 s** and verified it with a write that arrived on the rejoined node in **0.09 s** — roles alone say the group agrees, not that replication carries anything. `repl watch` under an apply stall recorded `copy 0→16, rose at +1.3s` while `apply` sat flat at 0, which is §3's lie with a timestamp on it. `node logs` names the process and finds the file; `fault ping-unavailable --mechanism binary` produced `rc=126` from a running node and `clear` put the binary back at its original mode |
+
+**Two defects it found in already-built code.** `partition --mechanism drop` and
+`ping-unavailable --mechanism icmp` are both packet-level, and **iptables was not
+in the base image** — the drop mechanism had never run since it was written.
+`record show` read the file in append order while `record export` sorted, so the
+two views of one run disagreed about when things happened; the sort moved into
+`record.Read`, where no caller can forget it.
+
+**Why M3.1 moved.** Its acceptance is a sentence about a consumer, and that
 consumer does not exist yet — `cubrid-testkit` is docs and an empty `impl/`. The
 surface it would call is built and machine-readable, so nothing here is blocked;
 what is missing is somebody on the other side to be wrong about it. Two things
@@ -156,10 +171,9 @@ the failback that actually hurts is the one that should never have started
 under load). What no ticket answers is what an operator *decides*: the threshold
 for "caught up enough", whether write traffic is quiesced, who authorises it,
 and whether the original master is preferred at all.
-[`harness/failback.sh`](../harness/failback.sh) goes to the team with four edits
-first (§7 of that document). **The marks it comes back with are the requirement
-set**, and they shape phase 1's verb vocabulary — which is why M0.7 sits in
-phase 0 and not later.
+[`harness/failback.sh`](../harness/failback.sh) is runnable and in the
+repository. **The marks it comes back with are the requirement set**, and they
+shape the verb vocabulary — which is why M0.7 sits in phase 0 and not later.
 
 **It is in the repository, which is the channel.** The script was written to be
 sent somewhere and marked up; three of its four questions were then answered by
@@ -167,14 +181,15 @@ reading the tracker, so what is left is a runnable operator script with one open
 decision in it. It does not need dispatching — it needs someone to run it and
 disagree.
 
-**A fifth edit, and it is the one that decides whether the answers are usable.**
-A second pass over the tracker
+**The word, and why the script names the operation instead.** A second pass over
+the tracker
 ([`requirements/02-ha-role-transition-field-evidence.md`](requirements/02-ha-role-transition-field-evidence.md))
-found that **"failback" means demotion** to the engine and to the team — a master
-stepping down — and that the tracker has no term at all for returning service to
-the original master. A script that asks what the team requires "of failback" will
-be answered about the wrong operation. It has to name the operation it means
-before it goes out.
+found that **"failback" means demotion** to the engine and to the team's own study
+notes — a master stepping down. Operations use **`failback 작업`** for the return
+trip, in ninety-five tickets, so the term does exist; the two readings simply sit
+side by side in the same tracker. A script that asks what the team requires "of
+failback" can therefore be answered about either one, which is why it names the
+operation it means rather than the word.
 
 **Implementation language — decided 2026-09-02.**
 [`design/ADR-001`](design/ADR-001-implementation-language.md) accepts **Go** for

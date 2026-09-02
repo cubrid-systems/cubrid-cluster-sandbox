@@ -15,16 +15,6 @@ import (
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/selector"
 )
 
-// notYet is the honest answer for a verb the surface defines and phase 1 has not
-// built. It is exit 1 with a note, not exit 2: the command exists, so "unknown
-// verb" would be a lie, and a consumer needs to tell the two apart.
-func notYet(doc string) func(*Ctx) (any, error) {
-	return func(c *Ctx) (any, error) {
-		return nil, Failed("not_implemented",
-			"%s %s is specified but not built yet — see docs/design/%s", c.Noun, c.Verb, doc)
-	}
-}
-
 var registry = []Command{
 	// ---- cluster ---------------------------------------------------------
 	{Noun: "cluster", Verb: "create", Summary: "build a topology", Mutates: true,
@@ -47,8 +37,8 @@ var registry = []Command{
 	{Noun: "node", Verb: "stop", Args: "<selector>", Summary: "graceful: the server flushes", Mutates: true, Run: cmdNodeStop},
 	{Noun: "node", Verb: "kill", Args: "<selector>", Summary: "crash: it does not", Mutates: true, Run: cmdNodeKill},
 	{Noun: "node", Verb: "status", Args: "<selector>", Summary: "one node's state", Run: cmdNodeStatus},
-	{Noun: "node", Verb: "logs", Args: "<selector>", Summary: "the log a failure is actually in", Run: notYet("01-cli.md")},
-	{Noun: "node", Verb: "shell", Args: "<selector>", Summary: "a shell on the node", Run: notYet("01-cli.md")},
+	{Noun: "node", Verb: "logs", Args: "<selector>", Summary: "the log a failure is actually in", Flags: logsFlags, Run: cmdNodeLogs},
+	{Noun: "node", Verb: "shell", Args: "<selector>", Summary: "a shell on the node", Run: cmdNodeShell},
 	{Noun: "node", Verb: "exec", Args: "<selector> -- <cmd>", Summary: "run a command on the node", Run: cmdNodeExec},
 
 	// ---- fault -----------------------------------------------------------
@@ -56,7 +46,7 @@ var registry = []Command{
 	{Noun: "fault", Verb: "lag", Args: "<selector>", Summary: "stage-targeted replication lag", Mutates: true, Flags: lagFlags, Run: cmdFaultLag},
 	{Noun: "fault", Verb: "splitbrain", Summary: "two masters, on request", Mutates: true, Flags: splitbrainFlags, Run: cmdFaultSplitbrain},
 	{Noun: "fault", Verb: "failcount", Summary: "move fail_counter deliberately", Mutates: true, Flags: failcountFlags, Run: cmdFaultFailcount},
-	{Noun: "fault", Verb: "ping-unavailable", Args: "<selector>", Summary: "the engine cannot ask", Mutates: true, Run: notYet("04-faults.md")},
+	{Noun: "fault", Verb: "ping-unavailable", Args: "<selector>", Summary: "the engine cannot ask", Mutates: true, Flags: pingFlags, Run: cmdFaultPingUnavailable},
 	{Noun: "fault", Verb: "clear", Args: "[<selector>]", Summary: "reverse a condition", Mutates: true, Run: cmdFaultClear},
 	{Noun: "fault", Verb: "ls", Summary: "what is currently in force", Run: cmdFaultLs},
 
@@ -64,12 +54,12 @@ var registry = []Command{
 	{Noun: "repl", Verb: "status", Summary: "both stages, against the master", Run: cmdReplStatus},
 	{Noun: "repl", Verb: "check", Args: "[<selector>]", Summary: "a write that has to arrive", Mutates: true,
 		Flags: checkFlags, Run: cmdReplCheck},
-	{Noun: "repl", Verb: "watch", Summary: "sample and retain", Run: notYet("05-inspect.md")},
+	{Noun: "repl", Verb: "watch", Summary: "sample and retain", Flags: watchFlags, Run: cmdReplWatch},
 
 	// ---- ha --------------------------------------------------------------
 	{Noun: "ha", Verb: "status", Summary: "roles and the group", Run: cmdHaStatus},
-	{Noun: "ha", Verb: "promote", Args: "<selector>", Summary: "promote a node", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "ha", Verb: "failback", Summary: "return to the original master; interactive", Mutates: true, Run: notYet("04-faults.md")},
+	{Noun: "ha", Verb: "promote", Args: "<selector>", Summary: "promote a node", Mutates: true, Flags: promoteFlags, Run: cmdHaPromote},
+	{Noun: "ha", Verb: "failback", Summary: "return to the original master; interactive", Mutates: true, Flags: failbackFlags, Run: cmdHaFailback},
 	{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Flags: resyncFlags, Run: cmdHaResync},
 
 	// ---- load ------------------------------------------------------------

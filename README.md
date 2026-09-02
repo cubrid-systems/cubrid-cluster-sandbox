@@ -74,14 +74,17 @@ $ csb cluster describe --json | jq .data.engine
 $ csb cluster destroy --cluster hadb        # keeps the run record; --purge drops it
 ```
 
-**What works today, honestly.** `cluster create`, `describe`, `ls`, `destroy`,
-`down`, and `record show`/`export`. `cluster up` after a `down` currently stops
-with a diagnosis rather than a cluster: a gracefully stopped HA group does not
-return to service on its own, and completing the promotion by hand is a forced
-transition whose safety `csb` will not assert on your behalf — see
-[`docs/design/03-assembly.md`](docs/design/03-assembly.md) §3. Everything under
-`fault`, `repl`, `ha` and `load` is specified and not built; each exits 1 with a
-`not_implemented` note rather than pretending.
+**What works today, honestly.** All of it. The surface names 30 verbs across
+seven nouns and every one is built and has been run against a real cluster.
+`cluster up` after a `down` brings the group back — an earlier version of this
+paragraph said it did not, on a stall that turned out to be this tool's own bug
+and not the engine's ([`docs/design/03-assembly.md`](docs/design/03-assembly.md)
+§3).
+
+What is **not** here is a policy for the return trip. `ha failback` performs it
+and stops at the decision nobody has written down — who authorises it, and on
+what evidence — because a tool that picked that would be inventing a requirement
+([`harness/failback.sh`](harness/failback.sh)).
 
 ## The surface being built
 
@@ -102,10 +105,12 @@ Every command has a `--json` form and a documented exit code, because
 `cubrid-testkit` provisions through this surface rather than screen-scraping it
 ([`docs/design/01-cli.md`](docs/design/01-cli.md)).
 
-**The surface is built; most of the verbs behind it are not.** A verb that is
-specified and not yet implemented exits 1 with a `not_implemented` note rather
-than pretending — never exit 2, because a consumer has to tell a gap from a typo.
-What provisions a cluster today is the shell harness in [`harness/`](harness/).
+A verb that is specified and not yet implemented exits 1 with a
+`not_implemented` note rather than pretending — never exit 2, because a consumer
+has to tell a gap from a typo. No verb uses that answer any more. The shell
+scripts in [`harness/`](harness/) are no longer how a cluster gets provisioned;
+they are the measurements and the operator script that the tool was built out
+of.
 
 ## Why it exists
 

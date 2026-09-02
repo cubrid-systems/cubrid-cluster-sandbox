@@ -114,7 +114,19 @@ csb node exec    <selector> -- <command...>
 `--which` exists because CUBRID scatters a node's logs across
 `<db>_<peer>_copylogdb.err`, `<db>@localhost_applylogdb_<db>_<peer>.err`,
 `<host>_master.err`, and `log/server/<db>_<date>.err`. A user should not have to
-know that naming to read a failure.
+know that naming to read a failure. The default is every kind, newest lines
+first read; `--which` narrows it to the process the user suspects.
+
+Two details are from running it. The engine keeps a `<db>_latest.err` symlink
+beside each dated file, and following it prints the same log twice — or fails
+outright when it is stale and points at a file that has been rotated away, which
+is how this verb failed on its first run against a healthy cluster. It skips
+symlinks. And **`--follow` is bounded by `--timeout` rather than by Ctrl-C**:
+every other verb here is bounded, and a command that can only be stopped by hand
+cannot go in a script. `--follow` has no envelope to close, so it refuses
+`--json` — as does `node shell`, which replaces this process with `docker exec
+-it` because a real TTY has to come from docker's own stdin and not through a
+pipe this tool sits in.
 
 ### `fault`
 
@@ -297,9 +309,12 @@ per cluster with its `describe` artifact and its record (default
 `~/.local/share/csb`), and **`CSB_CLUSTER`** supplies `--cluster` when it is
 absent.
 
-A verb the surface defines and this phase has not built exits **1** with a
+A verb the surface defines and has not built exits **1** with a
 `not_implemented` note — not 2. The command exists, so "unknown verb" would be a
-lie, and a consumer needs to tell a gap from a typo.
+lie, and a consumer needs to tell a gap from a typo. **Since 2026-09-03 no verb
+uses it**: the surface names 30 and all 30 are built, so the helper that returned
+that answer is gone rather than kept warm. The rule above is what to do if the
+surface ever again promises something ahead of its implementation.
 
 `--verbose` is worth its keep for a tool whose main value is knowing an ordering
 a user does not: seeing what it ran is how somebody learns the assembly, and how
