@@ -29,6 +29,12 @@ What that apparatus was for: the switchover threshold the field asked to have
 validated in 2021 and could not measure has been measured
 ([`findings/switchover-threshold.md`](findings/switchover-threshold.md)).
 
+**The surface verifies itself.** `make e2e CSB_E2E_BUILD=…` drives the whole
+thing against a real engine in about two minutes and found three defects on its
+first run — see M3.4. Two of them had been in the tree for weeks, one of them
+was costing every promotion 57 seconds, and none of them was visible to a unit
+test.
+
 **The surface no longer promises anything it does not do.** Six verbs were
 specified and unbuilt through phases 1 and 2 — `node logs`, `node shell`,
 `fault ping-unavailable`, `repl watch`, `ha promote`, `ha failback` — and M3.3
@@ -110,7 +116,33 @@ every other threshold value is **one cluster** —
 
 | M3.3 | **The six verbs the surface named and had not built** | **done 2026-09-03** — measured on one cluster in a single unattended run. `ha promote` moved the role in **1.8 s** and reported that `cubrid heartbeat stop` had not returned yet, which is the phase-0 finding turned into a note: the roles are the evidence, not the exit status. `ha failback` returned service in **2.5 s** and verified it with a write that arrived on the rejoined node in **0.09 s** — roles alone say the group agrees, not that replication carries anything. `repl watch` under an apply stall recorded `copy 0→16, rose at +1.3s` while `apply` sat flat at 0, which is §3's lie with a timestamp on it. `node logs` names the process and finds the file; `fault ping-unavailable --mechanism binary` produced `rc=126` from a running node and `clear` put the binary back at its original mode |
 
-**Two defects it found in already-built code.** `partition --mechanism drop` and
+| M3.4 | **The surface verifies itself against a real engine** (`e2e/`, `make e2e`) | **done 2026-09-03** — twelve checks in one unattended run of about two minutes: create, both provenances, the canary, a stalled stage seen through `repl watch`, both ping mechanisms, a dropped-packet partition, `down`/`up`, promote, failback, the record's ordering and the exit codes. It asserts on the JSON envelope rather than on printed text, because the envelope is the contract and prose is free to change. Not part of `make check` — it needs Docker, an engine tree and several minutes — and not optional either |
+
+**Three defects on its first run, and one of them had been costing 57 seconds.**
+
+- **`ha_ping_hosts` was never written.** `--ping-mode icmp` is the default, was
+  recorded in `describe`, and never reached `cubrid_ha.conf` —
+  [`design/02-topology.md`](design/02-topology.md) has said "set by default"
+  since it was written. What it cost is in the engine's own words: a node left
+  alone in the group logged `[Failback] [Cancelled] No hosts are registered in
+  ha_ping_hosts … making it impossible to determine` on a loop while it sat in
+  `to_be_active`. With the parameter written, the same `ha promote` subtest went
+  from **59.1 s to 2.3 s**. The host is the docker network's gateway, which is
+  the one address that survives a cut between the two nodes.
+- **An unknown noun or verb produced no envelope at all** — it printed to stderr
+  and exited 2, so a consumer had to parse stderr to tell a typo from a
+  precondition. Every early failure now answers in the envelope
+  ([`design/01-cli.md`](design/01-cli.md) §6).
+- `record show` read the file in append order while `record export` sorted it,
+  so two views of one run disagreed about when things happened.
+
+**And it is the standing check on the withdrawn one.** `down` then `up` is a
+subtest now, asserting the original master comes back without a forced
+promotion. The `to_be_active` stall was never explained
+([`design/03-assembly.md`](design/03-assembly.md) §3); an unexplained
+observation deserves a check that runs every time, not a paragraph.
+
+**Two defects M3.3 found in already-built code.** `partition --mechanism drop` and
 `ping-unavailable --mechanism icmp` are both packet-level, and **iptables was not
 in the base image** — the drop mechanism had never run since it was written.
 `record show` read the file in append order while `record export` sorted, so the

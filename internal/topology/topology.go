@@ -40,6 +40,7 @@ type Topology struct {
 	Network    string           `json:"network"`
 	Image      string           `json:"image"`
 	PingMode   string           `json:"ping_mode"`
+	PingHost   string           `json:"ping_host,omitempty"`
 	WithBroker bool             `json:"with_broker"`
 	Nodes      []Node           `json:"nodes"`
 	Engine     *engine.Identity `json:"engine,omitempty"`

@@ -95,6 +95,27 @@ func (d *Docker) EnsureNetwork(ctx context.Context, name, cluster string) error 
 	return err
 }
 
+// NetworkGateway is the address a node pings to decide whether it is the one
+// that is isolated.
+//
+// The gateway is the right answer rather than a convenient one: a ping host has
+// to sit OUTSIDE the pair, or a partition between the two nodes takes the ping
+// host with it and neither side can tell "the peer is gone" from "I am gone".
+// The gateway survives a route cut between the nodes, which is what makes the
+// two split-brain flavours different scenarios rather than one.
+func (d *Docker) NetworkGateway(ctx context.Context, name string) (string, error) {
+	res, err := d.R.Run(ctx, "docker", "network", "inspect", "-f",
+		"{{(index .IPAM.Config 0).Gateway}}", name)
+	if err != nil {
+		return "", err
+	}
+	gw := strings.TrimSpace(res.Stdout)
+	if gw == "" {
+		return "", fmt.Errorf("network %s reports no gateway", name)
+	}
+	return gw, nil
+}
+
 // NodePlan is the argv for one container, kept separate from running it so the
 // container requirements in docs/design/03-assembly.md §4 can be asserted
 // without a docker daemon.

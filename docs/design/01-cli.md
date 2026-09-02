@@ -309,6 +309,14 @@ per cluster with its `describe` artifact and its record (default
 `~/.local/share/csb`), and **`CSB_CLUSTER`** supplies `--cluster` when it is
 absent.
 
+**Every failure answers in the envelope, including the ones that happen before a
+command starts.** An unknown noun, an unknown verb and a flag that does not parse
+all produce `ok: false` with `unknown_noun`, `unknown_verb` or `usage` when
+`--json` was asked for. This is not free — those failures happen before the flag
+set exists, so the raw arguments are scanned for `--json` — and it is not
+optional: a consumer that has to read stderr to tell a typo from a real
+precondition has no contract at all. The end-to-end suite caught this one.
+
 A verb the surface defines and has not built exits **1** with a
 `not_implemented` note — not 2. The command exists, so "unknown verb" would be a
 lie, and a consumer needs to tell a gap from a typo. **Since 2026-09-03 no verb

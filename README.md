@@ -36,7 +36,12 @@ make dist                      # a static binary at bin/csb
 sudo install bin/csb /usr/local/bin/     # optional
 ```
 
-`make check` runs gofmt, `go vet` and the tests. State lives under `$CSB_HOME`
+`make check` runs gofmt, `go vet` and the unit tests — no Docker, no engine.
+`make e2e CSB_E2E_BUILD=~/cubrid/install.out` runs the whole surface against a
+real build: it creates a cluster, breaks it every way the tool knows, returns
+service to the original master and destroys it, asserting on the JSON envelopes
+rather than on printed text. Run it against an engine build before trusting the
+tool with one. State lives under `$CSB_HOME`
 (default `~/.local/share/csb`), one directory per cluster holding its `describe`
 artifact and its run record.
 

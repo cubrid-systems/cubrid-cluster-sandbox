@@ -221,6 +221,25 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		return nil, Failed("store_unwritable", "%v", err)
 	}
+	// The network comes before the artifact, because the ping host is resolved
+	// from it and the artifact has to carry what the cluster was actually built
+	// with -- a describe that omits the ping host describes a different cluster.
+	if err := d.EnsureNetwork(c.Ctx, t.Network, t.Cluster); err != nil {
+		return nil, Failed("network_failed", "%v", err)
+	}
+	if t.PingMode != topology.PingNone {
+		// Resolved every time rather than taken from the artifact: an address is
+		// local to the machine that issued it, so a describe rebuilt elsewhere
+		// carries a gateway that is not this network's.
+		gw, gerr := d.NetworkGateway(c.Ctx, t.Network)
+		if gerr != nil || gw == "" {
+			c.Note("no_ping_host", SevWarn,
+				"could not resolve a ping host from "+t.Network+": this cluster cannot diagnose a partition, and a node left alone in the group will loop in to_be_active rather than finish a promotion")
+		} else {
+			t.PingHost = gw
+		}
+	}
+
 	b, _ := json.MarshalIndent(t, "", "  ")
 	if err := os.WriteFile(c.Store.DescribePath(name), append(b, '\n'), 0o644); err != nil {
 		return nil, Failed("store_unwritable", "%v", err)
@@ -234,9 +253,6 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 		c.Note("describe_not_snapshotted", SevWarn, err.Error())
 	}
 
-	if err := d.EnsureNetwork(c.Ctx, t.Network, t.Cluster); err != nil {
-		return nil, Failed("network_failed", "%v", err)
-	}
 	uid, gid := os.Getuid(), os.Getgid()
 	for _, n := range t.Nodes {
 		if err := d.CreateNode(c.Ctx, t, n, workdir, uid, gid); err != nil {

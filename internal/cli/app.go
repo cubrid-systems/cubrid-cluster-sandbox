@@ -102,11 +102,11 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cmd, ok := lookup(noun, verb)
 	if !ok {
 		if !knownNoun(noun) {
-			fmt.Fprintf(stderr, "csb: unknown noun %q (want: %s)\n", noun, strings.Join(nouns, ", "))
-		} else {
-			fmt.Fprintf(stderr, "csb: %s has no verb %q (want: %s)\n", noun, verb, strings.Join(verbsOf(noun), ", "))
+			return early(stdout, stderr, args, noun+" "+verb, "unknown_noun",
+				fmt.Sprintf("unknown noun %q (want: %s)", noun, strings.Join(nouns, ", ")))
 		}
-		return ExitUsage
+		return early(stdout, stderr, args, noun+" "+verb, "unknown_verb",
+			fmt.Sprintf("%s has no verb %q (want: %s)", noun, verb, strings.Join(verbsOf(noun), ", ")))
 	}
 
 	code, err := dispatch(cmd, args[2:], stdout, stderr)
@@ -135,7 +135,7 @@ func dispatch(cmd Command, rest []string, stdout, stderr io.Writer) (int, error)
 
 	positional, err := parseInterspersed(fs, rest)
 	if err != nil {
-		return ExitUsage, err
+		return early(stdout, stderr, rest, cmd.key(), "usage", err.Error()), nil
 	}
 
 	st, err := store.Open()
@@ -257,4 +257,37 @@ func usage(w io.Writer) {
 	}
 	fmt.Fprintf(w, "\nglobal flags: --cluster NAME  --json  --timeout DURATION  --quiet/-q  --verbose/-v\n")
 	fmt.Fprintf(w, "environment:  CSB_HOME (state root)  CSB_CLUSTER (default --cluster)\n")
+}
+
+// wantsJSON scans the raw arguments. A failure that happens before a flag set is
+// parsed still has to answer in the shape the caller asked for.
+func wantsJSON(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "--json" || a == "-json" {
+			return true
+		}
+	}
+	return false
+}
+
+// early answers a failure that happens before a command runs -- an unknown verb,
+// a flag that does not parse -- in the envelope when one was asked for.
+//
+// It used to print to stderr and exit 2 with no envelope at all, which broke the
+// contract exactly where a consumer needs it most: it had to parse stderr to
+// tell a typo from anything else (docs/design/01-cli.md §4). The end-to-end
+// suite caught it on its first run.
+func early(stdout, stderr io.Writer, args []string, command, note, msg string) int {
+	if wantsJSON(args) {
+		e := newEnvelope(command, "", time.Now())
+		e.OK = false
+		e.note(note, SevError, msg)
+		_ = e.writeJSON(stdout)
+		return ExitUsage
+	}
+	fmt.Fprintf(stderr, "csb: %s\n", msg)
+	return ExitUsage
 }

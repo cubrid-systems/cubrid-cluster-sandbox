@@ -190,6 +190,16 @@ func (a *Assembler) haConf() []byte {
 	fmt.Fprintf(&b, "ha_node_list=%s\n", a.T.HANodeList())
 	fmt.Fprintf(&b, "ha_db_list=%s\n", a.T.DB)
 	b.WriteString("ha_apply_max_mem_size=300\nha_copy_log_max_archives=10\n")
+	// The ping parameter is written here rather than left to the user, because a
+	// cluster without one cannot diagnose a partition at all: the engine's own
+	// answer is "No hosts are registered in ha_ping_hosts ... making it
+	// impossible to determine", and a node alone in the group then loops in
+	// to_be_active instead of finishing its promotion. --ping-mode decides WHICH
+	// parameter, and an explicit --set of either one wins over both
+	// (docs/design/02-topology.md §5).
+	if k := a.pingKey(); k != "" {
+		fmt.Fprintf(&b, "%s=%s\n", k, a.T.PingHost)
+	}
 	for _, k := range sortedKeys(a.T.Parameters.HA) {
 		if k == "ha_copy_sync_mode" {
 			continue // T1: never, whatever was asked for
@@ -200,6 +210,28 @@ func (a *Assembler) haConf() []byte {
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.Hidden[k])
 	}
 	return []byte(b.String())
+}
+
+// pingKey names the parameter this topology's ping mode writes, or "" when
+// there is nothing to write: no host resolved, mode none, or the user set one of
+// the two parameters explicitly and their value is already in the file.
+func (a *Assembler) pingKey() string {
+	if a.T.PingHost == "" {
+		return ""
+	}
+	if _, ok := a.T.Parameters.HA["ha_ping_hosts"]; ok {
+		return ""
+	}
+	if _, ok := a.T.Parameters.HA["ha_tcp_ping_hosts"]; ok {
+		return ""
+	}
+	switch a.T.PingMode {
+	case topology.PingICMP:
+		return "ha_ping_hosts"
+	case topology.PingTCP:
+		return "ha_tcp_ping_hosts"
+	}
+	return ""
 }
 
 func sortedKeys(m map[string]string) []string {

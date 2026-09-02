@@ -298,3 +298,21 @@ user:
   diagnose a partition at all. A scenario may ask for it to be unset — that is
   one of the two split-brain flavours — and when it does, the deviation is named
   and travels in `describe` (principle 6 in [`README.md`](README.md)).
+
+  **The host is the docker network's gateway**, and that is a requirement rather
+  than a convenience: a ping host has to sit *outside* the pair, or a partition
+  between the two nodes takes the ping host with it and neither side can tell
+  "the peer is gone" from "I am gone". The gateway survives a route cut between
+  the nodes, which is exactly what makes `ping-survives` and `no-ping-hosts`
+  different scenarios ([`04-faults.md`](04-faults.md) §5). It is resolved on
+  every `create` rather than read back from the artifact, because an address is
+  local to the machine that issued it. `describe` carries it as `ping_host`.
+
+  **For a while nothing wrote it.** `--ping-mode icmp` was the default, was
+  recorded in `describe`, and never reached `cubrid_ha.conf`. What that cost is
+  in the engine's own words, from a node that had just been left alone in the
+  group: `[Failback] [Cancelled] No hosts are registered in ha_ping_hosts, or
+  all registered hosts are invalid, making it impossible to determine`, on a
+  loop, while the node sat in `to_be_active` instead of finishing its promotion.
+  The end-to-end suite found it on its first run
+  ([`../ROADMAP.md`](../ROADMAP.md) M3.4).
