@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 600" width="880" height="600" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="cluster-sandbox architecture: consumers, command surface, six components, the cluster, and the two evidence artifacts">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .band{font-size:9px;font-weight:700;fill:#9ca3af;letter-spacing:1.1px}
+  .h{font-size:11.5px;font-weight:700;fill:#1f2937}
+  .d{font-size:9.5px;fill:#6b7280}
+  .tag{font-size:9px;fill:#2563eb}
+  .box{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .boxp{fill:#eff6ff;stroke:#2563eb;stroke-width:1.4}
+  .boxn{fill:#f0fdf4;stroke:#1a7f37;stroke-width:1.4}
+  .hdbox{fill:#eef2f7;stroke:#d1d5db;stroke-width:1}
+  .later{fill:#fafafa;stroke:#d1d5db;stroke-width:1;stroke-dasharray:4 3}
+  .net{fill:#f9fafb;stroke:#9ca3af;stroke-width:1.2;stroke-dasharray:5 4}
+  .arw{stroke:#9ca3af;stroke-width:1.4;fill:none;marker-end:url(#a)}
+  .pill{fill:#f3f4f6;stroke:#e5e7eb;stroke-width:1}
+  .p{font-size:9px;fill:#34495e}
+  .cut{stroke:#c0392b;stroke-width:1.6;fill:none;marker-end:url(#ar)}
+</style>
+<defs>
+  <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9ca3af"/></marker>
+  <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#c0392b"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="600" fill="#ffffff"/>
+
+<text class="ttl" x="10" y="22">Architecture — six components, and the document that specifies each</text>
+<text class="sub" x="10" y="38">DESIGN.md §4 fixes the boundaries; design/ specifies the interfaces across them. Six rather than five: the load driver was not one of the survey's decisions.</text>
+
+<!-- A. consumers -->
+<text class="band" x="92" y="84" text-anchor="end">CONSUMERS</text>
+<rect class="boxp"  x="100" y="60" width="250" height="40" rx="4"/>
+<text class="h"     x="112" y="78">CLI — csb</text>
+<text class="d"     x="112" y="92">the primary surface, and the only one</text>
+<rect class="box"   x="360" y="60" width="250" height="40" rx="4"/>
+<text class="h"     x="372" y="78">cubrid-testkit</text>
+<text class="d"     x="372" y="92">consumes it; owns suites and reporting</text>
+<rect class="later" x="620" y="60" width="250" height="40" rx="4"/>
+<text class="h"     x="632" y="78" fill="#9ca3af">web front end</text>
+<text class="d"     x="632" y="92">phase 3 — over this surface, not beside it</text>
+<path class="arw" d="M 485 100 L 485 116"/>
+
+<!-- B. surface -->
+<text class="band" x="92" y="142" text-anchor="end">SURFACE</text>
+<rect class="hdbox" x="100" y="118" width="770" height="38" rx="4"/>
+<text class="h"   x="112" y="135">command surface — &lt;noun&gt; &lt;verb&gt;, role selectors, --json on every command, stable exit codes</text>
+<text class="d"   x="112" y="149">cluster · node · fault · repl · ha · load · record</text>
+<text class="tag" x="858" y="141" text-anchor="end">01-cli.md</text>
+<path class="arw" d="M 485 156 L 485 172"/>
+
+<!-- C. components -->
+<text class="band" x="92" y="240" text-anchor="end">COMPONENTS</text>
+<rect class="box" x="100" y="176" width="250" height="56" rx="4"/>
+<text class="h"   x="112" y="194">1 · Topology model</text>
+<text class="d"   x="112" y="208">presets, identity, engine source,</text>
+<text class="d"   x="112" y="220">parameters — including the hidden ones</text>
+<text class="tag" x="338" y="194" text-anchor="end">02-topology.md</text>
+
+<rect class="box" x="360" y="176" width="250" height="56" rx="4"/>
+<text class="h"   x="372" y="194">2 · Provisioner core</text>
+<text class="d"   x="372" y="208">empty directory → serving, and the</text>
+<text class="d"   x="372" y="220">seven traps it owns on your behalf</text>
+<text class="tag" x="598" y="194" text-anchor="end">03-assembly.md</text>
+
+<rect class="box" x="620" y="176" width="250" height="56" rx="4"/>
+<text class="h"   x="632" y="194">3 · Container backend</text>
+<text class="d"   x="632" y="208">NET_ADMIN, --init, ping in the image,</text>
+<text class="d"   x="632" y="220">run as you, one network to cut</text>
+<text class="tag" x="858" y="194" text-anchor="end">§4</text>
+
+<rect class="box" x="100" y="242" width="250" height="56" rx="4"/>
+<text class="h"   x="112" y="260">4 · Fault injection</text>
+<text class="d"   x="112" y="274">events and conditions, addressed by</text>
+<text class="d"   x="112" y="286">role; one whose reversal is a repair</text>
+<text class="tag" x="338" y="260" text-anchor="end">04-faults.md</text>
+
+<rect class="box" x="360" y="242" width="250" height="56" rx="4"/>
+<text class="h"   x="372" y="260">5 · Inspector</text>
+<text class="d"   x="372" y="274">tiers 1 and 2 — and a hard rule about</text>
+<text class="d"   x="372" y="286">what it is not allowed to claim</text>
+<text class="tag" x="598" y="260" text-anchor="end">05-inspect.md</text>
+
+<rect class="boxn" x="620" y="242" width="250" height="56" rx="4"/>
+<text class="h"   x="632" y="260">6 · Load driver</text>
+<text class="d"   x="632" y="274">two kinds — transactions, and</text>
+<text class="d"   x="632" y="286">contention. A rate it must hold</text>
+<text class="tag" x="858" y="260" text-anchor="end" fill="#1a7f37">06-load.md</text>
+<path class="arw" d="M 485 298 L 485 320"/>
+
+<!-- D. the cluster -->
+<text class="band" x="92" y="404" text-anchor="end">CLUSTER</text>
+<rect class="net" x="100" y="324" width="770" height="152" rx="6"/>
+<text class="d"  x="112" y="342" fill="#9ca3af">hadb-net — one user-defined network, and the only place a partition can be cut</text>
+
+<rect class="box" x="165" y="352" width="300" height="104" rx="5"/>
+<text class="h"   x="179" y="372">hadb-n1</text>
+<text class="h"   x="451" y="372" text-anchor="end" fill="#1a7f37">active</text>
+<rect class="pill" x="179" y="384" width="80" height="18" rx="9"/><text class="p" x="219" y="397" text-anchor="middle">cub_master</text>
+<rect class="pill" x="265" y="384" width="76" height="18" rx="9"/><text class="p" x="303" y="397" text-anchor="middle">cub_server</text>
+<rect class="pill" x="179" y="408" width="80" height="18" rx="9"/><text class="p" x="219" y="421" text-anchor="middle">copylogdb</text>
+<rect class="pill" x="265" y="408" width="80" height="18" rx="9"/><text class="p" x="305" y="421" text-anchor="middle">applylogdb</text>
+<text class="d"   x="179" y="444">/db mounted at the same path on both</text>
+
+<rect class="box" x="505" y="352" width="300" height="104" rx="5"/>
+<text class="h"   x="519" y="372">hadb-n2</text>
+<text class="h"   x="791" y="372" text-anchor="end" fill="#2563eb">standby</text>
+<rect class="pill" x="519" y="384" width="80" height="18" rx="9"/><text class="p" x="559" y="397" text-anchor="middle">cub_master</text>
+<rect class="pill" x="605" y="384" width="76" height="18" rx="9"/><text class="p" x="643" y="397" text-anchor="middle">cub_server</text>
+<rect class="pill" x="519" y="408" width="80" height="18" rx="9"/><text class="p" x="559" y="421" text-anchor="middle">copylogdb</text>
+<rect class="pill" x="605" y="408" width="80" height="18" rx="9"/><text class="p" x="645" y="421" text-anchor="middle">applylogdb</text>
+<text class="d"   x="519" y="444">to_be_active is a role here, not a moment</text>
+
+<path class="arw" d="M 468 396 L 501 396"/>
+<text class="d" x="485" y="389" text-anchor="middle">copy</text>
+<path class="arw" d="M 468 416 L 501 416"/>
+<text class="d" x="485" y="432" text-anchor="middle">apply</text>
+<path class="arw" d="M 485 476 L 485 498"/>
+
+<!-- E. evidence -->
+<text class="band" x="92" y="528" text-anchor="end">EVIDENCE</text>
+<rect class="box" x="100" y="502" width="380" height="52" rx="4"/>
+<text class="h"   x="112" y="520">describe — what cluster was this</text>
+<text class="d"   x="112" y="534">preset, engine identity, every non-default parameter,</text>
+<text class="d"   x="112" y="546">and what is in force: faults, load, quiesce</text>
+<text class="tag" x="468" y="520" text-anchor="end">02-topology.md §4</text>
+
+<rect class="box" x="490" y="502" width="380" height="52" rx="4"/>
+<text class="h"   x="502" y="520">record — what happened to it</text>
+<text class="d"   x="502" y="534">a timeline that separates the tool from the engine, and</text>
+<text class="d"   x="502" y="546">for every role change both intervals: measured, predicted</text>
+<text class="tag" x="858" y="520" text-anchor="end">07-record.md</text>
+
+<text class="sub" x="100" y="572">Tier 3 is a documented seam rather than a component: nothing here parses statdump, because the engine has no machine-readable contract for it yet.</text>
+<text class="sub" x="100" y="589" style="fill:#c0392b">Specified, not built. Phase 0 is the measured harness under harness/; everything above is what phase 1 and phase 2 build.</text>
+</svg>

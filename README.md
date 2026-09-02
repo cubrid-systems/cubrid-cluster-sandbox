@@ -1,4 +1,4 @@
-# cluster-sandbox
+![cluster-sandbox — multi-node CUBRID topologies for development: one command, your own build, and the states you need one for as verbs: lag, split brain, the trip back](docs/assets/banner.svg)
 
 A CLI-first provisioner that stands a CUBRID topology up in containers from a
 declarative configuration — node count and roles, engine version *or* a local
@@ -22,6 +22,20 @@ single-container *build* shell, `docker_for_ctp` drives CTP against a released
 tarball, `cubrid-testkit` is the *test harness* and treats HA as a workload
 rather than as something it provisions, and `cubrid-operator` deploys to
 production Kubernetes. Nobody provisions a development topology.
+
+## Architecture
+
+Six components and two artifacts. [`docs/DESIGN.md`](docs/DESIGN.md) §4 fixes the
+boundaries between them; [`docs/design/`](docs/design/) specifies what crosses
+each one, and the diagram says which document that is.
+
+![Architecture: consumers over one command surface, six components — topology model, provisioner core, container backend, fault injection, inspector, load driver — acting on a two-node cluster in one network, and emitting two artifacts: describe and record](docs/assets/architecture.svg)
+
+The sixth component is the late one. Phase 0 assumed a scenario brings its own
+traffic; the field's tracker showed that assumption is what left its own
+switchover measurement unusable for four years, so the load driver is a
+component with a rate contract rather than a loop in each scenario's shell
+script ([`docs/design/06-load.md`](docs/design/06-load.md)).
 
 ## Status
 
@@ -47,10 +61,12 @@ at every step where the guess is a guess, and it is meant to come back marked up
 docs/
   DESIGN.md          the design document — problem, goals, architecture, decisions
   ROADMAP.md         phases, milestones, and where the project actually is
-  design/            the design below the architecture: command surface, topology
-                     model, assembly, fault vocabulary, inspection
+  design/            01 command surface · 02 topology · 03 assembly · 04 faults
+                     05 inspection · 06 load · 07 the run record · ADR-001 language
+  requirements/      what the field asks for, from CUBRID's internal tracker
   survey/            PostgreSQL, MySQL, MongoDB, TiDB, and the CUBRID gap analysis
   findings/          what running it showed — including where it contradicted the design
+  assets/            the banner and the architecture diagram
 harness/
   Dockerfile · entrypoint.sh · lib.sh  the Phase-0 spike: one node, and the
                                        four-step assembly that makes two of them
