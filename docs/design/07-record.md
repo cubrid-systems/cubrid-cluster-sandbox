@@ -17,7 +17,7 @@ second person needs to believe a result.
 It is not a monitoring system. It is scenario-scoped, bounded, local, and
 discarded with the cluster unless exported — the same rule that keeps
 `repl watch` from becoming a second operational collector
-([`05-inspect.md`](05-inspect.md) §4). The organization's operational metrics
+([`05-inspect.md`](05-inspect.md) §5). The organization's operational metrics
 contract is a different thing with a different owner
 ([`../DESIGN.md`](../DESIGN.md) §3, §9 OQ2).
 

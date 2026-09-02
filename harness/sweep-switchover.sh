@@ -17,13 +17,14 @@ set -uo pipefail
 CSB=${CSB:-./bin/csb}
 ENGINE=${ENGINE:-/data/workspace/for-plan/importdb/cubrid/install.out}
 OUT=${OUT:-harness/results/sweep-switchover.tsv}
+REPEATS=${REPEATS:-1}
 
-[ -s "$OUT" ] || printf 'param\tvalue\tpredicted\tmeasured\tmasters_after\tcancel_reason\n' > "$OUT"
+[ -s "$OUT" ] || printf 'param\tvalue\trun\tpredicted\tmeasured\tmasters_after\tcancel_reason\n' > "$OUT"
 
-run () {                       # run <param> <value> <other-setting>
-  local param=$1 value=$2 other=$3 name="sw$(date +%s%N | tail -c 6)"
+run () {                       # run <param> <value> <other-setting> [run-no]
+  local param=$1 value=$2 other=$3 runno=${4:-1} name="sw$(date +%s%N | tail -c 6)"
   export CSB_CLUSTER=$name
-  echo "== $param=$value"
+  echo "== $param=$value  (run $runno)"
   $CSB cluster create --name "$name" --build "$ENGINE" \
        --set-hidden "$param=$value" ${other:+--set-hidden "$other"} --timeout 600s >/dev/null 2>&1 || {
     echo "   !! create failed"; return 1; }
@@ -55,17 +56,21 @@ PY
   masters=$($CSB ha status --json --timeout 30s 2>/dev/null | python3 -c 'import json,sys; print(sum(1 for n in json.load(sys.stdin)["data"]["nodes"] if n["server_state"]=="registered_and_active"))' 2>/dev/null)
   reason=$($CSB node exec all -- "grep -ho '\[Fail[a-z]*\] \[[A-Za-z]*\]' /work/\$(hostname)/cubrid/log/*master.err 2>/dev/null | tail -1" --timeout 60s 2>/dev/null | tr -d '\r' | tail -1)
 
-  printf '%s\t%s\t%s\t%s\t%s\n' "$param" "$value" "$line" "${masters:-?}" "${reason:-?}" >> "$OUT"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$param" "$value" "$runno" "$line" "${masters:-?}" "${reason:-?}" >> "$OUT"
   echo "   predicted/measured: $line   masters=$masters"
   $CSB cluster destroy --cluster "$name" --purge --timeout 180s >/dev/null 2>&1
   rm -f "$json"
 }
 
-run ha_max_heartbeat_gap 5  "ha_heartbeat_interval_in_msecs=500"
-run ha_max_heartbeat_gap 10 "ha_heartbeat_interval_in_msecs=500"
-run ha_max_heartbeat_gap 20 "ha_heartbeat_interval_in_msecs=500"
-run ha_heartbeat_interval_in_msecs 1000 "ha_max_heartbeat_gap=5"
-run ha_heartbeat_interval_in_msecs 2000 "ha_max_heartbeat_gap=5"
+# Four points, repeated. A single run per point is what left the field's own
+# measurement arguable; the baseline is what makes an outlier an effect, so it is
+# repeated too rather than assumed.
+for i in $(seq 1 "$REPEATS"); do
+  run ha_max_heartbeat_gap             5     "ha_heartbeat_interval_in_msecs=500" "$i"   # all defaults
+  run ha_max_heartbeat_gap             20    "ha_heartbeat_interval_in_msecs=500" "$i"
+  run ha_heartbeat_interval_in_msecs   2000  "ha_max_heartbeat_gap=5"             "$i"
+  run ha_calc_score_interval_in_msecs  15000 ""                                   "$i"
+done
 
 echo; column -t -s $'\t' "$OUT"
 
@@ -74,8 +79,4 @@ echo; column -t -s $'\t' "$OUT"
 # reached cub_master. The field reported that this third one is the only one it
 # could feel. If it moves the measurement, the delivery path works and the other
 # two are genuinely inert.
-if [ "${DISCRIMINATE:-}" = "1" ]; then
-  run ha_calc_score_interval_in_msecs 3000  ""
-  run ha_calc_score_interval_in_msecs 15000 ""
-  echo; column -t -s $'\t' "$OUT"
-fi
+echo; column -t -s $'\t' "$OUT"

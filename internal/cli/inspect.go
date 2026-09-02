@@ -816,3 +816,62 @@ func cmdHaResync(c *Ctx) (any, error) {
 	}
 	return out, nil
 }
+
+func checkFlags(fs *flag.FlagSet) {
+	fs.String("table", "", "marker table (default csb_canary)")
+	fs.Duration("wait", 30*time.Second, "how long the row has to arrive in")
+}
+
+// cmdReplCheck is the canary. The field verifies a rebuilt slave this way rather
+// than by reading a threshold off a gauge, and the reason is in the measurement
+// this tool can already produce: a suspended applier freezes db_ha_apply_info at
+// a healthy-looking number for as long as the stall lasts. A row does not freeze.
+func cmdReplCheck(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	master, merr := a.Resolve(c.Ctx, "master")
+	if merr != nil || len(master) != 1 {
+		return nil, Precondition("unresolved_selector", "the canary needs one active node: %v", merr)
+	}
+	standby := ""
+	if len(c.Args) > 0 {
+		names, rerr := a.Resolve(c.Ctx, c.Args[0])
+		if rerr != nil || len(names) != 1 {
+			return nil, Precondition("unresolved_selector", "%v", rerr)
+		}
+		standby = names[0]
+	} else {
+		names, rerr := a.Resolve(c.Ctx, "slave")
+		if rerr != nil || len(names) != 1 {
+			return nil, Precondition("unresolved_selector", "%v", rerr)
+		}
+		standby = names[0]
+	}
+
+	can, cerr := inspect.Check(c.Ctx, a.D, t, master[0], standby, c.str("table"), c.dur("wait"))
+	if cerr != nil {
+		return can, Failed("canary_failed", "%v", cerr)
+	}
+	if c.Record != nil {
+		_ = c.Record.Append(record.ActorTool, "repl.check", map[string]any{
+			"from": can.From, "to": can.To, "arrived": can.Arrived, "seconds": can.Seconds})
+	}
+	if !c.JSON && !c.Quiet {
+		if can.Arrived {
+			fmt.Fprintf(c.Out, "arrived on %s in %.2fs (marker %s)\n", can.To, can.Seconds, can.Marker)
+		} else {
+			fmt.Fprintf(c.Out, "NOT arrived on %s after %.0fs (marker %s written on %s)\n",
+				can.To, can.Waited, can.Marker, can.From)
+		}
+	}
+	if !can.Arrived {
+		// Exit 4 rather than 1: the write succeeded and the wait ran out, which
+		// is a different thing from the tool being unable to do its job.
+		return can, &Error{Code: ExitTimeout, Note: "canary_did_not_arrive",
+			Msg: fmt.Sprintf("the marker did not reach %s within %s; replication is not carrying writes, whatever db_ha_apply_info says",
+				can.To, c.dur("wait"))}
+	}
+	return can, nil
+}

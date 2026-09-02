@@ -137,7 +137,37 @@ been handed to the organization's CUBRID Ops work as an input to its metrics
 contract, which needs the master's append position in it and not only the
 slave's applied position.
 
-## 4. `repl watch` — retention, and why
+## 4. `repl check` — a write that has to arrive
+
+```
+csb repl check [<selector>] [--wait 30s] [--table csb_canary]
+```
+
+Everything above this line reads a gauge. This writes a marker on the master and
+waits for it on the standby, and it is here because **the field verifies a
+rebuilt slave exactly this way** — `applyinfo -r … -a` alongside a `repl_test`
+table they create and insert into
+([`../requirements/01-failback-field-evidence.md`](../requirements/01-failback-field-evidence.md) §4).
+They do not read a threshold off a gauge; they ask the pipeline to carry
+something and watch it land.
+
+The reason that is better judgement than instrumentation is §3. A suspended
+applier freezes `db_ha_apply_info` at a constant, healthy-looking lag for as long
+as the stall lasts, and a suspended copier makes the reported lag read zero. **A
+row does not freeze.** It arrives or it does not, and the check reports which,
+with the time it took.
+
+Measured, on one cluster, minutes apart. Healthy: **arrived in 0.63 s**. With the
+applier suspended, the gauge reads `copy=0 pages behind`, `apply_lag=0`,
+`fail=0` — every number says the cluster is fine — and the row **does not arrive
+in 15 s**. That screen is the argument for this verb.
+
+Not arriving is **exit 4**, not 1: the write succeeded and the wait ran out,
+which is a different fact from the tool being unable to do its job. The table is
+created once and reused, because creating it per check would put a DDL through
+replication every time and measure something else.
+
+## 5. `repl watch` — retention, and why
 
 ```
 csb repl watch [--interval 0.5s] [--for 60s] [--out FILE]
@@ -152,7 +182,7 @@ collector.
 The retained series carries both stages and both provenances, or it inherits
 every problem in §3 with a timestamp attached.
 
-## 5. `cluster status`
+## 6. `cluster status`
 
 One command, the whole topology, T1 and T2 together:
 

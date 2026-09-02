@@ -129,13 +129,34 @@ func (d *Driver) Start(ctx context.Context, s Spec) error {
 	if res.ExitCode != 0 {
 		return fmt.Errorf("could not start the driver: %s", strings.TrimSpace(res.Stderr))
 	}
+	// Keep the pid. Stopping by pattern would mean pkill -f, and a pattern
+	// matched against full command lines also matches the shell running the
+	// pkill -- its own command line contains the pattern. The shell dies first
+	// and everything after it in the command never runs.
+	pid := strings.TrimSpace(lastLine(res.Stdout))
+	if pid != "" {
+		_ = os.WriteFile(filepath.Join(nodeDir, "load.pid"), []byte(pid+"\n"), 0o644)
+	}
 	return nil
 }
 
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
+}
+
+// Stop signals the driver by pid, and gives it a moment to write its final
+// status: the last line of a run is the one that says whether the rate held.
 func (d *Driver) Stop(ctx context.Context, node string) error {
-	// By name, never with pkill -f: a pattern matched against full command lines
-	// also matches the shell running the pkill.
-	_, err := d.D.Exec(ctx, node, d.T.DB, "pkill -f load-driver.py >/dev/null 2>&1; sleep 1; true")
+	b, err := os.ReadFile(filepath.Join(d.Workdir, node, "load.pid"))
+	if err != nil {
+		return nil // nothing was started here
+	}
+	pid := strings.TrimSpace(string(b))
+	if pid == "" {
+		return nil
+	}
+	_, err = d.D.Exec(ctx, node, d.T.DB, "kill "+pid+" 2>/dev/null; sleep 2; kill -9 "+pid+" 2>/dev/null; true")
 	return err
 }
 

@@ -205,3 +205,84 @@ func (s *Status) Serving() bool {
 	}
 	return active == 1
 }
+
+// Canary is a write that has to arrive. It is the field's own verification for a
+// rebuilt slave -- create and insert into a marker table, then confirm it lands
+// -- and it is worth having as a verb because it tests the path end to end
+// rather than reading db_ha_apply_info, which §3 says cannot be trusted alone.
+//
+// A gauge can freeze at a healthy-looking number while replication is stopped.
+// A row either arrives or it does not.
+type Canary struct {
+	Table    string  `json:"table"`
+	Marker   string  `json:"marker"`
+	From     string  `json:"from"`
+	To       string  `json:"to"`
+	Arrived  bool    `json:"arrived"`
+	Seconds  float64 `json:"seconds,omitempty"`
+	Waited   float64 `json:"waited_seconds"`
+	LastSeen string  `json:"last_error,omitempty"`
+}
+
+// Check writes a marker on master and waits for it on standby.
+func Check(ctx context.Context, d *backend.Docker, t *topology.Topology, master, standby, table string, wait time.Duration) (*Canary, error) {
+	if table == "" {
+		table = "csb_canary"
+	}
+	marker := fmt.Sprintf("csb-%d", time.Now().UnixNano())
+	c := &Canary{Table: table, Marker: marker, From: master, To: standby}
+
+	// The table is created once and reused: creating it every check would put a
+	// DDL through replication each time, which is a different thing to measure.
+	//
+	// The result is checked rather than discarded. A canary whose setup fails
+	// quietly is worse than no canary -- the first draft swallowed a syntax
+	// error and reported "the marker could not be written", which is true and
+	// says nothing about why.
+	cr, cerr := d.Exec(ctx, master, t.DB,
+		"csql -u dba -t -N -c \"CREATE TABLE "+table+" (m VARCHAR(64) PRIMARY KEY, seen DATETIME)\" "+t.DB+" 2>&1")
+	if cerr == nil && cr.ExitCode != 0 && !strings.Contains(cr.Stdout, "already exists") {
+		return c, fmt.Errorf("the marker table %s could not be created on %s: %s",
+			table, master, firstError(cr.Stdout))
+	}
+
+	start := time.Now()
+	res, err := d.Exec(ctx, master, t.DB,
+		"csql -u dba -t -N -c \"INSERT INTO "+table+" VALUES ('"+marker+"', SYS_DATETIME)\" "+t.DB)
+	if err != nil {
+		return c, err
+	}
+	if res.ExitCode != 0 {
+		c.LastSeen = strings.TrimSpace(res.Stderr)
+		return c, fmt.Errorf("the marker could not be written on %s: %s", master, c.LastSeen)
+	}
+
+	deadline := time.Now().Add(wait)
+	for {
+		q, qerr := d.Exec(ctx, standby, t.DB,
+			"csql -u dba -t -N -c \"SELECT count(*) FROM "+table+" WHERE m='"+marker+"'\" "+t.DB+" 2>/dev/null")
+		if qerr == nil && q.ExitCode == 0 && strings.Contains(q.Stdout, "1") {
+			c.Arrived = true
+			c.Seconds = time.Since(start).Seconds()
+			break
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	c.Waited = time.Since(start).Seconds()
+	return c, nil
+}
+
+// firstError picks the line a person needs out of csql's output, which leads
+// with connection notifications before it gets to the problem.
+func firstError(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		l := strings.TrimSpace(line)
+		if strings.HasPrefix(l, "ERROR:") || strings.HasPrefix(l, "Syntax error:") {
+			return l
+		}
+	}
+	return strings.TrimSpace(out)
+}

@@ -62,6 +62,8 @@ var registry = []Command{
 
 	// ---- repl ------------------------------------------------------------
 	{Noun: "repl", Verb: "status", Summary: "both stages, against the master", Run: cmdReplStatus},
+	{Noun: "repl", Verb: "check", Args: "[<selector>]", Summary: "a write that has to arrive", Mutates: true,
+		Flags: checkFlags, Run: cmdReplCheck},
 	{Noun: "repl", Verb: "watch", Summary: "sample and retain", Run: notYet("05-inspect.md")},
 
 	// ---- ha --------------------------------------------------------------

@@ -120,7 +120,7 @@ have to be decided *with* testkit rather than guessed at ahead of it:
 
 Building against an imagined consumer is how a surface ends up fitting nobody.
 
-| M3.2 | **Replication canary** — `repl check`, a write that has to arrive | the field verifies a rebuilt slave with `applyinfo -r … -a` and a `repl_test` table it creates and inserts into, rather than by reading a threshold off a gauge ([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §4). It is cheap, it is what an operator actually trusts, and it tests the path end to end rather than the view §3 of `design/05-inspect.md` says cannot be trusted alone |
+| M3.2 | **Replication canary** — `repl check`, a write that has to arrive — **done 2026-09-02**. Measured on one cluster minutes apart: healthy, the row arrives in **0.63 s**; with the applier suspended the gauge reads `apply_lag=0` and `fail=0` while the row does not arrive in 15 s, exit 4. Every number says fine and nothing is moving | the field verifies a rebuilt slave with `applyinfo -r … -a` and a `repl_test` table it creates and inserts into, rather than by reading a threshold off a gauge ([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §4). It is cheap, it is what an operator actually trusts, and it tests the path end to end rather than the view §3 of `design/05-inspect.md` says cannot be trusted alone |
 
 ### Also phase 3 — skeletal
 
