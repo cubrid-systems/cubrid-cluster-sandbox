@@ -8,3 +8,6 @@ out/
 csql.err
 
 .omc/
+
+# build output
+bin/

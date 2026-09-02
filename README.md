@@ -8,8 +8,9 @@ are master, and the return trip after a failover.
 For engine developers, QA, and external contributors. Part of
 [CUBRID Systems Research](https://github.com/cubrid-systems).
 
-> **Where it is:** phase 0. The design is written and the assembly runs as a
-> shell harness; the tool itself is not built yet — see [Status](#status).
+> **Where it is:** phase 1 has started. The command surface, its JSON envelope
+> and its exit codes are built and tested; the verbs behind them are not. See
+> [Status](#status).
 
 ## The surface being built
 
@@ -27,9 +28,13 @@ csb cluster describe --out cluster.yaml        # stands the same cluster up else
 ```
 
 Every command has a `--json` form and a documented exit code, because
-`cubrid-testkit` provisions through this surface rather than screen-scraping it.
-Specified in [`docs/design/01-cli.md`](docs/design/01-cli.md) — **none of it runs
-yet.** What runs today is the harness in [`harness/`](harness/).
+`cubrid-testkit` provisions through this surface rather than screen-scraping it
+([`docs/design/01-cli.md`](docs/design/01-cli.md)).
+
+**The surface is built; most of the verbs behind it are not.** A verb that is
+specified and not yet implemented exits 1 with a `not_implemented` note rather
+than pretending — never exit 2, because a consumer has to tell a gap from a typo.
+What provisions a cluster today is the shell harness in [`harness/`](harness/).
 
 ## Why it exists
 
@@ -105,6 +110,19 @@ harness/
   failback.sh · failback-demo.sh       the failback artifact, and a rig that proves it runs
   results/                             captured console output and samples
 ```
+
+## Building
+
+Go and a POSIX shell are the whole toolchain; there is nothing else to install.
+
+```bash
+make check     # gofmt, go vet, go test
+make dist      # a static binary at bin/csb
+./bin/csb --help
+```
+
+State lives under `$CSB_HOME` (default `~/.local/share/csb`), one directory per
+cluster holding its `describe` artifact and its run record.
 
 ## Running the harness
 

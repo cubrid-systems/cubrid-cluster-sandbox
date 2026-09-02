@@ -222,10 +222,14 @@ Three rules that come from measurement rather than taste:
   the copy stage cannot be measured because the master is unreachable, the field
   is `null` and `notes` says why. It is never zero.
 - **`notes` is machine-readable too** — a list of `{code, severity, message}`,
-  not prose. `stale_apply_info`, `no_master_reference`, `fault_active`,
+  not prose. Severity is `info`, `warn` or `error`: a consumer has to tell "this
+  number is missing and here is why" from "this run is not trustworthy".
+  `stale_apply_info`, `no_master_reference`, `fault_active`,
   `ambiguous_apply_info`, `load_rate_not_held`, `quiesce_active`,
-  `hidden_parameter_set` and `clock_skew` are the codes so far, and each
-  corresponds to something that was observed or measured.
+  `hidden_parameter_set` and `clock_skew` are the measurement codes, and each
+  corresponds to something that was observed. The operational ones are
+  `no_such_cluster`, `no_describe`, `stale_state`, `docker_unavailable` and
+  `not_implemented`.
 - **Timestamps are the sample's, not the report's.** A `repl status` that
   reports a row `applylogdb` wrote four seconds ago says so, because during an
   apply stall that row stops moving while looking perfectly healthy.
@@ -272,12 +276,23 @@ code of the command that was supposed to cause it.**
 ## 7. Global flags
 
 ```
---cluster NAME     which cluster (default: the only one, or the one in cwd)
+--cluster NAME     which cluster (default: $CSB_CLUSTER)
 --json             structured output
---timeout DURATION override the default bound on any engine wait
+--timeout DURATION override the default bound on any engine wait (default 180s)
 --quiet / -q       suppress progress, keep errors
 --verbose / -v     show the engine commands being run
+--version          the binary's version, without needing a noun
 ```
+
+Two environment variables, because a path and a default cluster are not worth a
+flag on every invocation: **`CSB_HOME`** is the state root, holding one directory
+per cluster with its `describe` artifact and its record (default
+`~/.local/share/csb`), and **`CSB_CLUSTER`** supplies `--cluster` when it is
+absent.
+
+A verb the surface defines and this phase has not built exits **1** with a
+`not_implemented` note — not 2. The command exists, so "unknown verb" would be a
+lie, and a consumer needs to tell a gap from a typo.
 
 `--verbose` is worth its keep for a tool whose main value is knowing an ordering
 a user does not: seeing what it ran is how somebody learns the assembly, and how

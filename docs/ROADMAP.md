@@ -15,8 +15,10 @@ says what order they get built in and where the project is.
 
 ## Where it is
 
-**Phase 0 complete (2026-08-27).** Phase 1 not started. One external dependency
-is outstanding and it shapes phase 1 rather than blocking it — see *Open* below.
+**Phase 0 complete (2026-08-27). Phase 1 started 2026-09-02** with M1.1, which
+doubles as the validation slice for the language decision. One external
+dependency is outstanding and it shapes phase 1 rather than blocking it — see
+*Open* below.
 
 ## Phase 0 — baseline, spike, and the question for the technical team ✅
 
@@ -42,7 +44,7 @@ verification needed, and can ask it what state it is in.
 
 | # | Item | Acceptance |
 |---|---|---|
-| M1.1 | Command surface and machine-readable output (`design/01-cli.md`) | every command has a `--json` form; exit codes are documented and stable |
+| M1.1 | Command surface and machine-readable output (`design/01-cli.md`) | **done 2026-09-02** — every command has a `--json` form, the envelope is one type, and the exit codes are implemented and tested. The verbs behind the surface are M1.2–M1.7; until they land each exits 1 with a `not_implemented` note rather than pretending |
 | M1.2 | Topology model — the `ha` preset, node count, per-node overrides (`design/02-topology.md`) | a two-node HA cluster from one command and one configuration input |
 | M1.3 | Container backend — image, network, run-as-invoking-user, `NET_ADMIN`, `--init` | a host-built `install.out` runs by path with no image build |
 | M1.4 | Assembly — config generation, the slave chain, start ordering (`design/03-assembly.md`) | zero manual interventions; a first-time user needs no ordering knowledge |
