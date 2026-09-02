@@ -2,3 +2,8 @@ arm	run	master_state_after_up	apply_eof	apply_final	stalled
 A	1	registered_and_active	?	?	no
 B	1	registered_and_active	?	?	no
 C	1	registered_and_active	?	?	no
+D	1	registered_and_active	?	?	no
+A	1	registered_and_active	?	?	no
+B	1	registered_and_active	?	?	no
+C	1	registered_and_active	?	?	no
+D	1	registered_and_active	?	?	no

@@ -128,35 +128,32 @@ zombie answers yes. In a container this means the node needs a reaping PID 1 —
 must decide on the observed roles
 ([`../findings/failback.md`](../findings/failback.md)).
 
-**And a cleanly stopped group does not come back on its own.** `cluster down`
-followed by `cluster up` leaves the original master holding
-`registered_and_to_be_active` indefinitely, refusing writes, with its applier
-fully drained. Measured 2026-09-02 -- three times on one cluster, and **not
-reproduced on a second built the same way**, so the deciding variable is not yet
-isolated and what follows is the mechanism the lab described rather than a
-demonstrated cause: the promotion to `active` is *requested by `applylogdb`* when
-it meets the `dead` record `copylogdb` writes on detecting the peer's death. Stop
-both nodes gracefully and nobody died — so there is no dead record, nothing to
-meet, and no request. Starting the master alone does not help; the state is not
-about the peer being absent, it is about the request never being made.
+**A cleanly stopped group does come back — and the run that once said otherwise
+was this tool's own bug.** For a while this section reported that `cluster down`
+followed by `cluster up` left the original master holding
+`registered_and_to_be_active` indefinitely, three times on one cluster and never
+on a second. It was isolated on 2026-09-02 and the deciding variable was ours: at
+the time, `up` **re-seeded the standby**, copying the master's volumes over a
+database that had been serving and replicating since. With that fixed, four arms
+— idle, under load until the moment of the stop, master stopped first, standby
+stopped first — came back `registered_and_active` every time
+([`../../harness/isolate-to-be-active.sh`](../../harness/isolate-to-be-active.sh)).
 
-The one visible difference between the cluster that showed it and the one that
-did not is the applier's outstanding work — 178 against 176 that never closed,
-versus 176/176 — which points at a stalled applier rather than at a missing dead
-record. That is an open question, recorded rather than resolved.
+The applier's outstanding work looked like the variable and was not. The affected
+cluster sat at 178 against 176 while the clean one was at 176/176, which is a
+difference you can see; arm B holds a load until the stop and comes back cleanly
+anyway. **A shared symptom is not a shared cause**, which is the part worth
+keeping.
 
-Two negative results bound it. `cubrid heartbeat stop` on both nodes does **not**
-produce it — the group is back to `active` within five seconds — and on the
-second cluster neither did `cubrid service stop`. The one visible difference
-between the cluster that showed it and the one that did not is the applier's
-outstanding work: 178 against 176, never closing, versus 176/176. That points at
-an applier that cannot drain rather than at a missing dead record, and it is
-recorded as an open question rather than resolved.
+The field's own `to_be_active` outage stands and is a separate matter
+([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §3):
+eight hours of refused writes, caused by a wrong `db_ha_apply_info` row sending
+the applier after an archive that had been deleted. The state is real. Our route
+into it was not, and an engine that declines to complete a promotion onto a
+database somebody overwrote underneath it is behaving correctly.
 
-This is the same symptom as the field's eight-hour outage
-([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §3)
-reached by a different route, and it is one answer to the analysis that report
-asked for: **a graceful restart is a condition that produces `to_be_active`.**
+The tool still completes a promotion that is stuck, because the state is real
+even where our reproduction of it was not.
 
 `cubrid changemode -m active -f` completes it. The tool runs that only when it
 can show the move is safe — the applier drained (`eof == final`) and

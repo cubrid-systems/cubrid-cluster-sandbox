@@ -433,13 +433,15 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 		if st == "registered_and_active" {
 			break
 		}
-		// T9 -- a cleanly stopped group does not come back on its own. The
-		// promotion to active is requested by applylogdb when it meets the "dead"
-		// record copylogdb writes on detecting the peer's death. Stop both nodes
-		// gracefully and nobody died, so there is no dead record, nothing to meet,
-		// and the node holds registered_and_to_be_active indefinitely -- refusing
-		// writes, with a fully caught-up applier. Measured 2026-09-02; it is the
-		// same symptom as the field's eight-hour outage by a different route.
+		// A node can hold to_be_active for a long time: the field has one that
+		// did for eight hours, refusing writes, because a wrong db_ha_apply_info
+		// row sent its applier after an archive that had been deleted.
+		//
+		// This project's own reproduction of that turned out to be a bug in this
+		// tool -- up used to re-seed a live standby -- and a graceful restart
+		// comes back cleanly now. The completion below stays because the state is
+		// real even though our route into it was not, and because it fires only
+		// when it can show the move is safe.
 		if st == "registered_and_to_be_active" {
 			stuck++
 			if stuck >= 5 { // ~10 s of it, which is well past the normal transit
