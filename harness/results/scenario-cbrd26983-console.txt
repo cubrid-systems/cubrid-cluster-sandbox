@@ -1,0 +1,28 @@
+== 0/5  start from nothing (the scenario asserts an id sequence, so it needs a fresh serial)
+== 1/5  build the cluster
+  cbrd-n2          slave      registered_and_standby
+== 2/5  a table with an AUTO_INCREMENT, and two rows
+   ids so far: 1 2 
+== 3/5  role change 1: kill cbrd-n1
+   roles now: n1=unknown n2=active
+   ids so far: 1 2 21 22 
+   bringing cbrd-n1 back so the next role change has somewhere to go
+== 3/5  role change 2: kill cbrd-n2
+   roles now: n1=active n2=unknown
+   ids so far: 1 2 21 22 41 42 
+   bringing cbrd-n2 back so the next role change has somewhere to go
+== 3/5  role change 3: kill cbrd-n1
+   roles now: n1=unknown n2=active
+   ids so far: 1 2 21 22 41 42 61 
+== 4/5  the sequence
+   measured: 1 2 21 22 41 42 61
+   expected: 1 2 21 22 41 42 61
+   ✓ reproduced
+== 5/5  what the record says about it
+wrote /tmp/cbrd-run.json (20 entries, 4 role change(s), valid=true)
+note: engine_events_harvested: 9 engine line(s) added to the timeline
+   role changes: 4
+     cbrd-n1  measured=28.9s  predicted=2.5s  trigger=command.cluster.create
+     cbrd-n2  measured=5.1s  predicted=2.5s  trigger=node.kill
+     cbrd-n1  measured=5.9s  predicted=2.5s  trigger=node.kill
+     cbrd-n2  measured=6.9s  predicted=2.5s  trigger=node.kill

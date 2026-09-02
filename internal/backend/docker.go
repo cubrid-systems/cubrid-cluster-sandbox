@@ -132,8 +132,20 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir string, uid, gid
 }
 
 // CreateNode makes one container's directories and starts it.
+//
+// It is resumable, because create is: a run that died half way leaves containers
+// behind, and the answer is to pick up from the state found rather than to make
+// the user clean up first (docs/design/03-assembly.md §1). An existing container
+// is started if it is stopped and left alone if it is running.
 func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topology.Node, workdir string, uid, gid int) error {
 	if err := os.MkdirAll(filepath.Join(workdir, node.Name, "db"), 0o755); err != nil {
+		return err
+	}
+	if res, err := d.R.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", node.Name); err == nil && res.ExitCode == 0 {
+		if strings.TrimSpace(res.Stdout) == "true" {
+			return nil
+		}
+		_, err := d.docker(ctx, "start", node.Name)
 		return err
 	}
 	_, err := d.docker(ctx, NodePlan(t, node, workdir, uid, gid)...)
