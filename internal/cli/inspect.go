@@ -9,6 +9,7 @@ import (
 
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/fault"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/inspect"
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/load"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 )
 
@@ -348,6 +349,33 @@ func describeWithFaults(c *Ctx, doc map[string]any) map[string]any {
 	var raw any
 	_ = json.Unmarshal(b, &raw)
 	doc["faults"] = raw
+	return doc
+}
+
+// describeWithLoad does the same for the workload. A cluster reproducing a bug
+// under 2000 inserts a second is not the same cluster as an idle one
+// (docs/design/06-load.md §7).
+func describeWithLoad(c *Ctx, doc map[string]any) map[string]any {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return doc
+	}
+	d := &load.Driver{D: a.D, T: t, Workdir: a.Workdir}
+	for _, n := range t.Nodes {
+		st, serr := d.Status(n.Name)
+		if serr != nil || st == nil || !st.Running {
+			continue
+		}
+		spec, _ := d.Spec(n.Name)
+		if spec == nil {
+			continue
+		}
+		b, _ := json.Marshal(spec)
+		var raw any
+		_ = json.Unmarshal(b, &raw)
+		doc["load"] = raw
+		return doc
+	}
 	return doc
 }
 

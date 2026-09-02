@@ -70,9 +70,9 @@ var registry = []Command{
 	{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Run: notYet("04-faults.md")},
 
 	// ---- load ------------------------------------------------------------
-	{Noun: "load", Verb: "start", Summary: "a rate it has to hold", Mutates: true, Run: notYet("06-load.md")},
-	{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Run: notYet("06-load.md")},
-	{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Run: notYet("06-load.md")},
+	{Noun: "load", Verb: "start", Summary: "a rate it has to hold", Mutates: true, Flags: loadStartFlags, Run: cmdLoadStart},
+	{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStop},
+	{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStatus},
 
 	// ---- record ----------------------------------------------------------
 	{Noun: "record", Verb: "show", Summary: "the timeline", Run: cmdRecordShow,
@@ -185,6 +185,7 @@ func cmdClusterDescribe(c *Ctx) (any, error) {
 		return nil, Failed("describe_malformed", "%s is not valid JSON: %v", c.Store.DescribePath(c.Cluster), err)
 	}
 	doc = describeWithFaults(c, doc)
+	doc = describeWithLoad(c, doc)
 	b, _ = json.MarshalIndent(doc, "", "  ")
 	if !c.JSON && !c.Quiet {
 		c.Out.Write(b)

@@ -52,11 +52,19 @@ So the profile, not a scale factor, is the first argument.
 ## 2. Shape
 
 ```
-csb load start [--profile insert] [--rate 2000/s] [--concurrency 4]
-               [--for 60s] [--table t] [--seed 42] [--require-rate]
+csb load start [--profile insert] [--rate 2000/s] [--concurrency 4] [--batch 200]
+               [--for 60s] [--table t] [--seed 42] [--node master] [--require-rate]
 csb load stop
 csb load status
 ```
+
+**`--batch` separates volume from rate, and the two are reported separately.**
+The rate contract counts *statements*; a statement can carry many rows. Measured
+on the first implementation: 281 statements/s single-row is the ceiling, because
+each one is a process the driver spawns, and 100 statements/s at `--batch 200`
+is **14,141 rows/s** — enough to build a replication backlog, which single-row
+inserts at that ceiling are not. A driver that reported one number for both could
+not say which of them it had failed to hold.
 
 `load` is the sixth noun ([`01-cli.md`](01-cli.md) §1), because it is a thing a
 user holds in their head separately from the cluster, the faults and the
@@ -86,7 +94,8 @@ Three consequences:
 
 - **`--require-rate` makes a miss an error** (exit 1,
   [`01-cli.md`](01-cli.md) §6) rather than a footnote, for the runs where the
-  rate is a premise instead of an observation.
+  rate is a premise instead of an observation. Measured: asking for 500/s and
+  getting 85.6/s exits 1 and says so in a note.
 - **A run whose load did not hold its rate is marked invalid in the record**,
   with the reason, and the record does not leave the reader to infer it
   ([`07-record.md`](07-record.md) §4).
