@@ -143,7 +143,7 @@ correct configuration**:
 |---|---|---|---|
 | `ping-survives` (default) | `ha_ping_hosts` set, ping host reachable from both | `[Failback] [Cancelled] Ping check succeeded … determining that it is not a network partition` | 9 s |
 | `no-ping-hosts` | `ha_ping_hosts` unset — the default a real deployment starts from | `[Failback] [Cancelled] No hosts are registered in ha_ping_hosts …` | 13 s |
-| `calc-score-window` | `ha_calc_score_interval_in_msecs` raised | **unmeasured** — reported, not reproduced here | for the length of the interval |
+| `calc-score-window` | `ha_calc_score_interval_in_msecs` raised | the cancel reason is still whichever of the two above the ping config gives; this flavour is about what happens **after** the heal | the split as above; then **~12 s** of Active-Active at 15000 ms, against ~1 s at the default ([`../findings/active-active-window.md`](../findings/active-active-window.md)) |
 
 The asymmetry is in one function. A **master** cancels its failback when
 `ping_try_count == 0` **or** the ping succeeded; a **slave** cancels its failover
@@ -153,8 +153,8 @@ survives the partition satisfies both cancel-nots at once — the master reads
 nothing stops me, promote". **A single ping host is a quorum of one, and it votes
 for whoever asks it.**
 
-**The third flavour is a different anomaly wearing the same name, and this
-project has not reproduced it.** The field's own hidden-parameter test reports
+**The third flavour is a different anomaly wearing the same name, and it now
+reproduces — one half of it.** The field's own hidden-parameter test reports
 that with
 `ha_calc_score_interval_in_msecs` raised, a cluster whose slave was promoted
 during a partition runs **Active-Active for the length of that interval once the
@@ -164,8 +164,29 @@ master describing itself as `to-be-master`. Both are recorded as `특이사항` 
 test that could not tell an engine behaviour from a test artefact, which is why
 that ticket has been open since 2022 and why this flavour is the one to build
 first ([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §2).
-Until it reproduces, the table's last row is a claim from the tracker, and the
-tool should say so.
+Measured 2026-09-03, six runs, three per arm
+([`../findings/active-active-window.md`](../findings/active-active-window.md)).
+**The window is real and it is the length of the interval**: both nodes accepted
+writes for 11, 12 and 12 seconds with the interval at 15000 ms, against 2, 1 and
+0 at the default, and the first second at which only one node still accepted a
+write was 13, 13, 13 against 4, 2, 1. Every run ended with the original roles
+restored, so the parameter does not prevent recovery — it lengthens the interval
+in which two nodes accept writes.
+
+**"Syncing both ways" is not what happens.** Rows crossed in one direction only,
+and it is the opposite one from the settled roles: the promoted slave's row came
+back to the restored master in five of six runs, and the master's row reached the
+slave in none. What is left is a permanent divergence that `repl status`,
+`repl check` and `ha resync` all call healthy — because replication is healthy;
+it simply never carried one row and no view remembers that. **A master calling
+itself `to-be-master` was not observed in any of the six**, which is recorded as
+unreproduced rather than dismissed.
+
+The consequence for anyone tuning: `ha_calc_score_interval_in_msecs` is the one
+parameter shown to move the switchover threshold
+([`../findings/switchover-threshold.md`](../findings/switchover-threshold.md)) and
+it widens this window by the same amount. Any recommendation to raise it has to
+say both.
 
 **The flavour follows from the configuration, so the tool refuses to fake one.**
 Asking for `ping-survives` on a cluster with no `ha_ping_hosts` is a request the

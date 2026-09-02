@@ -162,6 +162,17 @@ applier suspended, the gauge reads `copy=0 pages behind`, `apply_lag=0`,
 `fail=0` — every number says the cluster is fine — and the row **does not arrive
 in 15 s**. That screen is the argument for this verb.
 
+**What it proves is that the path is open, and nothing more than that.** A
+healed split brain leaves the two databases holding different rows — measured, one
+direction only, five of six runs
+([`../findings/active-active-window.md`](../findings/active-active-window.md)) —
+and on that cluster the canary arrives, `apply_lag` is 0 on both sides and
+`ha resync` correctly reports that replication is not broken. It is not: it is
+carrying new writes fine. It simply never carried one old one. **A canary cannot
+prove the two databases are the same**, and a healed split brain needs a
+divergence check — row counts, or the comparison `ha resync --path table` makes
+— rather than a lag check or this one.
+
 Not arriving is **exit 4**, not 1: the write succeeded and the wait ran out,
 which is a different fact from the tool being unable to do its job. The table is
 created once and reused, because creating it per check would put a DDL through

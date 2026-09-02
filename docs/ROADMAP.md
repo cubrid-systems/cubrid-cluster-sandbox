@@ -29,6 +29,13 @@ What that apparatus was for: the switchover threshold the field asked to have
 validated in 2021 and could not measure has been measured
 ([`findings/switchover-threshold.md`](findings/switchover-threshold.md)).
 
+**The last unmeasured row of the split-brain table is measured.** The
+Active-Active window after a healed partition is real and is as long as
+`ha_calc_score_interval_in_msecs` — about 12 s at 15000 against about 1 s at the
+default, three runs each. What it leaves is not the reported "data syncing both
+ways" but a one-directional merge and a permanent divergence that every gauge
+calls healthy ([`findings/active-active-window.md`](findings/active-active-window.md)).
+
 **The surface verifies itself.** `make e2e CSB_E2E_BUILD=…` drives the whole
 thing against a real engine in about two minutes and found three defects on its
 first run — see M3.4. Two of them had been in the tree for weeks, one of them
@@ -116,6 +123,7 @@ every other threshold value is **one cluster** —
 
 | M3.3 | **The six verbs the surface named and had not built** | **done 2026-09-03** — measured on one cluster in a single unattended run. `ha promote` moved the role in **1.8 s** and reported that `cubrid heartbeat stop` had not returned yet, which is the phase-0 finding turned into a note: the roles are the evidence, not the exit status. `ha failback` returned service in **2.5 s** and verified it with a write that arrived on the rejoined node in **0.09 s** — roles alone say the group agrees, not that replication carries anything. `repl watch` under an apply stall recorded `copy 0→16, rose at +1.3s` while `apply` sat flat at 0, which is §3's lie with a timestamp on it. `node logs` names the process and finds the file; `fault ping-unavailable --mechanism binary` produced `rc=126` from a running node and `clear` put the binary back at its original mode |
 
+| M3.5 | **The third split-brain flavour, measured** (`harness/calc-score-window.sh`) | **done 2026-09-03** — six runs, three per arm. The window is the interval: both nodes accepted writes for 11/12/12 s at `ha_calc_score_interval_in_msecs=15000` against 2/1/0 s at the default, and the roles settled at 13/13/13 s against 4/2/1. The reported both-ways sync did not happen — rows crossed one way only, the wrong way relative to the settled roles, and the standby is left permanently missing a row while `repl status`, `repl check` and `ha resync` all report a healthy cluster. `to-be-master` was not observed in any run and is recorded as unreproduced rather than dismissed ([`findings/active-active-window.md`](findings/active-active-window.md)) |
 | M3.4 | **The surface verifies itself against a real engine** (`e2e/`, `make e2e`) | **done 2026-09-03** — twelve checks in one unattended run of about two minutes: create, both provenances, the canary, a stalled stage seen through `repl watch`, both ping mechanisms, a dropped-packet partition, `down`/`up`, promote, failback, the record's ordering and the exit codes. It asserts on the JSON envelope rather than on printed text, because the envelope is the contract and prose is free to change. Not part of `make check` — it needs Docker, an engine tree and several minutes — and not optional either |
 
 **Three defects on its first run, and one of them had been costing 57 seconds.**
