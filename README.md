@@ -156,11 +156,15 @@ answered by measurement rather than by reading:
 reads, edits, or runs on a real host stays shell
 ([ADR-001](docs/design/ADR-001-implementation-language.md)).
 
-**Open, and not this project's to close:** what the technical team requires of the
-return trip to the original master. [`harness/failback.sh`](harness/failback.sh)
-encodes this project's guess at that sequence, with a decision point at every step
-where the guess is a guess. It goes to them to be marked up, and the marks are the
-requirement set.
+**Runnable, and one decision short.**
+[`harness/failback.sh`](harness/failback.sh) returns a cluster to its original
+master and stops where a person has to choose. Most of what it once guessed at
+came out of the field's own records — "caught up" is a canary rather than a
+number, writes are held off with the broker's `ACCESS_MODE`, and the return trip
+is routine and sometimes needs no rebuild. What nobody has written down is **who
+authorises it and on what evidence**, so that step asks and does not assume. A
+site that does it differently disagreeing with this script is the most useful
+thing that could happen to it.
 
 ## Layout
 

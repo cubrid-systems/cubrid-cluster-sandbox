@@ -161,6 +161,12 @@ first (§7 of that document). **The marks it comes back with are the requirement
 set**, and they shape phase 1's verb vocabulary — which is why M0.7 sits in
 phase 0 and not later.
 
+**It is in the repository, which is the channel.** The script was written to be
+sent somewhere and marked up; three of its four questions were then answered by
+reading the tracker, so what is left is a runnable operator script with one open
+decision in it. It does not need dispatching — it needs someone to run it and
+disagree.
+
 **A fifth edit, and it is the one that decides whether the answers are usable.**
 A second pass over the tracker
 ([`requirements/02-ha-role-transition-field-evidence.md`](requirements/02-ha-role-transition-field-evidence.md))

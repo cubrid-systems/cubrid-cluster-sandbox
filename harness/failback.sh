@@ -1,15 +1,20 @@
 #!/bin/bash
 # N65 G8 — return a CUBRID HA cluster to its ORIGINAL master, semi-automatically.
-#          Your word for this is not "failback" -- see the vocabulary note below.
+#          "failback" means two different things here -- see VOCABULARY below.
 #
 # ============================================================================
-#  THIS SCRIPT IS A QUESTION, NOT AN ANSWER.
+#  RUN IT. IT STOPS WHERE YOU HAVE TO DECIDE.
 #
-#  It encodes ONE PROJECT'S GUESS at the sequence a technical team performs by
-#  hand after a failover. Every DECIDE block below is a place where we do not
-#  know what you actually do. Please mark them up: change the default, add a
-#  step we missed, delete a step you would never take, and say why. The marks
-#  are the requirement set -- the script is only the paper it is written on.
+#  This started as a questionnaire: a guess at the sequence, written to be
+#  marked up. Most of what it guessed at has since been answered out of the
+#  field's own records, so the guesses are gone and what is left is a script
+#  that does the thing and pauses where a person genuinely has to choose.
+#
+#  Every DECIDE block prints what is known, what was measured, and what the
+#  default is; --auto takes them all. One of them -- STEP 3 -- is the one
+#  nothing found so far answers, and it is marked. If your site does it
+#  differently, that disagreement is the most useful thing you can send back,
+#  and the repository is where it goes.
 #  -- CUBRID Systems Research, N65 cluster-sandbox, 2026-08-27 (revised 2026-09-02)
 # ============================================================================
 #
@@ -224,25 +229,34 @@ else echo; echo "  ✗ NOT in the expected state -- $TGT=$MT $CUR=$MC"; exit 1; 
 cat <<'EOT'
 
 ────────────────────────────────────────────────────────────────────
- What we still do not know, and would like you to write in.
+ What this script knows, and the one thing it does not.
 
- Your own documents answered part of this before we sent it, and those
- questions are gone rather than asked twice. What they answered was the
- REBUILD -- how a slave is put back. What none of them describe is the
- RETURN TRIP: moving the service back to the node that was master. So:
+ Most of what it used to ask was answered by reading the field's own
+ records rather than by asking, so those questions are gone:
 
-   1. Is the canary the whole "caught up" check at STEP 2, or is there
-      also a number you will not go below?
-   2. Whether the broker's ACCESS_MODE is how you quiesce at STEP 3, and
-      who puts it back afterwards.
-   3. Whether STEP 4's heartbeat stop is what you use, or something else.
-   4. At STEP 6, how much of the rebuild procedure a return trip actually
-      borrows -- all of it, or a restart, and what tells you which.
-   5. Who authorises this operation, and on what evidence.
-   6. (answered by your own records -- the original master IS preferred,
-      and a return is sometimes done without any rebuild. Left here so you
-      can correct us if that is not true at your site.)
-   7. Every step we did not write down.
+   caught up enough   a method, not a number: applyinfo -r with -a, plus a
+                      row you insert and watch arrive
+   quiescing          the broker's ACCESS_MODE, moved to RO or SO
+   is the return trip worth doing
+                      yes -- it is scheduled, it is routine, and it is
+                      sometimes done with no rebuild at all
+
+ What is left, and what this script cannot decide for you:
+
+   *  WHO AUTHORISES THIS, AND ON WHAT EVIDENCE.  Your records show it
+      scheduled -- a week after the incident, on a named date, carried out
+      by the first-line vendor with support on the phone. They do not show
+      who signs it off, or what they look at before they do. That is the
+      one decision this script leaves entirely to the person running it,
+      and STEP 3 is where it lands.
+
+ Smaller things we would still take a correction on:
+
+   -  whether the canary is your whole "caught up" check, or a number sits
+      behind it;
+   -  whether STEP 4's heartbeat stop is what you use, or something else;
+   -  how much of the rebuild a return trip borrows at your site;
+   -  every step we did not write down.
 
  Six is answered, and we have removed the pretence of asking it: your
  records show the return trip is routine, scheduled, and sometimes done
