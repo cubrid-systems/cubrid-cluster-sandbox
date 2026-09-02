@@ -240,7 +240,10 @@ number.
 
 The script goes to the technical team either way; these are the edits to make
 first, because the tracker already answers them and asking again wastes the one
-round of attention this gets.
+round of attention this gets. **All six are applied** — the four below, the
+vocabulary edit that a second pass over the tracker forced
+([`02-ha-role-transition-field-evidence.md`](02-ha-role-transition-field-evidence.md) §1),
+and a sixth once the attached procedures were read.
 
 1. **Add a step 0: "should this failback be happening at all?"** The
    failover-loop report says the most common failback is one that should never
@@ -253,13 +256,36 @@ round of attention this gets.
    asking the open-ended "how do you detect divergence".
 4. **Add a ping-host question.** Given §2, the team has met at least two of the
    three states in production; which, and what did they do.
+5. **Say which operation the script means, in their vocabulary.** "Failback" is
+   a master stepping down to them and to the engine; a script that asks what they
+   require "of failback" is answered about the wrong operation
+   ([`02-ha-role-transition-field-evidence.md`](02-ha-role-transition-field-evidence.md) §1).
+6. **Stop asking what the attachments answered.** Reading them (§4 above) retired
+   two questions and sharpened two more:
+
+   - *"What is your threshold for caught up?"* → they answer it as a **method**,
+     `applyinfo -r … -a` plus a canary table. The script now asks whether the
+     canary is the whole check or whether a number sits behind it.
+   - *"How do you detect divergence before rejoining?"* → the rebuild procedures
+     exist and are an eleven-hour change window. The script now asks **how much
+     of that a return trip borrows** — all of it, or a restart, and what tells
+     them which.
+   - Two details from those documents are put back to them for confirmation as
+     current practice: pausing replication with `cubrid heartbeat deregister`
+     rather than by signalling, and the hand-written slave `db_ha_apply_info`
+     row.
+
+   The closing block says out loud that their own documents answered part of it
+   before the script was sent, so nothing is asked twice.
 
 ## 8. What is still genuinely unknown
 
 The tracker says a great deal about *what goes wrong* and very little about
 **what an operator decides**. Nothing found answers:
 
-- the threshold for "caught up enough" to switch back;
+- ~~the threshold for "caught up enough" to switch back~~ — **answered as a
+  method** (§4): `applyinfo -r … -a` plus a canary that has to arrive. Whether a
+  number sits behind it is what the script now asks;
 - whether write traffic is quiesced first, and how;
 - who authorises a failback, and on what evidence;
 - whether the original master is preferred at all, or whether sites simply run

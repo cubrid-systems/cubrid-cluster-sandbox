@@ -10,7 +10,7 @@
 #  know what you actually do. Please mark them up: change the default, add a
 #  step we missed, delete a step you would never take, and say why. The marks
 #  are the requirement set -- the script is only the paper it is written on.
-#  -- CUBRID Systems Research, N65 cluster-sandbox, 2026-08-27 (revised 2026-08-28)
+#  -- CUBRID Systems Research, N65 cluster-sandbox, 2026-08-27 (revised 2026-09-02)
 # ============================================================================
 #
 # Why this script exists at all. CUBRID's engine already has something it calls
@@ -135,10 +135,12 @@ DECIDE "Is the target caught up enough to take over?" y \
   "A non-zero lag means the writes not yet applied are lost when $CUR steps down." \
   "A non-zero fail_counter means replication is BROKEN, not merely behind, and" \
   "failing back onto it will not fix itself." \
-  "We know what you do about a fail count once it exists -- repair the affected" \
-  "table, or rebuild the slave, with the changeover somewhere around a thousand" \
-  "rows. What we do not know is the threshold HERE: zero pages? one? a second of" \
-  "business time? And do you read fail_counter before failing back at all?" || exit 3
+  "Your own rebuild procedure answers this as a METHOD rather than a number:" \
+  "cubrid applyinfo -r <master> -L <copylog> -a, plus a repl_test table you" \
+  "create and insert into and watch arrive. So the question is narrower than we" \
+  "first asked it -- is that canary the whole check here too, or is there also a" \
+  "number you will not go below? And do you read fail_counter before failing" \
+  "back at all, or only after a rebuild?" || exit 3
 
 STEP "Decide what happens to the application during the switch"
 NOTE "Stopping the heartbeat on $CUR takes its SERVER down with it -- clients on"
@@ -189,14 +191,18 @@ NOTE "      \"CUBRID heartbeat feature is being deactivated\". A full service"
 NOTE "      stop/start is required first (measured in the CBRD-26983 session)."
 DECIDE "Run: cubrid service stop; cubrid service start; on $CUR ?" y \
   "If $CUR's log diverged -- it accepted writes $TGT never received -- rejoining" \
-  "may not be possible at all, and your path back is the online rebuild script," \
-  "ha_make_slavedb.sh." \
-  "Which of its known problems do you actually hit: the hardcoded SSH port, the" \
-  "backup_dest_path / backup_option settings not being applied, transaction logs" \
-  "applied that should not be (Fail Count), apply delay after the rebuild, or a" \
-  "second slave coming up as a replica?" \
-  "And do you rebuild every time, or only when something tells you it diverged --" \
-  "in which case, what tells you?" || exit 3
+  "may not be possible at all, and your path back is the rebuild." \
+  "We have read your procedures for that: the seventeen-step manual order, and" \
+  "the 2025 online procedure that backs up from a REPLICA so the master is never" \
+  "touched, costed at about eleven hours end to end. Neither is a thing anyone" \
+  "does casually." \
+  "So the question is which parts of it a RETURN TRIP borrows. Does bringing the" \
+  "old master back as a slave need that whole procedure, or is it usually just a" \
+  "restart? What tells you which -- and is it the same signal either way?" \
+  "Two details from those documents we would like confirmed as current: that you" \
+  "pause replication with cubrid heartbeat deregister <pid> rather than by" \
+  "signalling the process, and that the slave db_ha_apply_info row is still" \
+  "hand-written from the LSA values in the backup log." || exit 3
 on "$CUR" "cubrid service stop"  2>&1 | tail -3 | sed 's/^/     /'
 on "$CUR" "cubrid service start" 2>&1 | tail -3 | sed 's/^/     /'
 sleep 5
@@ -215,17 +221,26 @@ else echo; echo "  ✗ NOT in the expected state -- $TGT=$MT $CUR=$MC"; exit 1; 
 cat <<'EOT'
 
 ────────────────────────────────────────────────────────────────────
- What we still do not know, and would like you to write in:
-   1. Your threshold for "caught up" at STEP 2, and what you do when it
-      is not met.
+ What we still do not know, and would like you to write in.
+
+ Your own documents answered part of this before we sent it, and those
+ questions are gone rather than asked twice. What they answered was the
+ REBUILD -- how a slave is put back. What none of them describe is the
+ RETURN TRIP: moving the service back to the node that was master. So:
+
+   1. Is the canary the whole "caught up" check at STEP 2, or is there
+      also a number you will not go below?
    2. Whether the broker's ACCESS_MODE is how you quiesce at STEP 3, and
       who puts it back afterwards.
    3. Whether STEP 4's heartbeat stop is what you use, or something else.
-   4. At STEP 6: do you resume replication, rebuild the affected table, or
-      rebuild the slave outright -- and what decides which?
+   4. At STEP 6, how much of the rebuild procedure a return trip actually
+      borrows -- all of it, or a restart, and what tells you which.
    5. Who authorises this operation, and on what evidence.
    6. Whether the original master is preferred at all, or whether you
       simply run on whichever node currently holds the service.
    7. Every step we did not write down.
+
+ Five and six are the two nothing we have found answers, and they are the
+ two that decide whether this script should exist.
 ────────────────────────────────────────────────────────────────────
 EOT
