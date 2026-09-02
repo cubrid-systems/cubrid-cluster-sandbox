@@ -34,37 +34,36 @@ var registry = []Command{
 		Run: cmdClusterDown},
 	{Noun: "cluster", Verb: "destroy", Summary: "containers, network, volumes", Mutates: true,
 		Flags: destroyFlags, Run: cmdClusterDestroy},
-	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state",
-		Run: notYet("05-inspect.md")},
+	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state", Run: cmdClusterStatus},
 	{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe},
 	{Noun: "cluster", Verb: "quiesce", Summary: "block writes", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "cluster", Verb: "resume", Summary: "release writes", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "cluster", Verb: "ls", Summary: "clusters on this machine", Run: cmdClusterLs},
 
 	// ---- node ------------------------------------------------------------
-	{Noun: "node", Verb: "start", Args: "<selector>", Summary: "start a node", Mutates: true, Run: notYet("03-assembly.md")},
-	{Noun: "node", Verb: "stop", Args: "<selector>", Summary: "graceful: the server flushes", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "node", Verb: "kill", Args: "<selector>", Summary: "crash: it does not", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "node", Verb: "status", Args: "<selector>", Summary: "one node's state", Run: notYet("05-inspect.md")},
+	{Noun: "node", Verb: "start", Args: "<selector>", Summary: "start a node", Mutates: true, Run: cmdNodeStart},
+	{Noun: "node", Verb: "stop", Args: "<selector>", Summary: "graceful: the server flushes", Mutates: true, Run: cmdNodeStop},
+	{Noun: "node", Verb: "kill", Args: "<selector>", Summary: "crash: it does not", Mutates: true, Run: cmdNodeKill},
+	{Noun: "node", Verb: "status", Args: "<selector>", Summary: "one node's state", Run: cmdNodeStatus},
 	{Noun: "node", Verb: "logs", Args: "<selector>", Summary: "the log a failure is actually in", Run: notYet("01-cli.md")},
 	{Noun: "node", Verb: "shell", Args: "<selector>", Summary: "a shell on the node", Run: notYet("01-cli.md")},
 	{Noun: "node", Verb: "exec", Args: "<selector> -- <cmd>", Summary: "run a command on the node", Run: cmdNodeExec},
 
 	// ---- fault -----------------------------------------------------------
-	{Noun: "fault", Verb: "partition", Args: "<selector>", Summary: "cut routes, not interfaces", Mutates: true, Run: notYet("04-faults.md")},
+	{Noun: "fault", Verb: "partition", Args: "<selector>", Summary: "cut routes, not interfaces", Mutates: true, Flags: partitionFlags, Run: cmdFaultPartition},
 	{Noun: "fault", Verb: "lag", Args: "<selector>", Summary: "stage-targeted replication lag", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "fault", Verb: "splitbrain", Summary: "two masters, on request", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "fault", Verb: "failcount", Args: "<selector>", Summary: "move fail_counter deliberately", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "fault", Verb: "ping-unavailable", Args: "<selector>", Summary: "the engine cannot ask", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "fault", Verb: "clear", Args: "[<selector>]", Summary: "reverse a condition", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "fault", Verb: "ls", Summary: "what is currently in force", Run: notYet("04-faults.md")},
+	{Noun: "fault", Verb: "clear", Args: "[<selector>]", Summary: "reverse a condition", Mutates: true, Run: cmdFaultClear},
+	{Noun: "fault", Verb: "ls", Summary: "what is currently in force", Run: cmdFaultLs},
 
 	// ---- repl ------------------------------------------------------------
-	{Noun: "repl", Verb: "status", Summary: "both stages, against the master", Run: notYet("05-inspect.md")},
+	{Noun: "repl", Verb: "status", Summary: "both stages, against the master", Run: cmdReplStatus},
 	{Noun: "repl", Verb: "watch", Summary: "sample and retain", Run: notYet("05-inspect.md")},
 
 	// ---- ha --------------------------------------------------------------
-	{Noun: "ha", Verb: "status", Summary: "roles and the group", Run: notYet("05-inspect.md")},
+	{Noun: "ha", Verb: "status", Summary: "roles and the group", Run: cmdHaStatus},
 	{Noun: "ha", Verb: "promote", Args: "<selector>", Summary: "promote a node", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "ha", Verb: "failback", Summary: "return to the original master; interactive", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Run: notYet("04-faults.md")},
@@ -180,10 +179,12 @@ func cmdClusterDescribe(c *Ctx) (any, error) {
 	if err != nil {
 		return nil, Failed("describe_unreadable", "%v", err)
 	}
-	var doc any
+	var doc map[string]any
 	if err := json.Unmarshal(b, &doc); err != nil {
 		return nil, Failed("describe_malformed", "%s is not valid JSON: %v", c.Store.DescribePath(c.Cluster), err)
 	}
+	doc = describeWithFaults(c, doc)
+	b, _ = json.MarshalIndent(doc, "", "  ")
 	if !c.JSON && !c.Quiet {
 		c.Out.Write(b)
 		if len(b) > 0 && b[len(b)-1] != '\n' {
