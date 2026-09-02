@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/assembly"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/backend"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/engine"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
@@ -148,22 +149,107 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 		}
 	}
 
-	// docs/design/03-assembly.md §1: absent -> defined -> seeded -> forming ->
-	// serving. This milestone reaches defined and says so; the assembly is M1.4.
-	c.Note("not_implemented", SevWarn,
-		"stopped at state \"defined\": containers exist and nothing is started. "+
-			"The assembly -- createdb, the slave chain, the start ordering -- is M1.4")
+	a := &assembly.Assembler{D: d, T: t, Workdir: workdir}
+	if !c.Quiet && !c.JSON {
+		a.Log = c.Out
+	}
+	for _, n := range t.Nodes {
+		if err := a.WriteConfig(n, id.Path); err != nil {
+			return nil, Failed("config_failed", "%v", err)
+		}
+	}
+
+	states, err := a.Up(c.Ctx)
+	if err != nil {
+		st, _ := a.State(c.Ctx)
+		return nil, &Error{Code: ExitTimeout, Note: "did_not_reach_serving",
+			Msg: fmt.Sprintf("cluster %s stopped at %q: %v (csb cluster up resumes it)", t.Cluster, st, err)}
+	}
 
 	if !c.JSON && !c.Quiet {
-		fmt.Fprintf(c.Out, "cluster %s: %d node(s) on %s, state defined\n", t.Cluster, len(t.Nodes), t.Network)
+		fmt.Fprintf(c.Out, "cluster %s: %d node(s) on %s, state serving\n", t.Cluster, len(t.Nodes), t.Network)
 		for _, n := range t.Nodes {
-			fmt.Fprintf(c.Out, "  %-16s %s\n", n.Name, n.Role)
+			fmt.Fprintf(c.Out, "  %-16s %-10s %s\n", n.Name, n.Role, states[n.Name])
 		}
 		for _, n := range c.Env.Notes {
 			fmt.Fprintf(c.Err, "note: %s: %s\n", n.Code, n.Message)
 		}
 	}
-	return map[string]any{"state": "defined", "topology": t, "workdir": workdir}, nil
+	return map[string]any{"state": assembly.StateServing, "topology": t, "workdir": workdir, "nodes": states}, nil
+}
+
+// loadCluster rebuilds the assembler for a cluster that already exists, from the
+// describe artifact rather than from flags.
+func loadCluster(c *Ctx) (*assembly.Assembler, *topology.Topology, error) {
+	if err := requireCluster(c); err != nil {
+		return nil, nil, err
+	}
+	b, err := os.ReadFile(c.Store.DescribePath(c.Cluster))
+	if err != nil {
+		return nil, nil, Precondition("no_describe", "cluster %q has no describe artifact", c.Cluster)
+	}
+	var t topology.Topology
+	if err := json.Unmarshal(b, &t); err != nil {
+		return nil, nil, Failed("describe_malformed", "%v", err)
+	}
+	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}}
+	a := &assembly.Assembler{D: d, T: &t, Workdir: filepath.Join(c.Store.ClusterDir(c.Cluster), "work")}
+	if !c.Quiet && !c.JSON {
+		a.Log = c.Out
+	}
+	return a, &t, nil
+}
+
+func cmdClusterUp(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range t.Nodes {
+		if res, e := a.D.R.Run(c.Ctx, "docker", "start", n.Name); e != nil || res.ExitCode != 0 {
+			return nil, Precondition("no_container",
+				"%s is not there; cluster create builds it", n.Name)
+		}
+	}
+	if t.Engine != nil && t.Engine.Path != "" {
+		for _, n := range t.Nodes {
+			if err := a.WriteConfig(n, t.Engine.Path); err != nil {
+				return nil, Failed("config_failed", "%v", err)
+			}
+		}
+	}
+	states, err := a.Up(c.Ctx)
+	if err != nil {
+		st, _ := a.State(c.Ctx)
+		return nil, &Error{Code: ExitTimeout, Note: "did_not_reach_serving",
+			Msg: fmt.Sprintf("cluster %s stopped at %q: %v", t.Cluster, st, err)}
+	}
+	if a.Forced {
+		c.Note("promotion_forced", SevWarn,
+			"the master held to_be_active with its applier drained, which a cleanly stopped group does on restart; "+
+				"the promotion was completed explicitly after checking that nothing was left to apply")
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "cluster %s: state serving\n", t.Cluster)
+		for _, n := range c.Env.Notes {
+			fmt.Fprintf(c.Err, "note: %s: %s\n", n.Code, n.Message)
+		}
+	}
+	return map[string]any{"state": assembly.StateServing, "nodes": states, "promotion_forced": a.Forced}, nil
+}
+
+func cmdClusterDown(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.Down(c.Ctx); err != nil {
+		return nil, Failed("down_failed", "%v", err)
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "cluster %s: stopped\n", t.Cluster)
+	}
+	return map[string]any{"state": assembly.StateDefined}, nil
 }
 
 var glibcRe = regexp.MustCompile(`(\d+\.\d+)\s*$`)
@@ -245,4 +331,48 @@ func cmdClusterDestroy(c *Ctx) (any, error) {
 		}
 	}
 	return map[string]any{"removed": removed, "purged": purge}, nil
+}
+
+func cmdNodeExec(c *Ctx) (any, error) {
+	a, _, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	if len(c.Args) < 2 {
+		return nil, Usage("node exec needs a selector and a command: node exec master -- csql ...")
+	}
+	if _, err := ParseSelector(c.Args[0]); err != nil {
+		return nil, err
+	}
+	names, err := a.Resolve(c.Ctx, c.Args[0])
+	if err != nil {
+		return nil, Precondition("unresolved_selector", "%v", err)
+	}
+	command := strings.Join(c.Args[1:], " ")
+
+	out := map[string]any{}
+	worst := 0
+	for _, n := range names {
+		res, err := a.D.Exec(c.Ctx, n, a.T.DB, command)
+		if err != nil {
+			return nil, Failed("exec_failed", "%v", err)
+		}
+		out[n] = map[string]any{"exit": res.ExitCode, "stdout": res.Stdout, "stderr": res.Stderr}
+		if res.ExitCode > worst {
+			worst = res.ExitCode
+		}
+		if !c.JSON {
+			if len(names) > 1 {
+				fmt.Fprintf(c.Out, "== %s\n", n)
+			}
+			fmt.Fprint(c.Out, res.Stdout)
+			fmt.Fprint(c.Err, res.Stderr)
+		}
+	}
+	if worst != 0 {
+		// The command ran; it is its exit status that is non-zero, and a caller
+		// needs that distinguished from the tool failing to run it.
+		c.Note("remote_exit_nonzero", SevWarn, fmt.Sprintf("the command exited %d on at least one node", worst))
+	}
+	return out, nil
 }

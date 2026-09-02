@@ -128,6 +128,50 @@ zombie answers yes. In a container this means the node needs a reaping PID 1 —
 must decide on the observed roles
 ([`../findings/failback.md`](../findings/failback.md)).
 
+**And a cleanly stopped group does not come back on its own.** `cluster down`
+followed by `cluster up` leaves the original master holding
+`registered_and_to_be_active` indefinitely, refusing writes, with its applier
+fully drained. Measured 2026-09-02 -- three times on one cluster, and **not
+reproduced on a second built the same way**, so the deciding variable is not yet
+isolated and what follows is the mechanism the lab described rather than a
+demonstrated cause: the promotion to `active` is *requested by `applylogdb`* when
+it meets the `dead` record `copylogdb` writes on detecting the peer's death. Stop
+both nodes gracefully and nobody died — so there is no dead record, nothing to
+meet, and no request. Starting the master alone does not help; the state is not
+about the peer being absent, it is about the request never being made.
+
+The one visible difference between the cluster that showed it and the one that
+did not is the applier's outstanding work — 178 against 176 that never closed,
+versus 176/176 — which points at a stalled applier rather than at a missing dead
+record. That is an open question, recorded rather than resolved.
+
+Two negative results bound it. `cubrid heartbeat stop` on both nodes does **not**
+produce it — the group is back to `active` within five seconds — and on the
+second cluster neither did `cubrid service stop`. The one visible difference
+between the cluster that showed it and the one that did not is the applier's
+outstanding work: 178 against 176, never closing, versus 176/176. That points at
+an applier that cannot drain rather than at a missing dead record, and it is
+recorded as an open question rather than resolved.
+
+This is the same symptom as the field's eight-hour outage
+([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §3)
+reached by a different route, and it is one answer to the analysis that report
+asked for: **a graceful restart is a condition that produces `to_be_active`.**
+
+`cubrid changemode -m active -f` completes it. The tool runs that only when it
+can show the move is safe — the applier drained (`eof == final`) and
+`fail_counter` at zero — because forcing the transition while the applier is
+behind is exactly how data written after the promotion gets overwritten by
+replication log arriving late, which is the lab's stated reason for refusing to
+force it in general. When it cannot show that, it refuses and says what is
+outstanding — which is not a rare path: in one measured run the applier held two
+pages (`eof` 178, `final` 176) and neither figure moved over 100 seconds, so the
+drained condition was never reached and `cluster up` reported that rather than
+inventing a tolerance. **How many outstanding pages are safe is a threshold, and
+this project does not invent thresholds** — it is exactly the kind of number the
+field's own stalled measurement is a warning about. Either way the run record carries what happened, because a cluster
+that needed a forced promotion is not the same evidence as one that did not.
+
 ## 4. Container requirements
 
 Not preferences; each one is load-bearing.

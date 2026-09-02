@@ -12,6 +12,77 @@ For engine developers, QA, and external contributors. Part of
 > and its exit codes are built and tested; the verbs behind them are not. See
 > [Status](#status).
 
+## Prerequisites
+
+Three things, and the third is the one people forget:
+
+| | Why |
+|---|---|
+| **Docker** | a node is a container, and a partition is a route operation inside one. Tested against 29.x |
+| **Go** | to build `csb`. There are no binary releases yet |
+| **A CUBRID install tree** | the engine under test. Your own build (`install.out`), or an unpacked release — it is bind-mounted read-only and never goes into an image |
+
+Linux x86-64 for now. The engine tree has to be loadable by the container's
+libc: `csb` reads the highest `GLIBC_` symbol your build requires straight out of
+the ELF and refuses with that sentence rather than failing later as a linker
+error.
+
+## Install
+
+```bash
+git clone https://github.com/cubrid-systems/cubrid-cluster-sandbox
+cd cubrid-cluster-sandbox
+make dist                      # a static binary at bin/csb
+sudo install bin/csb /usr/local/bin/     # optional
+```
+
+`make check` runs gofmt, `go vet` and the tests. State lives under `$CSB_HOME`
+(default `~/.local/share/csb`), one directory per cluster holding its `describe`
+artifact and its run record.
+
+## Getting started
+
+Stand up a two-node HA pair against a build you made, and write to it.
+
+```bash
+$ csb cluster create --name hadb --build ~/cubrid/install.out
+   createdb hadb on hadb-n1
+   seeded hadb-n2 with 7 files from hadb-n1
+   heartbeat start on 2 node(s), concurrently
+   waiting for hadb-n1 to reach registered_and_active
+cluster hadb: 2 node(s) on hadb-net, state serving
+  hadb-n1          master     registered_and_active
+  hadb-n2          slave      registered_and_standby
+```
+
+About 50 seconds from nothing, most of it the engine. The first run also builds
+the base image, once.
+
+That is the whole assembly — two configuration files per node, the four-step
+slave chain, the start ordering, and the traps that go with them — and you did
+not have to know any of it. That is the point of the tool; the traps are listed
+in [`docs/design/03-assembly.md`](docs/design/03-assembly.md) if you want to see
+what it did on your behalf.
+
+Then use it. `node exec` runs a command on a node with the engine's environment
+already set:
+
+```bash
+$ csb node exec master -- "csql -u dba -c 'CREATE TABLE t(i INT PRIMARY KEY);' hadb"
+$ csb cluster describe --json | jq .data.engine
+{ "kind": "build", "version": "11.5.0", "commit": "dd15f7f", "min_glibc": "2.34" }
+$ csb cluster destroy --cluster hadb        # keeps the run record; --purge drops it
+```
+
+**What works today, honestly.** `cluster create`, `describe`, `ls`, `destroy`,
+`down`, and `record show`/`export`. `cluster up` after a `down` currently stops
+with a diagnosis rather than a cluster: a gracefully stopped HA group does not
+return to service on its own, and completing the promotion by hand is a forced
+transition whose safety `csb` will not assert on your behalf — see
+[`docs/design/03-assembly.md`](docs/design/03-assembly.md) §3. Everything under
+`fault`, `repl`, `ha` and `load` is specified and not built; each exits 1 with a
+`not_implemented` note rather than pretending.
+
 ## The surface being built
 
 ```
@@ -110,19 +181,6 @@ harness/
   failback.sh · failback-demo.sh       the failback artifact, and a rig that proves it runs
   results/                             captured console output and samples
 ```
-
-## Building
-
-Go and a POSIX shell are the whole toolchain; there is nothing else to install.
-
-```bash
-make check     # gofmt, go vet, go test
-make dist      # a static binary at bin/csb
-./bin/csb --help
-```
-
-State lives under `$CSB_HOME` (default `~/.local/share/csb`), one directory per
-cluster holding its `describe` artifact and its run record.
 
 ## Running the harness
 

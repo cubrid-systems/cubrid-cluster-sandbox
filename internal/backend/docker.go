@@ -136,6 +136,31 @@ func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topo
 	return err
 }
 
+// NodeEnv is the environment every command on a node needs. The engine finds
+// its own tree through CUBRID, and both configuration files are named
+// explicitly rather than left to a search path.
+func NodeEnv(node, db string) []string {
+	c := "/work/" + node + "/cubrid"
+	return []string{
+		"CUBRID=" + c,
+		"CUBRID_DATABASES=/db",
+		"CUBRID_CONF_FILE=" + c + "/conf/cubrid.conf",
+		"CUBRID_HA_CONF_FILE=" + c + "/conf/cubrid_ha.conf",
+		"PATH=" + c + "/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+		"LD_LIBRARY_PATH=" + c + "/lib:" + c + "/cci/lib",
+	}
+}
+
+// Exec runs a shell command inside a node with that environment.
+func (d *Docker) Exec(ctx context.Context, node, db, command string) (*run.Result, error) {
+	args := []string{"exec"}
+	for _, e := range NodeEnv(node, db) {
+		args = append(args, "-e", e)
+	}
+	args = append(args, node, "bash", "-lc", command)
+	return d.R.Run(ctx, "docker", args...)
+}
+
 type NodeState struct {
 	Name    string `json:"name"`
 	Running bool   `json:"running"`

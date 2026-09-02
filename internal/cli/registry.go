@@ -29,9 +29,9 @@ var registry = []Command{
 	{Noun: "cluster", Verb: "create", Summary: "build a topology", Mutates: true,
 		Flags: createFlags, Run: cmdClusterCreate},
 	{Noun: "cluster", Verb: "up", Summary: "start an existing cluster, in the order that works", Mutates: true,
-		Run: notYet("03-assembly.md")},
+		Run: cmdClusterUp},
 	{Noun: "cluster", Verb: "down", Summary: "graceful stop, servers flushed", Mutates: true,
-		Run: notYet("03-assembly.md")},
+		Run: cmdClusterDown},
 	{Noun: "cluster", Verb: "destroy", Summary: "containers, network, volumes", Mutates: true,
 		Flags: destroyFlags, Run: cmdClusterDestroy},
 	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state",
@@ -48,7 +48,7 @@ var registry = []Command{
 	{Noun: "node", Verb: "status", Args: "<selector>", Summary: "one node's state", Run: notYet("05-inspect.md")},
 	{Noun: "node", Verb: "logs", Args: "<selector>", Summary: "the log a failure is actually in", Run: notYet("01-cli.md")},
 	{Noun: "node", Verb: "shell", Args: "<selector>", Summary: "a shell on the node", Run: notYet("01-cli.md")},
-	{Noun: "node", Verb: "exec", Args: "<selector> -- <cmd>", Summary: "run a command on the node", Run: notYet("01-cli.md")},
+	{Noun: "node", Verb: "exec", Args: "<selector> -- <cmd>", Summary: "run a command on the node", Run: cmdNodeExec},
 
 	// ---- fault -----------------------------------------------------------
 	{Noun: "fault", Verb: "partition", Args: "<selector>", Summary: "cut routes, not interfaces", Mutates: true, Run: notYet("04-faults.md")},
