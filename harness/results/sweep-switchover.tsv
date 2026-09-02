@@ -1,0 +1,8 @@
+param	value	predicted	measured	masters_after	cancel_reason
+ha_max_heartbeat_gap	5	2.5s	8.9s	2	[Failback] [Cancelled]
+ha_max_heartbeat_gap	10	5s	8s	2	[Failback] [Cancelled]
+ha_max_heartbeat_gap	20	10s	8.9s	2	[Failback] [Cancelled]
+ha_heartbeat_interval_in_msecs	1000	5s	6.9s	2	[Failback] [Cancelled]
+ha_heartbeat_interval_in_msecs	2000	10s	6.9s	2	[Failback] [Cancelled]
+ha_calc_score_interval_in_msecs	3000	2.5s	6.9s	2	[Failback] [Cancelled]
+ha_calc_score_interval_in_msecs	15000	2.5s	18.9s	2	[Failover] [Success]
