@@ -7,12 +7,19 @@
 # master. The difference between the two clusters was visible but not isolated --
 # the affected one had user data and an applier sitting two pages short.
 #
-# Four arms, one variable each. Every arm builds a cluster from nothing.
+# Five arms, one variable each. Every arm builds a cluster from nothing.
 #
 #   A  idle, both stopped together          the control: expected to come back
 #   B  under load until the stop            outstanding replication at shutdown
 #   C  master stopped first, slave 10s later stop order
 #   D  slave stopped first, master 10s later stop order, reversed
+#   E  standby overwritten by hand          ARM_E=1; the tool's own former bug
+#
+# Result, 2026-09-02: ten runs, no stall. A-D 3 each, E 2. Arm E was added to
+# confirm that the re-seeding bug was the cause -- it does the copy on purpose,
+# in the same window `up` did it -- and it did not stall either. So the stall
+# correlates with that bug (3/3 with, 0/8 after) and nothing here explains it.
+# Untested: the affected cluster's state directory later filled to zero bytes.
 set -uo pipefail
 CSB=${CSB:-./bin/csb}
 ENGINE=${ENGINE:-/data/workspace/for-plan/importdb/cubrid/install.out}

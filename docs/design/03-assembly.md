@@ -129,15 +129,25 @@ must decide on the observed roles
 ([`../findings/failback.md`](../findings/failback.md)).
 
 **A cleanly stopped group does come back — and the run that once said otherwise
-was this tool's own bug.** For a while this section reported that `cluster down`
+has not been explained.** For a while this section reported that `cluster down`
 followed by `cluster up` left the original master holding
 `registered_and_to_be_active` indefinitely, three times on one cluster and never
-on a second. It was isolated on 2026-09-02 and the deciding variable was ours: at
-the time, `up` **re-seeded the standby**, copying the master's volumes over a
-database that had been serving and replicating since. With that fixed, four arms
-— idle, under load until the moment of the stop, master stopped first, standby
-stopped first — came back `registered_and_active` every time
+on a second. Five arms on 2026-09-02 — idle, under load until the moment of the
+stop, master stopped first, standby stopped first, and a standby deliberately
+overwritten by hand with the master's volumes after it had been replicating —
+came back `registered_and_active` in all ten runs
 ([`../../harness/isolate-to-be-active.sh`](../../harness/isolate-to-be-active.sh)).
+
+**No arm names the cause.** The tool did have a real bug at the time: `up`
+re-seeded the standby on every run, copying the master's volumes over a database
+that had been serving and replicating since. The stalls line up with it — 3 of 3
+while it was there, 0 of 8 after it was fixed — and for a few hours this section
+said so. But arm E performs that same copy deliberately, in the same window `up`
+did it (both services stopped, files replaced on the host, group restarted), and
+the group comes back both times. That leaves the alignment as correlation. One
+difference has never been tested: the affected cluster's state directory sat on a
+volume that later filled to zero bytes free, and a master that cannot extend its
+log cannot finish a promotion.
 
 The applier's outstanding work looked like the variable and was not. The affected
 cluster sat at 178 against 176 while the clean one was at 176/176, which is a
@@ -148,12 +158,11 @@ keeping.
 The field's own `to_be_active` outage stands and is a separate matter
 ([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §3):
 eight hours of refused writes, caused by a wrong `db_ha_apply_info` row sending
-the applier after an archive that had been deleted. The state is real. Our route
-into it was not, and an engine that declines to complete a promotion onto a
-database somebody overwrote underneath it is behaving correctly.
+the applier after an archive that had been deleted. The state is real; our route into it
+is unexplained, and an unexplained reproduction is not evidence about an engine.
 
 The tool still completes a promotion that is stuck, because the state is real
-even where our reproduction of it was not.
+whether or not we can say what put us in it.
 
 `cubrid changemode -m active -f` completes it. The tool runs that only when it
 can show the move is safe — the applier drained (`eof == final`) and
