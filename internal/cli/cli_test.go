@@ -127,14 +127,14 @@ func TestDescribeAndRecordRoundTrip(t *testing.T) {
 	// A mutating verb opens the record without anyone switching it on. It fails
 	// (not built yet) and must still have recorded that it was asked for, which
 	// is why this one has to be both Mutates and unbuilt.
-	if code, _, _ := invoke(t, home, "ha", "resync", "--cluster", "hadb"); code != ExitFailed {
+	if code, _, _ := invoke(t, home, "ha", "promote", "master", "--cluster", "hadb"); code != ExitFailed {
 		t.Fatalf("expected the not-implemented failure, got %d", code)
 	}
 	code, out, _ = invoke(t, home, "record", "show", "--cluster", "hadb", "--json")
 	if code != ExitOK {
 		t.Fatalf("record show exited %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "command.ha.resync") {
+	if !strings.Contains(out, "command.ha.promote") {
 		t.Errorf("the record did not open on a state-changing command:\n%s", out)
 	}
 
