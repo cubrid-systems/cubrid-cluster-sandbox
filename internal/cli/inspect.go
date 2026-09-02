@@ -579,7 +579,7 @@ func cmdFaultLag(c *Ctx) (any, error) {
 }
 
 func splitbrainFlags(fs *flag.FlagSet) {
-	fs.String("flavour", "", "ping-survives or no-ping-hosts; default: whichever this cluster's configuration produces")
+	fs.String("flavour", "", "ping-survives, no-ping-hosts or calc-score-window; default: whichever this cluster's configuration produces")
 	fs.Duration("wait", 30*time.Second, "how long to wait for the engine to reach two masters")
 }
 
@@ -592,16 +592,34 @@ func cmdFaultSplitbrain(c *Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	pingSet := t.Parameters.HA["ha_ping_hosts"] != "" || t.Parameters.HA["ha_tcp_ping_hosts"] != ""
+	// The effective configuration, not the user's overrides. --ping-mode writes
+	// the parameter by construction, so reading Parameters.HA alone reported
+	// "no-ping-hosts" for a cluster whose engine was logging "Ping check
+	// succeeded" -- naming the wrong flavour, which is the one thing this verb
+	// exists to get right (docs/design/02-topology.md §5).
+	pingSet := t.Parameters.HA["ha_ping_hosts"] != "" || t.Parameters.HA["ha_tcp_ping_hosts"] != "" ||
+		(t.PingMode != topology.PingNone && t.PingHost != "")
 	want := c.str("flavour")
 	have := "no-ping-hosts"
 	if pingSet {
 		have = "ping-survives"
 	}
+	// The third flavour is not a partition condition at all: it is the SAME
+	// partition observed through a raised ha_calc_score_interval_in_msecs, which
+	// is a create-time parameter. So it is reported when the cluster carries one
+	// and refused when it does not, rather than faked.
+	score := t.Parameters.HA["ha_calc_score_interval_in_msecs"]
+	if score == "" {
+		score = t.Parameters.Hidden["ha_calc_score_interval_in_msecs"]
+	}
+	if score != "" && score != "3000" {
+		have = "calc-score-window"
+	}
 	if want != "" && want != have {
 		return nil, Precondition("flavour_unavailable",
-			"this cluster produces the %q flavour: ha_ping_hosts is %s. The flavour follows from the configuration, so create the cluster with --set ha_ping_hosts=<host> to get %q",
-			have, map[bool]string{true: "set", false: "unset"}[pingSet], want)
+			"this cluster produces the %q flavour: ha_ping_hosts is %s and ha_calc_score_interval_in_msecs is %s. The flavour follows from the configuration, so build the cluster for the one you want rather than asking for it here",
+			have, map[bool]string{true: "set", false: "unset"}[pingSet],
+			map[bool]string{true: score, false: "default"}[score != ""])
 	}
 
 	master, rerr := a.Resolve(c.Ctx, "master")
@@ -646,6 +664,14 @@ func cmdFaultSplitbrain(c *Ctx) (any, error) {
 	// the time.
 	reason, _ := inj.CancelReason(c.Ctx, master[0])
 	out := map[string]any{"flavour": have, "masters": masters, "cancel_reason": reason, "partitioned": master[0]}
+	if have == "calc-score-window" {
+		// The claim this flavour carries is about what happens AFTER the heal --
+		// an Active-Active window with replication running both ways -- and this
+		// verb only induces the split. Saying so is the difference between a
+		// reproduction and a name.
+		c.Note("window_is_after_the_heal", SevInfo,
+			"this flavour's reported anomaly is the window after `fault clear`, not the split itself: measure it with `repl check` in both directions while the interval elapses (docs/design/04-faults.md §5)")
+	}
 	if masters < 2 {
 		c.Note("no_split_brain", SevWarn,
 			fmt.Sprintf("the cluster did not reach two masters within %s; it is partitioned and the condition is in force", c.dur("wait")))
