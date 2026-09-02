@@ -55,14 +55,28 @@ So there are two operations and one word:
 
 | | Engine and team call it | This project has been calling it |
 |---|---|---|
-| A master demotes itself because another master exists | **failback** | split-brain recovery |
-| Service returns to the node that was master before the failover | *(no term found in the tracker)* | **failback** |
+| A master demotes itself because another master exists | **failback** (engine logs, study notes) | split-brain recovery |
+| Service returns to the node that was master before the failover | **failback 작업** (operations, 95 tickets) | **failback** |
 
-The second row is the finding. The tracker has no name for returning to the
-original master, which is consistent with the other thing this project measured
-— **there is no engine path back** after a clean failover
-([`../DESIGN.md`](../DESIGN.md) §9 OQ9). An operation with no mechanism and no
-name is one nobody has written a ticket about.
+**Corrected 2026-09-02 — the second row does have a name, and this document had
+it wrong.** The claim here was that the tracker has no term for returning to the
+original master, inferred from `text ~ "failback"` returning two development
+tickets. That search was the wrong shape: the operational usage is Korean-suffixed
+and lives in the support project. **`failback 작업` appears in ninety-five
+tickets**, the most recent from 2025, and one of them settles the meaning beyond
+argument:
+
+> 재구성 없이 1번을 마스터로 **failback**만 하는 작업 진행
+
+That is the return trip, named, and explicitly distinguished from a rebuild.
+
+So the word means two things inside one organization. The **engine** logs
+`[Failback]` when a master steps down, and the team's own study notes define it
+that way. **Operations** use `failback 작업` for putting the service back on the
+node that was master. Both usages are current, and that is worse than either one
+being wrong: a question asked with the bare word gets answered about whichever
+the reader has in mind. The requirement below is unchanged and better founded —
+the script has to say which operation it means.
 
 **Requirements.**
 

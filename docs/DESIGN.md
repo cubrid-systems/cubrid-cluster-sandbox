@@ -613,10 +613,14 @@ deliberate return at all but a **loop** — four sites reporting ten or more
 failover/split-brain/failback cycles a day under load, with no network fault
 (the failover-loop report, 2016).
 
-*Still unknown, and the reason to send the script*: the threshold for "caught up
-enough"; whether and how write traffic is quiesced first; who authorises a
-failback and on what evidence; and whether the original master is preferred at
-all, or whether sites simply run on whichever node holds the service.
+*Still unknown, and the reason to send the script* — **three of the four have
+since been answered by reading the tracker rather than asking**
+([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §8).
+"Caught up enough" is a method rather than a number: `applyinfo -r … -a` plus a
+canary row that has to arrive. Write traffic is held off with the broker's
+`ACCESS_MODE`. And the original master is preferred — the return trip is a
+scheduled operation, sometimes done with no rebuild at all. **What remains is who
+authorises it, and on what evidence.**
 
 `harness/failback.sh` encodes this project's guess and goes to the team with the
 four edits listed in §7 of that document — the tracker already answers what they
@@ -837,6 +841,19 @@ all"; and `--set-hidden` resolves a contradiction the previous round created —
 the three parameters that decide when a failover happens are absent from
 `paramdump`, so a rule that refuses every key it cannot look up refused the
 entire subject of M2.5.
+
+**2026-09-02 — the word was wrong in both directions.** The 2026-08-28 entry
+below said `failback` means demotion and that the tracker has no term for the
+return trip. The first half holds; the second was an artefact of searching for
+the English word in the development projects. Operations tickets say
+**`failback 작업`** for the return trip — ninety-five of them, the most recent from
+2025 — and one asks for it explicitly without a rebuild. So the word carries both
+meanings inside the same organization, which is worse than either being wrong:
+a question asked with the bare word is answered about whichever the reader has
+in mind. `failback.sh` now names the two and says which it means. Reading the
+same incidents also answered two of §9 OQ8's four unknowns — the return trip is
+routine and scheduled, and writes are held off with the broker's `ACCESS_MODE` —
+leaving one: who authorises it, and on what evidence.
 
 **2026-08-28 — the word was wrong.** `failback` means *demotion* to the engine
 and to the technical team: their own HA study notes say so, and so does every

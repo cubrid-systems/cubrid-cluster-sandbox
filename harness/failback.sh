@@ -29,13 +29,15 @@
 #     (server_support.c:1558).
 #
 # VOCABULARY -- please read this before answering anything below.
-#   In your own material, "Fail Back" means what the engine means by it:
-#   마스터 노드가 슬레이브 노드가 되는 것 -- a master stepping down. THIS SCRIPT
-#   IS NOT THAT. It is the operation of putting the service back on the node that
-#   was master before the failover. We could find no term for that operation
-#   anywhere in the tracker, and there is no engine path for it either, which we
-#   think are the same fact. Where this script says "failback" it means the return
-#   trip, and every question below is about the return trip.
+#   The word means two things in your own material and we cannot tell from a
+#   sentence which one is meant:
+#     the ENGINE logs [Failback] when a master steps down, and your study notes
+#     define it that way -- 마스터 노드가 슬레이브 노드가 되는 것;
+#     your OPERATIONS tickets say "failback 작업" for putting the service back on
+#     the node that was master, which is the opposite direction. One of them is
+#     explicit about it: "재구성 없이 1번을 마스터로 failback만 하는 작업".
+#   THIS SCRIPT MEANS THE SECOND ONE. Every question below is about the return
+#   trip, not about a demotion.
 #
 # So the operational return trip is manual, and it is the manual part that this
 # project knows nothing about. Hence the DECIDE blocks.
@@ -196,9 +198,10 @@ DECIDE "Run: cubrid service stop; cubrid service start; on $CUR ?" y \
   "the 2025 online procedure that backs up from a REPLICA so the master is never" \
   "touched, costed at about eleven hours end to end. Neither is a thing anyone" \
   "does casually." \
-  "So the question is which parts of it a RETURN TRIP borrows. Does bringing the" \
-  "old master back as a slave need that whole procedure, or is it usually just a" \
-  "restart? What tells you which -- and is it the same signal either way?" \
+  "So the question is which parts of it a RETURN TRIP borrows. We have seen one" \
+  "of your own calls ask for exactly this -- 재구성 없이 1번을 마스터로 failback -- " \
+  "so we know it is sometimes none of it. What tells you which case you are in," \
+  "and is it the same signal either way?" \
   "Two details from those documents we would like confirmed as current: that you" \
   "pause replication with cubrid heartbeat deregister <pid> rather than by" \
   "signalling the process, and that the slave db_ha_apply_info row is still" \
@@ -236,11 +239,15 @@ cat <<'EOT'
    4. At STEP 6, how much of the rebuild procedure a return trip actually
       borrows -- all of it, or a restart, and what tells you which.
    5. Who authorises this operation, and on what evidence.
-   6. Whether the original master is preferred at all, or whether you
-      simply run on whichever node currently holds the service.
+   6. (answered by your own records -- the original master IS preferred,
+      and a return is sometimes done without any rebuild. Left here so you
+      can correct us if that is not true at your site.)
    7. Every step we did not write down.
 
- Five and six are the two nothing we have found answers, and they are the
- two that decide whether this script should exist.
+ Six is answered, and we have removed the pretence of asking it: your
+ records show the return trip is routine, scheduled, and sometimes done
+ with no rebuild at all. FIVE is the one nothing we have found answers,
+ and it is the one that decides what this script should do without
+ asking.
 ────────────────────────────────────────────────────────────────────
 EOT

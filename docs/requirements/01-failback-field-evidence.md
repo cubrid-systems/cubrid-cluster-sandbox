@@ -286,11 +286,33 @@ The tracker says a great deal about *what goes wrong* and very little about
 - ~~the threshold for "caught up enough" to switch back~~ — **answered as a
   method** (§4): `applyinfo -r … -a` plus a canary that has to arrive. Whether a
   number sits behind it is what the script now asks;
-- whether write traffic is quiesced first, and how;
-- who authorises a failback, and on what evidence;
-- whether the original master is preferred at all, or whether sites simply run
-  on whichever node holds the service.
+- ~~whether write traffic is quiesced first, and how~~ — **answered**: the
+  broker's `ACCESS_MODE`, moved to RO or SO. Named in the fail-count utility
+  proposal, and confirmed in a 2017 incident whose recovery plan reads *"40분 간
+  브로커 RO 모드로 서비스 운영"*;
+- ~~whether the original master is preferred at all~~ — **answered: it is**. See
+  below;
+- **who authorises a failback, and on what evidence** — still open.
 
-Those four remain the reason to send the script. §9 OQ8 stays open, but it is
-now a narrower question asked of people who have already written down the
-context.
+### What the incidents answered, once we read them instead of searching for the question
+
+*The original master is preferred, and returning to it is routine.* A 2018 site
+record reads "FailOver 확인 후 FailBack 수행". A 2017 one is fuller: a master lost
+to an OS failure, a return attempted **a week later** that produced two masters
+because the peer link was down, and then a plan — *"40분 간 브로커 RO 모드로 서비스
+운영. 40분 후 master HA 재구성 후 failback 작업"* — scheduled for a named date. And
+a 2024 support call asks for *"재구성 없이 1번을 마스터로 failback만 하는 작업"*: the
+return trip, requested by name, explicitly **without** a rebuild.
+
+That last one also answers the question §7's sixth edit had just sharpened. A
+return trip does not always borrow the eleven-hour rebuild; sometimes it borrows
+none of it.
+
+*Authorisation is partly visible and still not answered.* What the records show
+is **scheduling** — a return attempted a week after the incident, another planned
+for a stated date, the work carried out by the first-line maintenance vendor with
+CUBRID support guiding by phone. So it is a planned change rather than a reflex.
+Who signs it off, and against what evidence, is not written anywhere found.
+
+**One question of the original four is left**, and it is the one the script
+exists to ask. §9 OQ8 stays open on that alone.
