@@ -185,6 +185,33 @@ experiments; the node's CPU quota is what makes *N threads against M cores* a
 reproducible statement rather than a coincidence
 ([`06-load.md`](06-load.md) §5).
 
+### Rebuilding from it
+
+Measured: **976 bytes** for a two-node cluster carrying a non-default parameter,
+a hidden one, a CPU quota and a fault in force — which is the size test, since
+the artifact is meant to be pasted into an issue.
+
+`csb cluster create --from <artifact>` rebuilds it, through the same code path an
+ordinary `create` takes. A second implementation would drift, and then the
+artifact would stop reproducing what it says. Three things that path does that a
+plain reload would not:
+
+- **The engine is resolved against this machine.** `--build` wins; otherwise the
+  recorded path is used if it happens to exist here. When neither is available
+  the command refuses, naming the build the artifact was taken against; when the
+  tree it finds is a *different* build it says so and continues. That is what
+  `engine.identity` is for, and it is the difference between reproducing a
+  topology and reproducing a result.
+- **A rename rebuilds the derived fields** rather than substituting a string,
+  because the node names, the network and the database all descend from the
+  cluster name.
+- **What was in force is reported, not re-applied.** The cluster comes up healthy
+  and idle and the commands that would restore the situation are printed,
+  translated back into role selectors — the recorded names belonged to the
+  machine the artifact came from. Injecting a fault is a deliberate act, and
+  silently partitioning a cluster somebody has just asked to be built is a
+  surprise.
+
 ## 5. Parameters
 
 Overrides land in one of two files and the user should not have to know which:

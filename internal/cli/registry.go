@@ -36,7 +36,8 @@ var registry = []Command{
 	{Noun: "cluster", Verb: "destroy", Summary: "containers, network, volumes", Mutates: true,
 		Flags: destroyFlags, Run: cmdClusterDestroy},
 	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state", Run: cmdClusterStatus},
-	{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe},
+	{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe,
+		Flags: func(fs *flag.FlagSet) { fs.String("out", "", "write the artifact to a file") }},
 	{Noun: "cluster", Verb: "quiesce", Summary: "block writes", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "cluster", Verb: "resume", Summary: "release writes", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "cluster", Verb: "ls", Summary: "clusters on this machine", Run: cmdClusterLs},
@@ -187,6 +188,15 @@ func cmdClusterDescribe(c *Ctx) (any, error) {
 	doc = describeWithFaults(c, doc)
 	doc = describeWithLoad(c, doc)
 	b, _ = json.MarshalIndent(doc, "", "  ")
+	if out := c.str("out"); out != "" {
+		if err := os.WriteFile(out, append(b, '\n'), 0o644); err != nil {
+			return nil, Failed("describe_unwritable", "cannot write %s: %v", out, err)
+		}
+		if !c.JSON && !c.Quiet {
+			fmt.Fprintf(c.Out, "wrote %s (%d bytes)\n", out, len(b)+1)
+		}
+		return doc, nil
+	}
 	if !c.JSON && !c.Quiet {
 		c.Out.Write(b)
 		if len(b) > 0 && b[len(b)-1] != '\n' {

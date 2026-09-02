@@ -39,6 +39,7 @@ func createFlags(fs *flag.FlagSet) {
 	fs.Float64("cpus", 0, "CPU quota per node; host-load profiles are meaningless without it")
 	fs.Var(&repeatable{}, "set", "key=value, validated (repeatable)")
 	fs.Var(&repeatable{}, "set-hidden", "key=value, written unvalidated (repeatable)")
+	fs.String("from", "", "a describe artifact to rebuild from")
 }
 
 func repeated(c *Ctx, name string) []string {
@@ -52,7 +53,81 @@ func repeated(c *Ctx, name string) []string {
 	return nil
 }
 
+// fromArtifact rebuilds the topology out of a describe artifact instead of out
+// of flags.
+//
+// The artifact records the engine's identity rather than only its path, because
+// a build tree does not travel. So the path is taken from --build when it is
+// given, or from the artifact when that path happens to exist here, and the two
+// identities are compared: reproducing "the same cluster" against a different
+// commit is the failure this field exists to catch.
+func fromArtifact(c *Ctx, path string) (*topology.Topology, *engine.Identity, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, Usage("cannot read %s: %v", path, err)
+	}
+	var t topology.Topology
+	if err := json.Unmarshal(b, &t); err != nil {
+		return nil, nil, Usage("%s is not a describe artifact: %v", path, err)
+	}
+	if t.Schema != topology.Schema {
+		c.Note("schema_mismatch", SevWarn,
+			"the artifact says schema "+t.Schema+" and this tool speaks "+topology.Schema)
+	}
+	if len(t.Nodes) == 0 {
+		return nil, nil, Usage("%s has no nodes", path)
+	}
+
+	buildPath := c.str("build")
+	if buildPath == "" && t.Engine != nil {
+		if _, serr := os.Stat(t.Engine.Path); serr == nil {
+			buildPath = t.Engine.Path
+		}
+	}
+	if buildPath == "" {
+		want := "an engine"
+		if t.Engine != nil && t.Engine.Build != "" {
+			want = t.Engine.Build
+		}
+		return nil, nil, Precondition("no_engine",
+			"the artifact was built against %s and that tree is not on this machine; pass --build PATH to a tree of your own", want)
+	}
+
+	r := &run.Runner{Verbose: c.Verbose, Log: c.Err}
+	id, err := engine.Resolve(c.Ctx, buildPath, r)
+	if err != nil {
+		return nil, nil, Precondition("no_engine", "%v", err)
+	}
+	if t.Engine != nil && t.Engine.Build != "" && id.Build != "" && t.Engine.Build != id.Build {
+		// Not fatal: reproducing against a different build is often the point.
+		// Saying nothing about it is what would be wrong.
+		c.Note("engine_differs", SevWarn,
+			"the artifact was taken against "+t.Engine.Build+" and this tree is "+id.Build+
+				"; the topology is the same and the engine is not")
+	}
+	t.Engine = id
+
+	if n := c.str("name"); n != "" && n != t.Cluster {
+		// Everything else is derived from the name, so a rename is a rebuild of
+		// the derived fields rather than a string substitution.
+		rebuilt, rerr := topology.Resolve(topology.Options{
+			Name: n, Preset: t.Preset, Nodes: len(t.Nodes), Image: t.Image,
+			PingMode: t.PingMode, WithBroker: t.WithBroker,
+			CPUs: t.Resources.CPUs, ShmSize: t.Resources.ShmSize, Engine: id,
+		})
+		if rerr != nil {
+			return nil, nil, Usage("%v", rerr)
+		}
+		rebuilt.Parameters = t.Parameters
+		t = *rebuilt
+	}
+	return &t, id, nil
+}
+
 func cmdClusterCreate(c *Ctx) (any, error) {
+	if from := c.str("from"); from != "" {
+		return createFrom(c, from)
+	}
 	name := c.str("name")
 	if name == "" {
 		name = c.Cluster
@@ -94,6 +169,17 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 	if err != nil {
 		return nil, Usage("%v", err)
 	}
+	// standUp is the half both create paths share: the image, the libc check,
+	// the artifact, the containers and the assembly. Splitting it is what lets
+	// `create --from` be the same operation rather than a second implementation
+	// of it that drifts.
+	return standUp(c, t, id)
+}
+
+func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
+	name := t.Cluster
+	c.Cluster, c.Env.Cluster = name, name
+	r := &run.Runner{Verbose: c.Verbose, Log: c.Err}
 	if t.Image == "" {
 		t.Image = backend.BaseImage()
 	}
@@ -384,4 +470,96 @@ func cmdNodeExec(c *Ctx) (any, error) {
 		c.Note("remote_exit_nonzero", SevWarn, fmt.Sprintf("the command exited %d on at least one node", worst))
 	}
 	return out, nil
+}
+
+// createFrom rebuilds a cluster from a describe artifact.
+//
+// The artifact is the thing this project asks a person to paste into an issue,
+// so the reproduction has to be the same code path as an ordinary create --
+// otherwise the two drift and the artifact stops reproducing what it says.
+func createFrom(c *Ctx, path string) (any, error) {
+	t, id, err := fromArtifact(c, path)
+	if err != nil {
+		return nil, err
+	}
+	res, err := standUp(c, t, id)
+	if err != nil {
+		return nil, err
+	}
+
+	// What was in force when the artifact was taken is reported rather than
+	// re-applied. A describe that omitted its faults would hand the next person
+	// a healthy cluster and a bug that does not reproduce -- but silently
+	// partitioning a cluster somebody just asked to be built is a surprise, and
+	// injecting a fault is a deliberate act. So: the commands, not the act.
+	if b, rerr := os.ReadFile(path); rerr == nil {
+		var doc struct {
+			Nodes []struct {
+				Name, Role string
+			} `json:"nodes"`
+			Faults []struct {
+				Kind, Target, Mechanism, Stage string
+			} `json:"faults"`
+			Load *struct {
+				Profile string  `json:"profile"`
+				Rate    float64 `json:"rate"`
+				Batch   int     `json:"batch"`
+			} `json:"load"`
+		}
+		if json.Unmarshal(b, &doc) == nil {
+			// The recorded target is a node name from the machine the artifact
+			// came from, and the rebuilt cluster's names are derived from its own
+			// name. So it is translated back into the role selector it stood for,
+			// which is how the tool addresses nodes anyway and which survives both
+			// a rename and a failover.
+			sel := func(target string) string {
+				for i, n := range doc.Nodes {
+					if n.Name != target {
+						continue
+					}
+					switch {
+					case i == 0:
+						return "master"
+					case i == 1:
+						return "slave"
+					default:
+						return fmt.Sprintf("slave[%d]", i-1)
+					}
+				}
+				return target
+			}
+			var cmds []string
+			for _, f := range doc.Faults {
+				switch f.Kind {
+				case "partition":
+					cmds = append(cmds, "csb fault partition "+sel(f.Target))
+				case "lag":
+					cmds = append(cmds, "csb fault lag "+sel(f.Target)+" --stage "+f.Stage+" --mechanism "+f.Mechanism)
+				default:
+					cmds = append(cmds, "csb fault "+f.Kind+" "+sel(f.Target))
+				}
+			}
+			if doc.Load != nil && doc.Load.Profile != "" {
+				cmd := "csb load start --profile " + doc.Load.Profile
+				if doc.Load.Rate > 0 {
+					cmd += fmt.Sprintf(" --rate %g/s", doc.Load.Rate)
+				}
+				if doc.Load.Batch > 1 {
+					cmd += fmt.Sprintf(" --batch %d", doc.Load.Batch)
+				}
+				cmds = append(cmds, cmd)
+			}
+			if len(cmds) > 0 {
+				c.Note("situation_not_restored", SevWarn,
+					"the artifact was taken with something in force; the cluster is healthy and idle. To reproduce the situation: "+strings.Join(cmds, " ; "))
+				if !c.JSON && !c.Quiet {
+					fmt.Fprintln(c.Err, "note: the artifact recorded a situation. To reproduce it:")
+					for _, cmd := range cmds {
+						fmt.Fprintf(c.Err, "  %s\n", cmd)
+					}
+				}
+			}
+		}
+	}
+	return res, nil
 }

@@ -1,6 +1,10 @@
 package topology
 
-import "testing"
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+)
 
 func TestHaPresetDerivesEverythingFromTheName(t *testing.T) {
 	top, err := Resolve(Options{Name: "hadb"})
@@ -106,4 +110,42 @@ func contains(s, sub string) bool {
 		}
 		return false
 	})()
+}
+
+// The artifact is the same value the tool builds from, so it has to survive the
+// trip through JSON unchanged -- that is what makes `create --from` a rebuild
+// rather than an approximation.
+func TestTopologySurvivesJSON(t *testing.T) {
+	orig, err := Resolve(Options{
+		Name: "hadb", CPUs: 4, ShmSize: "1g", PingMode: PingICMP, WithBroker: true,
+		Set:       []string{"max_clients=200", "ha_ping_hosts=ping-host"},
+		SetHidden: []string{"ha_calc_score_interval_in_msecs=9000"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig.Image = "csb-base:test"
+
+	b, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Topology
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+
+	if !reflect.DeepEqual(*orig, back) {
+		t.Fatalf("the artifact did not survive the round trip\n orig: %+v\n back: %+v", *orig, back)
+	}
+	// The fields a naive artifact drops, spelled out so a refactor cannot.
+	if back.Parameters.Hidden["ha_calc_score_interval_in_msecs"] != "9000" {
+		t.Error("a hidden parameter must travel: the cluster may be in a state the documentation does not describe")
+	}
+	if back.Resources.CPUs != 4 {
+		t.Error("the CPU quota must travel: it is what makes a host-load profile reproducible")
+	}
+	if !back.WithBroker {
+		t.Error("the broker must travel: quiesce has no door to close without it")
+	}
 }
