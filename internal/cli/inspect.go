@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,17 @@ func readStatus(c *Ctx) (*inspect.Status, error) {
 	f := faultsOf(c)
 	for i := range st.Nodes {
 		st.Nodes[i].Faults = f[st.Nodes[i].Name]
+		// The view is written by the process a lag condition suspends, so it
+		// cannot report its own stall: every column freezes at a constant,
+		// healthy-looking value for as long as the stall lasts. The tool knows
+		// it suspended that process, so it says so rather than letting the
+		// number speak for itself (docs/design/05-inspect.md §3).
+		for _, lbl := range st.Nodes[i].Faults {
+			if strings.HasPrefix(lbl, "lag(") && st.Nodes[i].Repl != nil {
+				c.Note("stale_apply_info", SevError,
+					st.Nodes[i].Name+": a lag condition is in force here, so db_ha_apply_info is frozen by the very process it would be reporting on — these figures are not a measurement of replication")
+			}
+		}
 	}
 	for _, n := range st.Notes {
 		c.Note(n.Code, SevWarn, n.Message)
@@ -431,4 +443,165 @@ func clockSkew(c *Ctx) (time.Duration, bool) {
 		return 0, false
 	}
 	return time.Duration((max - min) * float64(time.Second)), true
+}
+
+func lagFlags(fs *flag.FlagSet) {
+	fs.String("stage", "apply", "copy or apply — the pipeline is two processes that stall independently")
+	fs.String("mechanism", "suspend", "suspend (stage-targeted) or delay (realistic, but cannot say which stage)")
+	fs.String("delay", "200ms", "for --mechanism delay")
+}
+
+func cmdFaultLag(c *Ctx) (any, error) {
+	sel, err := selectorArg(c)
+	if err != nil {
+		return nil, err
+	}
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	names, rerr := a.Resolve(c.Ctx, sel)
+	if rerr != nil || len(names) != 1 {
+		return nil, Precondition("unresolved_selector", "lag needs exactly one node: %v", rerr)
+	}
+	stage := c.str("stage")
+	if stage != "copy" && stage != "apply" {
+		return nil, Usage("--stage must be copy or apply; the engine reports the two separately and they stall independently")
+	}
+	set, err := fault.Open(c.Store.ClusterDir(c.Cluster))
+	if err != nil {
+		return nil, Failed("fault_state", "%v", err)
+	}
+	inj := &fault.Injector{D: a.D, T: t}
+	if err := inj.Lag(c.Ctx, set, names[0], stage, c.str("mechanism"), c.str("delay")); err != nil {
+		return nil, Precondition("lag_failed", "%v", err)
+	}
+	if c.str("mechanism") == "delay" {
+		c.Note("stage_not_separable", SevWarn,
+			"a netem delay slows both stages and cannot say which; --mechanism suspend is what separates them")
+	}
+	// Measured: the heartbeat watches process existence, not progress, so a
+	// suspended stage does not provoke a failover. Worth saying, because it is
+	// the reason this mechanism is usable at all.
+	c.Note("heartbeat_unaffected", SevInfo,
+		"the heartbeat monitors process existence rather than progress, so a suspended stage does not induce a failover")
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "lag on %s: stage=%s mechanism=%s\n", names[0], stage, c.str("mechanism"))
+		printNotes(c)
+	}
+	return map[string]any{"node": names[0], "stage": stage, "mechanism": c.str("mechanism")}, nil
+}
+
+func splitbrainFlags(fs *flag.FlagSet) {
+	fs.String("flavour", "", "ping-survives or no-ping-hosts; default: whichever this cluster's configuration produces")
+	fs.Duration("wait", 30*time.Second, "how long to wait for the engine to reach two masters")
+}
+
+// cmdFaultSplitbrain is a composed verb: the mechanism is a partition, and the
+// flavour follows from whether a ping host survives it. It exists separately
+// because the intent is what a scenario means, and because getting the --keep
+// right is precisely the knowledge the tool is supposed to hold.
+func cmdFaultSplitbrain(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	pingSet := t.Parameters.HA["ha_ping_hosts"] != "" || t.Parameters.HA["ha_tcp_ping_hosts"] != ""
+	want := c.str("flavour")
+	have := "no-ping-hosts"
+	if pingSet {
+		have = "ping-survives"
+	}
+	if want != "" && want != have {
+		return nil, Precondition("flavour_unavailable",
+			"this cluster produces the %q flavour: ha_ping_hosts is %s. The flavour follows from the configuration, so create the cluster with --set ha_ping_hosts=<host> to get %q",
+			have, map[bool]string{true: "set", false: "unset"}[pingSet], want)
+	}
+
+	master, rerr := a.Resolve(c.Ctx, "master")
+	if rerr != nil || len(master) != 1 {
+		return nil, Precondition("unresolved_selector", "%v", rerr)
+	}
+	var peers []string
+	for _, n := range t.Nodes {
+		if n.Name != master[0] {
+			peers = append(peers, n.Name)
+		}
+	}
+	set, err := fault.Open(c.Store.ClusterDir(c.Cluster))
+	if err != nil {
+		return nil, Failed("fault_state", "%v", err)
+	}
+	inj := &fault.Injector{D: a.D, T: t}
+	if err := inj.Partition(c.Ctx, set, master[0], peers, "blackhole"); err != nil {
+		return nil, Failed("partition_failed", "%v", err)
+	}
+
+	deadline := time.Now().Add(c.dur("wait"))
+	var st *inspect.Status
+	masters := 0
+	for time.Now().Before(deadline) {
+		time.Sleep(3 * time.Second)
+		st, _ = inspect.Read(c.Ctx, a.D, t)
+		masters = 0
+		for _, n := range st.Nodes {
+			if n.Server == "registered_and_active" {
+				masters++
+			}
+		}
+		if masters > 1 {
+			break
+		}
+	}
+
+	// The assertion belongs on the engine's own cancel reason, not on the
+	// outcome: both flavours give two masters, and only this line tells them
+	// apart. A test that asserts "two masters" passes for the wrong reason half
+	// the time.
+	reason, _ := inj.CancelReason(c.Ctx, master[0])
+	out := map[string]any{"flavour": have, "masters": masters, "cancel_reason": reason, "partitioned": master[0]}
+	if masters < 2 {
+		c.Note("no_split_brain", SevWarn,
+			fmt.Sprintf("the cluster did not reach two masters within %s; it is partitioned and the condition is in force", c.dur("wait")))
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "split brain (%s): %d master(s)\n", have, masters)
+		if reason != "" {
+			fmt.Fprintf(c.Out, "  the engine says: %s\n", reason)
+		}
+		printNotes(c)
+	}
+	return out, nil
+}
+
+func failcountFlags(fs *flag.FlagSet) {
+	fs.String("table", "", "table to break (default csb_failcount)")
+	fs.Int("rows", 5, "how many rows arrive before the primary key does")
+}
+
+func cmdFaultFailcount(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	master, rerr := a.Resolve(c.Ctx, "master")
+	if rerr != nil || len(master) != 1 {
+		return nil, Precondition("unresolved_selector", "%v", rerr)
+	}
+	rows, _ := strconv.Atoi(c.str("rows"))
+	if rows < 1 {
+		rows = 5
+	}
+	inj := &fault.Injector{D: a.D, T: t}
+	if err := inj.FailCount(c.Ctx, master[0], c.str("table"), rows); err != nil {
+		return nil, Failed("failcount_failed", "%v", err)
+	}
+	// Its damage is data, so clear cannot reverse it: the reversal is a repair.
+	c.Note("not_clearable", SevWarn,
+		"fault clear cannot reverse this — the rows are gone on one node and present on the other. The reversal is ha resync")
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "fail count induced on %s (%d rows arrived before the primary key)\n", master[0], rows)
+		printNotes(c)
+	}
+	return map[string]any{"master": master[0], "rows": rows}, nil
 }

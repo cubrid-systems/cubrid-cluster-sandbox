@@ -24,7 +24,10 @@ type Active struct {
 	Kind      string   `json:"kind"`
 	Target    string   `json:"target"`
 	Mechanism string   `json:"mechanism,omitempty"`
-	Cut       []string `json:"cut,omitempty"` // peers made unreachable from Target
+	Cut       []string `json:"cut,omitempty"`   // peers made unreachable from Target
+	Stage     string   `json:"stage,omitempty"` // copy | apply | both
+	Pid       string   `json:"pid,omitempty"`   // the suspended process, so clear can resume it
+	Delay     string   `json:"delay,omitempty"`
 	Since     string   `json:"since"`
 }
 
@@ -139,6 +142,9 @@ func (i *Injector) Clear(ctx context.Context, s *Set, target string) ([]Active, 
 			kept = append(kept, a)
 			continue
 		}
+		if a.Kind == "lag" {
+			i.clearLag(ctx, a)
+		}
 		if a.Kind == "partition" {
 			for _, p := range a.Cut {
 				ip, err := i.addr(ctx, p)
@@ -206,4 +212,135 @@ func (i *Injector) cut(ctx context.Context, from, to, ip, mechanism string, undo
 		return fmt.Errorf("%s on %s: %s", cmd, from, strings.TrimSpace(res.Stderr))
 	}
 	return nil
+}
+
+// ---- conditions ----------------------------------------------------------
+
+// stagePid finds the pid of one replication stage on a node.
+//
+// Matched on the process's comm, never with pgrep -f: a pattern matched against
+// full command lines also matches the shell running the pgrep, whose own command
+// line contains the pattern. Both stages run as cub_admin, so comm alone is not
+// enough -- the args say which is which.
+func (i *Injector) stagePid(ctx context.Context, node, stage string) (string, error) {
+	res, err := i.D.Exec(ctx, node, i.T.DB,
+		"ps -eo pid=,comm=,args= | awk '$2==\"cub_admin\" && $0 ~ /"+stage+"logdb/ {print $1; exit}'")
+	if err != nil {
+		return "", err
+	}
+	pid := strings.TrimSpace(res.Stdout)
+	if pid == "" {
+		return "", fmt.Errorf("%s has no %slogdb running; only a standby copies and applies", node, stage)
+	}
+	return pid, nil
+}
+
+// Lag holds a replication stage back.
+//
+// Stage-targeted because CUBRID's pipeline is two processes that stall
+// independently, and the engine's own report makes the same split -- "Delay in
+// Copying Active Log" versus "Delay in Applying Copied Log". Suspension is the
+// default mechanism because it is the only one that separates them, it is
+// instant, it reverses on resume, and the heartbeat does not interfere: it
+// watches process existence, not progress (measured, docs/findings/replication-lag.md).
+func (i *Injector) Lag(ctx context.Context, s *Set, node, stage, mechanism, delay string) error {
+	switch mechanism {
+	case "", "suspend":
+		pid, err := i.stagePid(ctx, node, stage)
+		if err != nil {
+			return err
+		}
+		if _, err := i.D.Exec(ctx, node, i.T.DB, "kill -STOP "+pid); err != nil {
+			return err
+		}
+		return s.add(Active{Kind: "lag", Target: node, Mechanism: "suspend",
+			Stage: stage, Pid: pid, Since: time.Now().UTC().Format(time.RFC3339)})
+	case "delay":
+		if delay == "" {
+			delay = "200ms"
+		}
+		// netem is the realism mechanism and cannot say which stage it slows,
+		// which is exactly why it is not the default.
+		res, err := i.D.R.Run(ctx, "docker", "exec", "-u", "0", node, "sh", "-c",
+			"tc qdisc add dev eth0 root netem delay "+delay)
+		if err != nil {
+			return err
+		}
+		if res.ExitCode != 0 {
+			return fmt.Errorf("tc on %s: %s", node, strings.TrimSpace(res.Stderr))
+		}
+		return s.add(Active{Kind: "lag", Target: node, Mechanism: "delay",
+			Stage: "both", Delay: delay, Since: time.Now().UTC().Format(time.RFC3339)})
+	}
+	return fmt.Errorf("unknown mechanism %q (want suspend or delay)", mechanism)
+}
+
+// clearLag reverses one lag condition.
+func (i *Injector) clearLag(ctx context.Context, a Active) {
+	switch a.Mechanism {
+	case "suspend":
+		if a.Pid != "" {
+			_, _ = i.D.Exec(ctx, a.Target, i.T.DB, "kill -CONT "+a.Pid)
+		}
+	case "delay":
+		_, _ = i.D.R.Run(ctx, "docker", "exec", "-u", "0", a.Target, "sh", "-c",
+			"tc qdisc del dev eth0 root")
+	}
+}
+
+// FailCount moves fail_counter deliberately.
+//
+// The recipe is the field's own, written down in the team's HA study notes:
+// create a table, insert rows, THEN add the primary key, then delete the pre-key
+// rows on the master. The pre-key rows never replicated, so the applier meets a
+// delete for a row it does not have. fail_counter is what separates broken
+// replication from slow replication, and until this verb existed the tool had no
+// way to move it -- an inspector claim nobody can test is not a claim.
+func (i *Injector) FailCount(ctx context.Context, master, table string, rows int) error {
+	if table == "" {
+		table = "csb_failcount"
+	}
+	vals := make([]string, 0, rows)
+	for n := 1; n <= rows; n++ {
+		vals = append(vals, fmt.Sprintf("(%d,'r%d')", n, n))
+	}
+	steps := []string{
+		fmt.Sprintf("DROP TABLE IF EXISTS %s;", table),
+		fmt.Sprintf("CREATE TABLE %s (i INT, s VARCHAR(20));", table),
+		fmt.Sprintf("INSERT INTO %s VALUES %s;", table, strings.Join(vals, ",")),
+		fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT pk_%s PRIMARY KEY (i);", table, table),
+		fmt.Sprintf("DELETE FROM %s;", table),
+	}
+	for _, sql := range steps {
+		res, err := i.D.Exec(ctx, master, i.T.DB,
+			"csql -u dba -t -N -c \""+sql+"\" "+i.T.DB)
+		if err != nil {
+			return err
+		}
+		if res.ExitCode != 0 && !strings.Contains(res.Stdout+res.Stderr, "does not exist") {
+			return fmt.Errorf("%s: %s", sql, strings.TrimSpace(tailLine(res.Stdout+res.Stderr)))
+		}
+	}
+	return nil
+}
+
+func tailLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
+}
+
+// CancelReason reads the engine's own verdict out of a node's master log. Both
+// split-brain flavours give two masters and are distinguishable only by this
+// line, so an assertion belongs on it rather than on the outcome
+// (docs/design/04-faults.md §5).
+func (i *Injector) CancelReason(ctx context.Context, node string) (string, error) {
+	res, err := i.D.Exec(ctx, node, i.T.DB,
+		// `.*` and not a negated class: inside single quotes the shell passes
+		// [^\r\n] to grep as "not a backslash, r or n", which truncates the
+		// reason at the first r -- and the reason is the assertion.
+		"grep -ho '\\[Fail[a-z]*\\] \\[[A-Za-z]*\\].*' /work/"+node+"/cubrid/log/*master.err 2>/dev/null | tail -1")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(res.Stdout), nil
 }

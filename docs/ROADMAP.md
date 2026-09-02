@@ -63,7 +63,7 @@ G5, G6, G7, G9.
 
 | # | Item | Acceptance |
 |---|---|---|
-| M2.1 | Condition verbs — `lag`, `splitbrain`, held until `heal` (`design/04-faults.md`) | lag is addressable per replication stage; split brain is assertable on the engine's own cancel reason |
+| M2.1 | Condition verbs — `lag`, `splitbrain`, held until `heal` (`design/04-faults.md`) | **done 2026-09-02**. `fault lag --stage copy\|apply --mechanism suspend\|delay` suspends the named stage and `clear` resumes it; `fault splitbrain` induces two masters and reports the engine's own cancel reason, refusing a flavour the cluster's configuration cannot produce; `fault failcount` moves `fail_counter` by the field's own recipe and says that `clear` cannot reverse it. Measured: a suspended applier freezes `db_ha_apply_info` at a healthy-looking `lag=13`, and clearing it moves to `lag=2718` in one step — the lie and the truth, on demand |
 | M2.2 | Replication observability with a master-side reference | a lag series that stays true through an apply stall, a copy stall, and a role change |
 | M2.3 | `describe` as a shareable artifact | the output recreates the same cluster on another machine and fits in a JIRA issue |
 | M2.4 | The surface `cubrid-testkit` provisions through | testkit calls it to set up and tear down without screen-scraping |

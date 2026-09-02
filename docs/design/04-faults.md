@@ -158,6 +158,12 @@ first ([`../requirements/02-ha-role-transition-field-evidence.md`](../requiremen
 Until it reproduces, the table's last row is a claim from the tracker, and the
 tool should say so.
 
+**The flavour follows from the configuration, so the tool refuses to fake one.**
+Asking for `ping-survives` on a cluster with no `ha_ping_hosts` is a request the
+mechanism cannot satisfy — there is no ping host to keep — and the verb says so
+and names the `--set` that would make it available, rather than producing the
+other flavour and calling it the one that was asked for.
+
 Two consequences for this layer:
 
 - The verb is composed, not primitive: `ping-survives` is

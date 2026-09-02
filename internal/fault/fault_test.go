@@ -40,3 +40,26 @@ func TestSetRoundTrip(t *testing.T) {
 		t.Error("a condition carries when it was entered")
 	}
 }
+
+// A lag condition has to remember which process it suspended, or clear cannot
+// resume it and the cluster is left with a stopped replication stage that
+// nothing in the tool knows about.
+func TestLagConditionRemembersWhatItStopped(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if err := s.add(Active{Kind: "lag", Target: "hadb-n2", Mechanism: "suspend",
+		Stage: "apply", Pid: "4711", Since: "2026-09-02T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := again.List[0]
+	if got.Stage != "apply" {
+		t.Errorf("stage lost: %+v — the pipeline is two processes and clear has to know which", got)
+	}
+	if got.Pid != "4711" {
+		t.Errorf("pid lost: %+v — SIGCONT needs it", got)
+	}
+}

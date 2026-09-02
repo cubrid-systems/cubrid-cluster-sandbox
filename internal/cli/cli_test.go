@@ -42,7 +42,10 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		{"too few arguments", []string{"cluster"}, ExitUsage},
 		{"a verb that needs a cluster and was given none", []string{"record", "show"}, ExitUsage},
 		{"a cluster that does not exist", []string{"record", "show", "--cluster", "nope"}, ExitPrecondition},
-		{"specified but not built", []string{"fault", "lag", "slave", "--cluster", "nope"}, ExitFailed},
+		// Any verb the surface defines and this phase has not built. When repl
+		// watch lands, this line fails loudly and should be pointed at whatever is
+		// still unbuilt -- that is the test doing its job.
+		{"specified but not built", []string{"repl", "watch", "--cluster", "nope"}, ExitFailed},
 		{"a command that works", []string{"cluster", "ls", "--timeout", "5s"}, ExitOK},
 	}
 	for _, c := range cases {
@@ -84,7 +87,7 @@ func TestEnvelopeShape(t *testing.T) {
 // note -- a consumer must not have to parse stderr to learn why.
 func TestFailureIsStillTheEnvelope(t *testing.T) {
 	home := t.TempDir()
-	code, out, _ := invoke(t, home, "fault", "lag", "slave", "--cluster", "hadb", "--json")
+	code, out, _ := invoke(t, home, "repl", "watch", "--cluster", "hadb", "--json")
 	if code != ExitFailed {
 		t.Fatalf("exit %d, want %d\n%s", code, ExitFailed, out)
 	}
@@ -122,15 +125,16 @@ func TestDescribeAndRecordRoundTrip(t *testing.T) {
 	}
 
 	// A mutating verb opens the record without anyone switching it on. It fails
-	// (not built yet) and must still have recorded that it was asked for.
-	if code, _, _ := invoke(t, home, "fault", "lag", "slave", "--cluster", "hadb"); code != ExitFailed {
+	// (not built yet) and must still have recorded that it was asked for, which
+	// is why this one has to be both Mutates and unbuilt.
+	if code, _, _ := invoke(t, home, "ha", "resync", "--cluster", "hadb"); code != ExitFailed {
 		t.Fatalf("expected the not-implemented failure, got %d", code)
 	}
 	code, out, _ = invoke(t, home, "record", "show", "--cluster", "hadb", "--json")
 	if code != ExitOK {
 		t.Fatalf("record show exited %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "command.fault.lag") {
+	if !strings.Contains(out, "command.ha.resync") {
 		t.Errorf("the record did not open on a state-changing command:\n%s", out)
 	}
 

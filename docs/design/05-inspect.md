@@ -48,6 +48,13 @@ stable, and it needs no output-format contract. That is why the design chose it.
 **`db_ha_apply_info` alone is not a lag measurement.** Three measured ways it
 misleads, each in a different direction:
 
+The tool can say all three, because it is the thing that caused them: when a
+lag condition is in force on a node, `repl status` and `cluster status` mark that
+node's figures `stale_apply_info` at severity `error` rather than printing them
+as a measurement. Demonstrated on demand — a suspended applier reports a constant
+`lag=13` for as long as the stall lasts, and clearing it moves the figure to
+`lag=2718` in one step.
+
 **It freezes.** The row is written by `applylogdb`. Suspend the applier and
 *every* column stops moving — `eof_lsa` included, although copying never
 stopped — so the view reports a **constant, healthy-looking** lag for as long as

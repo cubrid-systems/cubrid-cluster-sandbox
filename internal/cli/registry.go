@@ -52,9 +52,9 @@ var registry = []Command{
 
 	// ---- fault -----------------------------------------------------------
 	{Noun: "fault", Verb: "partition", Args: "<selector>", Summary: "cut routes, not interfaces", Mutates: true, Flags: partitionFlags, Run: cmdFaultPartition},
-	{Noun: "fault", Verb: "lag", Args: "<selector>", Summary: "stage-targeted replication lag", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "fault", Verb: "splitbrain", Summary: "two masters, on request", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "fault", Verb: "failcount", Args: "<selector>", Summary: "move fail_counter deliberately", Mutates: true, Run: notYet("04-faults.md")},
+	{Noun: "fault", Verb: "lag", Args: "<selector>", Summary: "stage-targeted replication lag", Mutates: true, Flags: lagFlags, Run: cmdFaultLag},
+	{Noun: "fault", Verb: "splitbrain", Summary: "two masters, on request", Mutates: true, Flags: splitbrainFlags, Run: cmdFaultSplitbrain},
+	{Noun: "fault", Verb: "failcount", Summary: "move fail_counter deliberately", Mutates: true, Flags: failcountFlags, Run: cmdFaultFailcount},
 	{Noun: "fault", Verb: "ping-unavailable", Args: "<selector>", Summary: "the engine cannot ask", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "fault", Verb: "clear", Args: "[<selector>]", Summary: "reverse a condition", Mutates: true, Run: cmdFaultClear},
 	{Noun: "fault", Verb: "ls", Summary: "what is currently in force", Run: cmdFaultLs},
