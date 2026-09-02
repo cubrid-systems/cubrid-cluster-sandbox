@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/selector"
 )
@@ -196,10 +197,25 @@ func cmdClusterDescribe(c *Ctx) (any, error) {
 
 func sinceFlag(c *Ctx, name string) time.Duration { return c.dur(name) }
 
+// harvest pulls the engine's own HA lines into the timeline before anything
+// reads it, so a record is never missing what the engine said while the tool was
+// not looking.
+func harvest(c *Ctx) {
+	a, t, err := loadCluster(c)
+	if err != nil || c.Record == nil {
+		return
+	}
+	if n, herr := c.Record.Harvest(a.Workdir, t.NodeNames()); herr == nil && n > 0 {
+		c.Note("engine_events_harvested", SevInfo,
+			fmt.Sprintf("%d engine line(s) added to the timeline", n))
+	}
+}
+
 func cmdRecordShow(c *Ctx) (any, error) {
 	if err := requireCluster(c); err != nil {
 		return nil, err
 	}
+	harvest(c)
 	var since time.Time
 	if d := sinceFlag(c, "since"); d > 0 {
 		since = time.Now().Add(-d)
@@ -227,21 +243,28 @@ func cmdRecordExport(c *Ctx) (any, error) {
 	if out == "" {
 		return nil, Usage("record export needs --out FILE")
 	}
+	harvest(c)
 	entries, err := c.Record.Read(time.Time{})
 	if err != nil {
 		return nil, Failed("record_unreadable", "%v", err)
 	}
-	var describe any
-	if b, rerr := os.ReadFile(c.Store.DescribePath(c.Cluster)); rerr == nil {
-		_ = json.Unmarshal(b, &describe)
-	} else {
-		c.Note("no_describe", SevWarn,
-			"no describe artifact to carry: a timeline without the topology it ran against is not evidence")
+
+	// The describe as it stood when the record opened, not as it stands now: the
+	// cluster may have been changed since, and the timeline ran against the
+	// former.
+	describe := c.Record.DescribeAtOpen()
+	if describe == nil {
+		if b, rerr := os.ReadFile(c.Store.DescribePath(c.Cluster)); rerr == nil {
+			describe = b
+			c.Note("describe_not_snapshotted", SevWarn,
+				"this record predates the describe snapshot, so the current artifact is carried instead")
+		} else {
+			c.Note("no_describe", SevWarn,
+				"no describe artifact to carry: a timeline without the topology it ran against is not evidence")
+		}
 	}
-	doc := map[string]any{
-		"schema": SchemaVersion, "cluster": c.Cluster,
-		"describe": describe, "timeline": entries,
-	}
+
+	doc := record.Build(c.Cluster, entries, describe, invalidities(c))
 	b, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return nil, Failed("export_failed", "%v", err)
@@ -253,9 +276,12 @@ func cmdRecordExport(c *Ctx) (any, error) {
 		return nil, Failed("export_failed", "cannot write %s: %v", out, err)
 	}
 	if !c.JSON && !c.Quiet {
-		fmt.Fprintf(c.Out, "wrote %s (%d entries)\n", out, len(entries))
+		fmt.Fprintf(c.Out, "wrote %s (%d entries, %d role change(s), valid=%v)\n",
+			out, len(entries), len(doc.RoleChanges), doc.Validity.Valid)
+		printNotes(c)
 	}
-	return map[string]any{"out": out, "entries": len(entries)}, nil
+	return map[string]any{"out": out, "entries": len(entries),
+		"role_changes": len(doc.RoleChanges), "valid": doc.Validity.Valid}, nil
 }
 
 // ParseSelector is the shared front door for every verb that takes one, so the

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/fault"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/inspect"
@@ -348,4 +349,58 @@ func describeWithFaults(c *Ctx, doc map[string]any) map[string]any {
 	_ = json.Unmarshal(b, &raw)
 	doc["faults"] = raw
 	return doc
+}
+
+// invalidities are the findings that make a run untrustworthy. They are stated
+// rather than inferred: a reader must not have to work out for themselves that
+// a measurement was taken while a fault was in force or while the nodes'
+// clocks disagreed by more than the interval being measured.
+func invalidities(c *Ctx) []string {
+	var reasons []string
+
+	set, err := fault.Open(c.Store.ClusterDir(c.Cluster))
+	if err == nil && len(set.List) > 0 {
+		reasons = append(reasons, "fault_active")
+	}
+
+	// The measurements this record exists for are single-digit seconds. Two
+	// containers on one host share a clock; the moment a topology spans hosts
+	// they do not, and a three-second skew silently becomes a three-second
+	// finding (docs/design/07-record.md §4).
+	if skew, ok := clockSkew(c); ok && skew > time.Second {
+		reasons = append(reasons, "clock_skew")
+		c.Note("clock_skew", SevWarn,
+			fmt.Sprintf("the nodes' clocks differ by %s, which is not small next to the intervals this records", skew.Round(time.Millisecond)))
+	}
+	return reasons
+}
+
+func clockSkew(c *Ctx) (time.Duration, bool) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return 0, false
+	}
+	var min, max float64
+	seen := 0
+	for _, n := range t.Nodes {
+		res, err := a.D.Exec(c.Ctx, n.Name, t.DB, "date +%s.%N")
+		if err != nil || res.ExitCode != 0 {
+			continue
+		}
+		var v float64
+		if _, err := fmt.Sscan(strings.TrimSpace(res.Stdout), &v); err != nil {
+			continue
+		}
+		if seen == 0 || v < min {
+			min = v
+		}
+		if seen == 0 || v > max {
+			max = v
+		}
+		seen++
+	}
+	if seen < 2 {
+		return 0, false
+	}
+	return time.Duration((max - min) * float64(time.Second)), true
 }

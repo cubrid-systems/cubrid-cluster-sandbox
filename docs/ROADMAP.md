@@ -19,9 +19,9 @@ says what order they get built in and where the project is.
 are done. One command builds a two-node HA pair and reaches `serving`, the three
 failure verbs the CBRD-26983 verification needed work and are addressed by role,
 and the cluster answers what state it is in without anything parsing
-human-formatted text. What remains in phase 1 is M1.7, the run record's
-`export`/`show` beyond the skeleton, and the scenario-set replay M1.5's original
-acceptance names. One external
+human-formatted text. What remains in phase 1 is the scenario-set replay M1.5's original acceptance
+names — the CBRD-26983 id sequence — after which phase 2 starts with the load
+driver, because everything else in it measures something under load. One external
 dependency is outstanding and it shapes phase 1 rather than blocking it — see
 *Open* below.
 
@@ -55,7 +55,7 @@ verification needed, and can ask it what state it is in.
 | M1.4 | Assembly — config generation, the slave chain, start ordering (`design/03-assembly.md`) | zero manual interventions; a first-time user needs no ordering knowledge |
 | M1.5 | Event verbs — `stop`, `kill`, `partition`, `heal`, `promote`, role-addressed | **done 2026-09-02** for `node stop` / `kill` / `start` and `fault partition` / `clear` / `ls`. Measured through the tool: a killed master fails over in 5 s, `master` then resolves to the other machine with no script change, a route-level partition produces two masters in 6 s, and clearing it lets the engine resolve the split brain — with the cancel reason in the log that tells the flavours apart. `promote` is M2 |
 | M1.6 | Inspector tier 1 + tier 2 (`design/05-inspect.md`) | **done 2026-09-02** — `cluster status`, `node status`, `ha status`, `repl status`. Liveness from the runtime, role and process state from `changemode` and `heartbeat status`, replication position from `db_ha_apply_info` over SQL. Copy progress is *not* reported: it needs a master-side reference, which is M2.2, and until then the note says so rather than the number lying |
-| M1.7 | The run record (`design/07-record.md`) | every state-changing command appends without being asked; `record export` carries the `describe` that opened it. In phase 1 because a record a user has to switch on is missing from the run that mattered |
+| M1.7 | The run record (`design/07-record.md`) | **done 2026-09-02** — every state-changing command appends without being asked, the engine's own HA lines are harvested into the same timeline under a separate actor, `export` carries the `describe` as it stood when the record opened, and every role change is reported with both intervals. First run: a promotion **5.9 s** after `node kill`, against the **2.5 s** the settings predict, with those settings in the document |
 
 ## Phase 2 — the anomalies, and the second consumer
 

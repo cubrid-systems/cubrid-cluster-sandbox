@@ -121,6 +121,10 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir string, uid, gid
 		"-v", filepath.Join(nodeWork, "db")+":/db", // the same container path on every node
 		"-e", "HOME=/work/"+node.Name,
 		"-e", "CUBRID_DATABASES=/db",
+		// The engine's log timestamps carry no zone, so the record would have to
+		// guess one. Pinning it removes the guess: everything a node writes is
+		// UTC, which is what the record stores.
+		"-e", "TZ=UTC",
 		t.Image,
 		"sleep", "infinity",
 	)

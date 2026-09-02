@@ -14,6 +14,7 @@ import (
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/assembly"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/backend"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/engine"
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
@@ -137,6 +138,14 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 	b, _ := json.MarshalIndent(t, "", "  ")
 	if err := os.WriteFile(c.Store.DescribePath(name), append(b, '\n'), 0o644); err != nil {
 		return nil, Failed("store_unwritable", "%v", err)
+	}
+	// The record opens here, and it keeps the artifact as it stood at that
+	// moment: a timeline without the topology it ran against is not evidence.
+	if c.Record == nil {
+		c.Record = record.Open(c.Store.RecordPath(name))
+	}
+	if err := c.Record.SnapshotDescribe(append(b, '\n')); err != nil {
+		c.Note("describe_not_snapshotted", SevWarn, err.Error())
 	}
 
 	if err := d.EnsureNetwork(c.Ctx, t.Network, t.Cluster); err != nil {

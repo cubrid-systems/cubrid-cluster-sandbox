@@ -104,6 +104,13 @@ by outcome and distinguishable only by the cancel reason
 ([`04-faults.md`](04-faults.md) §5), so the record quotes the line rather than
 summarising it. An assertion belongs on text the engine wrote.
 
+Measured on the first run that produced one: a promotion **5.9 s** after
+`node kill` against a predicted **2.5 s**, with `ha_heartbeat_interval_in_msecs`,
+`ha_max_heartbeat_gap`, `ha_calc_score_interval_in_msecs` and `ha_ping_hosts`
+recorded beside it. That is one document containing both numbers and the inputs
+that decide them, produced without anyone remembering to write anything down —
+which is the thing the field's stalled measurement never had.
+
 **`predicted` is arithmetic, and the record says so.** 5 × 500 ms is what the
 documented behaviour implies; the lab restated that documented behaviour to a
 customer in 2023. It is **not** a claim about what the engine does — the field
