@@ -291,6 +291,17 @@ against auto-clearing, and the strongest support
 [`05-inspect.md`](05-inspect.md) §3 has. `resync` reports what it repaired and
 re-reads the counter; if the counter stands, the output says the counter stands.
 
+**What the `table` path does today is compare, not repair, and it says so.** It
+reads the affected tables out of the applier's error log and counts rows on both
+nodes. That answers the question the field says it answers by hand, one key at a
+time: *"fail count는 있지만 오류 데이터를 조회하면 문제가 없어 엔지니어 판단에 의해
+fail count만 초기화하는 경우도 많이 발생"* — a counter with no divergence under it
+is their common case. Measured here: seven induced failures, `master=0
+standby=0`, verdict **the fail count is a scar rather than a divergence**. When
+the counts *do* differ the command stops and names what the field does instead —
+a table rebuild from the master, or the whole slave — because a repair that does
+nothing under a name that says otherwise is worse than an honest refusal.
+
 ## 9. `quiesce` — not a fault, and it still needs every property of a condition
 
 ```
@@ -326,6 +337,12 @@ mechanism closes a door the tool does not own: a user's own `csql` session on th
 node writes regardless. `cluster quiesce` with no broker **refuses** rather than
 reporting success it cannot deliver (exit 3), and `cluster status` shows which
 mechanism is in force so a reader knows which writers were actually stopped.
+
+Measured through the door itself, with a client that goes through the broker
+rather than around it. Quiesced at `RO`, a write returns `FAIL(-581)` and a read
+returns `OK`; after `cluster resume`, the same write returns `OK`. The mechanism
+is `broker_changer`, which applies the mode to a running broker rather than
+needing a restart.
 
 ## 10. `ping-unavailable` — a condition on the mechanism the engine decides with
 

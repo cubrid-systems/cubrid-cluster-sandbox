@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/assembly"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/fault"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/inspect"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/load"
@@ -610,4 +612,207 @@ func cmdFaultFailcount(c *Ctx) (any, error) {
 		printNotes(c)
 	}
 	return map[string]any{"master": master[0], "rows": rows}, nil
+}
+
+func quiesceFlags(fs *flag.FlagSet) {
+	fs.String("mode", "ro", "ro (reads allowed) or so (slave only)")
+	fs.String("mechanism", "broker", "broker (the field's mechanism) or load (this tool's own driver)")
+}
+
+func cmdClusterQuiesce(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	mech := c.str("mechanism")
+	set, ferr := fault.Open(c.Store.ClusterDir(c.Cluster))
+	if ferr != nil {
+		return nil, Failed("fault_state", "%v", ferr)
+	}
+	inj := &fault.Injector{D: a.D, T: t}
+
+	switch mech {
+	case "", "broker":
+		if !t.WithBroker {
+			// Refuse rather than report success it cannot deliver: a cluster
+			// with no broker has no door to close.
+			return nil, Precondition("no_broker",
+				"this cluster has no broker, so there is no door to close. Create it with --with-broker, or use --mechanism load to stop this tool's own writer")
+		}
+		if err := inj.Quiesce(c.Ctx, set, t.NodeNames(), c.str("mode"), assembly.BrokerName); err != nil {
+			return nil, Failed("quiesce_failed", "%v", err)
+		}
+	case "load":
+		d := &load.Driver{D: a.D, T: t, Workdir: a.Workdir}
+		for _, n := range t.Nodes {
+			_ = d.Stop(c.Ctx, n.Name)
+		}
+	default:
+		return nil, Usage("unknown --mechanism %q (want broker or load)", mech)
+	}
+
+	// Neither mechanism closes a door the tool does not own.
+	c.Note("writers_not_all_stopped", SevWarn,
+		"a session opened directly against a node still writes; quiesce closes the broker and this tool's driver, and says which")
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "quiesced %s (mechanism=%s mode=%s)\n", c.Cluster, orUnknown(mech), c.str("mode"))
+		printNotes(c)
+	}
+	return map[string]any{"mechanism": mech, "mode": c.str("mode")}, nil
+}
+
+func cmdClusterResume(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	set, ferr := fault.Open(c.Store.ClusterDir(c.Cluster))
+	if ferr != nil {
+		return nil, Failed("fault_state", "%v", ferr)
+	}
+	inj := &fault.Injector{D: a.D, T: t}
+	cleared, rerr := inj.Resume(c.Ctx, set, assembly.BrokerName)
+	if rerr != nil {
+		return nil, Failed("resume_failed", "%v", rerr)
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "resumed %s (%d condition(s) lifted)\n", c.Cluster, len(cleared))
+	}
+	return map[string]any{"resumed": cleared}, nil
+}
+
+func resyncFlags(fs *flag.FlagSet) {
+	fs.String("path", "", "resume, table or slave; default: chosen from what is observed")
+	fs.Bool("dry-run", false, "say what would be done and why, and do nothing")
+}
+
+// cmdHaResync is the reversal fault clear cannot perform, because a fail count's
+// damage is data. Three paths, which are the three the field chooses between,
+// and the tool reports how it decided rather than deciding silently.
+func cmdHaResync(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	st, serr := inspect.Read(c.Ctx, a.D, t)
+	if serr != nil {
+		return nil, Failed("inspect_failed", "%v", serr)
+	}
+	var master, slave string
+	for _, n := range st.Nodes {
+		switch n.Server {
+		case "registered_and_active":
+			master = n.Name
+		case "registered_and_standby":
+			slave = n.Name
+		}
+	}
+	if len(c.Args) > 0 {
+		names, rerr := a.Resolve(c.Ctx, c.Args[0])
+		if rerr != nil || len(names) != 1 {
+			return nil, Precondition("unresolved_selector", "%v", rerr)
+		}
+		slave = names[0]
+	}
+	if master == "" || slave == "" {
+		return nil, Precondition("not_a_pair", "resync needs one active and one standby node; found master=%q standby=%q", master, slave)
+	}
+
+	fail := 0
+	for _, n := range st.Nodes {
+		if n.Name == slave && n.Repl != nil && n.Repl.Fail != nil {
+			fail = *n.Repl.Fail
+		}
+	}
+	inj := &fault.Injector{D: a.D, T: t}
+	tables, _ := inj.FailRows(c.Ctx, slave)
+
+	// How the field chooses: nothing wrong, repair the affected table, or rebuild
+	// the slave. The changeover sits somewhere around a thousand rows -- which is
+	// their number, not one this project measured, and it is named as theirs.
+	path, why := c.str("path"), ""
+	switch {
+	case path != "":
+		why = "you asked for it"
+	case fail == 0:
+		path, why = "resume", "fail_counter is 0: replication is behind at worst, not broken"
+	case fail >= 1000:
+		path, why = "slave", fmt.Sprintf("fail_counter is %d, past the point the field stops repairing tables and rebuilds", fail)
+	case len(tables) > 0:
+		path, why = "table", fmt.Sprintf("fail_counter is %d and the applier's log names %d table(s)", fail, len(tables))
+	default:
+		path, why = "resume", fmt.Sprintf("fail_counter is %d but the applier's log names no table, so there is nothing to repair from", fail)
+	}
+
+	names := make([]string, 0, len(tables))
+	for k := range tables {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+
+	out := map[string]any{"master": master, "slave": slave, "fail_counter": fail,
+		"tables": names, "path": path, "decided_because": why}
+
+	if c.fs.Lookup("dry-run").Value.String() == "true" {
+		if !c.JSON && !c.Quiet {
+			fmt.Fprintf(c.Out, "would take path %q — %s\n", path, why)
+			for _, n := range names {
+				fmt.Fprintf(c.Out, "  affected: %s (%d failure(s) logged)\n", n, tables[n])
+			}
+		}
+		return out, nil
+	}
+
+	switch path {
+	case "resume":
+		// Nothing to do, and saying so is the answer.
+	case "table":
+		diffs := map[string][2]int{}
+		for _, n := range names {
+			m, sl, cerr := inj.CompareTable(c.Ctx, master, slave, n)
+			if cerr != nil {
+				c.Note("table_not_comparable", SevWarn, n+": "+cerr.Error())
+				continue
+			}
+			if m != sl {
+				diffs[n] = [2]int{m, sl}
+			}
+			if !c.JSON && !c.Quiet {
+				verdict := "same row count"
+				if m != sl {
+					verdict = "DIFFERENT"
+				}
+				fmt.Fprintf(c.Out, "  %-28s master=%-8d standby=%-8d %s\n", n, m, sl, verdict)
+			}
+		}
+		out["differs"] = diffs
+		if len(diffs) == 0 {
+			// The common case in the field, and the one nobody could confirm
+			// cheaply: a counter with no divergence under it.
+			c.Note("no_data_difference", SevInfo,
+				"every affected table has the same row count on both nodes; the fail count is a scar rather than a divergence")
+		} else {
+			// Repairing a real divergence is the field's table rebuild, and this
+			// tool does not do it yet. Saying so beats doing nothing under a name
+			// that says otherwise.
+			return out, Failed("not_implemented",
+				"%d table(s) differ and rebuilding one is not built here yet; the field's path is a table rebuild from the master, or ha_make_slavedb.sh for the whole slave", len(diffs))
+		}
+	case "slave":
+		return nil, Failed("not_implemented",
+			"rebuilding a slave in place is the online rebuild the field does with ha_make_slavedb.sh, and it is not built here yet; cluster destroy and cluster create rebuild the pair")
+	default:
+		return nil, Usage("unknown --path %q (want resume, table or slave)", path)
+	}
+
+	// The counter is not zeroed to make this output tidy. The engine leaves it
+	// standing on purpose: a zero would let an operator conclude master and slave
+	// agree when they do not.
+	c.Note("fail_counter_left_standing", SevInfo,
+		"fail_counter is not reset by this command; re-read it after replication has moved")
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "resync path %q — %s\n", path, why)
+		printNotes(c)
+	}
+	return out, nil
 }

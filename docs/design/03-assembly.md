@@ -231,8 +231,8 @@ accepts a file with a key it ignores and the divergence is then silent
 
 ## 6. The broker, when the topology has one
 
-**Nothing in the assembly starts a broker today**, and that is a gap rather than
-a decision. `csql` on the node reaches `cub_server` directly, so the four-step
+**`--with-broker` starts one; without it nothing does**, and that default is a
+decision rather than a gap. `csql` on the node reaches `cub_server` directly, so the four-step
 assembly needs no broker and the harness never started one — but the field's way
 of blocking writes is to move the broker's `ACCESS_MODE`, and a cluster with no
 broker has no door to close

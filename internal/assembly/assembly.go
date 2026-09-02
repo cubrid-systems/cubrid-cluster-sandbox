@@ -137,6 +137,12 @@ func (a *Assembler) WriteConfig(node topology.Node, enginePath string) error {
 		}
 	}
 
+	if a.T.WithBroker {
+		if err := os.WriteFile(filepath.Join(root, "conf", "cubrid_broker.conf"), a.brokerConf(), 0o644); err != nil {
+			return err
+		}
+	}
+
 	base, err := os.ReadFile(filepath.Join(enginePath, "conf", "cubrid.conf"))
 	if err != nil {
 		return fmt.Errorf("the engine tree has no conf/cubrid.conf: %w", err)
@@ -207,6 +213,56 @@ func sortedKeys(m map[string]string) []string {
 		}
 	}
 	return out
+}
+
+// BrokerName is the one broker this tool defines. Writing our own file rather
+// than editing the engine's shipped one means the name is known, which is what
+// broker_changer needs and what quiesce addresses.
+const BrokerName = "csb"
+
+// brokerConf is a single broker, RW, reachable only from inside the node. No
+// port is published: access stays node exec and node shell, which is what keeps
+// port bookkeeping absent ([`../DESIGN.md`] §6).
+func (a *Assembler) brokerConf() []byte {
+	return []byte(`# written by csb
+[broker]
+MASTER_SHM_ID           =30001
+ADMIN_LOG_FILE          =log/broker/cubrid_broker.log
+
+[%` + BrokerName + `]
+SERVICE                 =ON
+BROKER_PORT             =33000
+MIN_NUM_APPL_SERVER     =2
+MAX_NUM_APPL_SERVER     =10
+APPL_SERVER_SHM_ID      =33000
+LOG_DIR                 =log/broker/sql_log
+ERROR_LOG_DIR           =log/broker/error_log
+SQL_LOG                 =ON
+TIME_TO_KILL            =120
+SESSION_TIMEOUT         =300
+KEEP_CONNECTION         =AUTO
+ACCESS_MODE             =RW
+`)
+}
+
+// StartBroker starts the broker on every node, once the group is serving.
+//
+// After serving, not before: a broker in front of a server that is still
+// registered_and_to_be_active accepts a connection and fails the first write,
+// which is trap T5 wearing a different hat.
+func (a *Assembler) StartBroker(ctx context.Context) error {
+	if !a.T.WithBroker {
+		return nil
+	}
+	for _, n := range a.T.Nodes {
+		logPath := "/work/" + n.Name + "/broker-start.log"
+		if _, err := a.D.Exec(ctx, n.Name, a.T.DB,
+			"cubrid broker start > "+logPath+" 2>&1; true"); err != nil {
+			return err
+		}
+	}
+	a.step("broker %s started on %d node(s)", BrokerName, len(a.T.Nodes))
+	return nil
 }
 
 // ---- seeded --------------------------------------------------------------
@@ -443,7 +499,11 @@ func (a *Assembler) Up(ctx context.Context) (map[string]string, error) {
 		return nil, err
 	}
 	a.step("waiting for %s to reach registered_and_active", a.Master().Name)
-	return a.WaitServing(ctx)
+	states, err := a.WaitServing(ctx)
+	if err != nil {
+		return states, err
+	}
+	return states, a.StartBroker(ctx)
 }
 
 // Down stops every node gracefully: the server flushes, which is a different

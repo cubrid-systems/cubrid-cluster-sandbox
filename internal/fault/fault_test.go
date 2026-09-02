@@ -63,3 +63,26 @@ func TestLagConditionRemembersWhatItStopped(t *testing.T) {
 		t.Errorf("pid lost: %+v — SIGCONT needs it", got)
 	}
 }
+
+// Quiesce is not a fault, and it is stored beside them for the same reason: it
+// is held, it must be cleared, and describe has to carry it. The mode travels
+// because RO and SO are different doors.
+func TestQuiesceIsHeldState(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	if err := s.add(Active{Kind: "quiesce", Target: "hadb-n1,hadb-n2",
+		Mechanism: "broker", Mode: "RO", Since: "2026-09-02T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := again.List[0]
+	if got.Kind != "quiesce" || got.Mode != "RO" {
+		t.Errorf("quiesce did not survive: %+v", got)
+	}
+	if got.Target != "hadb-n1,hadb-n2" {
+		t.Errorf("resume has to know which doors it closed: %+v", got)
+	}
+}

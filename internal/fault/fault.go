@@ -28,6 +28,7 @@ type Active struct {
 	Stage     string   `json:"stage,omitempty"` // copy | apply | both
 	Pid       string   `json:"pid,omitempty"`   // the suspended process, so clear can resume it
 	Delay     string   `json:"delay,omitempty"`
+	Mode      string   `json:"mode,omitempty"` // quiesce: RO | SO
 	Since     string   `json:"since"`
 }
 
@@ -343,4 +344,125 @@ func (i *Injector) CancelReason(ctx context.Context, node string) (string, error
 		return "", err
 	}
 	return strings.TrimSpace(res.Stdout), nil
+}
+
+// ---- quiesce -------------------------------------------------------------
+
+// Quiesce blocks writes. It is not a fault -- it is an operational state the
+// tool enters on purpose -- but it has every property of a condition: entered,
+// held, cleared, visible in status, and carried in describe.
+//
+// The mechanism is the field's own. Before anyone touches replicated data they
+// move the broker's ACCESS_MODE to RO or SO; broker_changer applies it to a
+// running broker rather than needing a restart.
+func (i *Injector) Quiesce(ctx context.Context, s *Set, nodes []string, mode, broker string) error {
+	if mode == "" {
+		mode = "ro"
+	}
+	up := strings.ToUpper(mode)
+	if up != "RO" && up != "SO" {
+		return fmt.Errorf("unknown --mode %q (want ro or so)", mode)
+	}
+	for _, n := range nodes {
+		res, err := i.D.Exec(ctx, n, i.T.DB, "broker_changer "+broker+" ACCESS_MODE "+up)
+		if err != nil {
+			return err
+		}
+		if res.ExitCode != 0 {
+			return fmt.Errorf("%s: broker_changer exited %d: %s", n, res.ExitCode,
+				strings.TrimSpace(tailLine(res.Stdout+res.Stderr)))
+		}
+	}
+	return s.add(Active{Kind: "quiesce", Target: strings.Join(nodes, ","), Mechanism: "broker",
+		Mode: up, Since: time.Now().UTC().Format(time.RFC3339)})
+}
+
+// Resume puts the door back. Whoever closed it is not necessarily whoever
+// reopens it, which is one of the things the field was asked about and has not
+// answered -- so the tool records both events rather than assuming.
+func (i *Injector) Resume(ctx context.Context, s *Set, broker string) ([]Active, error) {
+	var kept, cleared []Active
+	for _, a := range s.List {
+		if a.Kind != "quiesce" {
+			kept = append(kept, a)
+			continue
+		}
+		for _, n := range strings.Split(a.Target, ",") {
+			if n == "" {
+				continue
+			}
+			_, _ = i.D.Exec(ctx, n, i.T.DB, "broker_changer "+broker+" ACCESS_MODE RW")
+		}
+		cleared = append(cleared, a)
+	}
+	s.List = kept
+	return cleared, s.save()
+}
+
+// ---- resync --------------------------------------------------------------
+
+// FailRows reads the applier's error log for the tables it could not apply to.
+//
+// This is where the field starts too: fail_counter says a number, and
+// applylogdb.err says which table and which key. A count with no reason attached
+// is the state the field has an open request about.
+func (i *Injector) FailRows(ctx context.Context, node string) (map[string]int, error) {
+	res, err := i.D.Exec(ctx, node, i.T.DB,
+		"grep -ho 'class: \"[^\"]*\"' /work/"+node+"/cubrid/log/*applylogdb*.err 2>/dev/null | sort | uniq -c")
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		f := strings.Fields(strings.TrimSpace(line))
+		if len(f) < 2 {
+			continue
+		}
+		var n int
+		if _, err := fmt.Sscan(f[0], &n); err != nil {
+			continue
+		}
+		name := strings.Trim(strings.TrimPrefix(strings.Join(f[1:], " "), "class:"), " \"")
+		out[name] = n
+	}
+	return out, nil
+}
+
+// CompareTable answers the question the field says it has no way to answer: is
+// this fail count a scar, or is the data actually different?
+//
+// From their own account -- "fail count는 있지만 오류 데이터를 조회하면 문제가 없어
+// 엔지니어 판단에 의해 fail count만 초기화하는 경우도 많이 발생" -- a counter with no
+// divergence under it is the common case, and today it is found by hand, one key
+// at a time. A row count is a coarse comparison and it is not nothing: it
+// separates "nothing to repair" from "something to repair" without an engineer
+// reading a log.
+func (i *Injector) CompareTable(ctx context.Context, master, slave, table string) (int, int, error) {
+	count := func(node string) (int, error) {
+		res, err := i.D.Exec(ctx, node, i.T.DB,
+			"csql -u dba -t -N -c \"SELECT count(*) FROM "+table+"\" "+i.T.DB+" 2>/dev/null")
+		if err != nil {
+			return 0, err
+		}
+		for _, line := range strings.Split(res.Stdout, "\n") {
+			f := strings.TrimSpace(line)
+			if f == "" {
+				continue
+			}
+			var n int
+			if _, serr := fmt.Sscan(f, &n); serr == nil {
+				return n, nil
+			}
+		}
+		return 0, fmt.Errorf("%s: no count for %s", node, table)
+	}
+	m, err := count(master)
+	if err != nil {
+		return 0, 0, err
+	}
+	s, err := count(slave)
+	if err != nil {
+		return m, 0, err
+	}
+	return m, s, nil
 }

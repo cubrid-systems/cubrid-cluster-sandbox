@@ -38,8 +38,8 @@ var registry = []Command{
 	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state", Run: cmdClusterStatus},
 	{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe,
 		Flags: func(fs *flag.FlagSet) { fs.String("out", "", "write the artifact to a file") }},
-	{Noun: "cluster", Verb: "quiesce", Summary: "block writes", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "cluster", Verb: "resume", Summary: "release writes", Mutates: true, Run: notYet("04-faults.md")},
+	{Noun: "cluster", Verb: "quiesce", Summary: "block writes", Mutates: true, Flags: quiesceFlags, Run: cmdClusterQuiesce},
+	{Noun: "cluster", Verb: "resume", Summary: "release writes", Mutates: true, Run: cmdClusterResume},
 	{Noun: "cluster", Verb: "ls", Summary: "clusters on this machine", Run: cmdClusterLs},
 
 	// ---- node ------------------------------------------------------------
@@ -68,7 +68,7 @@ var registry = []Command{
 	{Noun: "ha", Verb: "status", Summary: "roles and the group", Run: cmdHaStatus},
 	{Noun: "ha", Verb: "promote", Args: "<selector>", Summary: "promote a node", Mutates: true, Run: notYet("04-faults.md")},
 	{Noun: "ha", Verb: "failback", Summary: "return to the original master; interactive", Mutates: true, Run: notYet("04-faults.md")},
-	{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Run: notYet("04-faults.md")},
+	{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Flags: resyncFlags, Run: cmdHaResync},
 
 	// ---- load ------------------------------------------------------------
 	{Noun: "load", Verb: "start", Summary: "a rate it has to hold", Mutates: true, Flags: loadStartFlags, Run: cmdLoadStart},
