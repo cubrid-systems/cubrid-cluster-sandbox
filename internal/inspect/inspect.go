@@ -14,6 +14,7 @@ package inspect
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -36,6 +37,13 @@ type Repl struct {
 	Source    string `json:"source"`
 	SampledAt string `json:"sampled_at"`
 	Rows      int    `json:"rows"`
+
+	// The second source. Everything above is written by applylogdb, so it cannot
+	// report a stall of the process writing it; these two come from the master
+	// and are what make the copy stage measurable at all.
+	MasterAppend *int   `json:"master_append_pageid,omitempty"`
+	CopyLag      *int   `json:"copy_lag_pages,omitempty"`
+	RefSource    string `json:"reference_source,omitempty"`
 }
 
 type Node struct {
@@ -57,7 +65,31 @@ type Status struct {
 var (
 	reServer = regexp.MustCompile(`registered_and_[a-z_]+`)
 	reMode   = regexp.MustCompile(`(?i)running mode is ([a-z-]+)`)
+	// "Append LSA                     : 171 | 13976"
+	reAppend = regexp.MustCompile(`Append LSA\s*:\s*(\d+)\s*\|`)
 )
+
+// MasterAppend reads how far the master has written its own log.
+//
+// This is the second source docs/design/05-inspect.md §3 requires, and it comes
+// from `cubrid applyinfo -r`, which is text. The design said the tool would read
+// the position itself rather than parse that output; the engine turns out to
+// expose it nowhere else -- db_ha_apply_info is the only HA catalog view, and it
+// describes the applier rather than the log. So this parses one labelled line,
+// `Append LSA`, and nothing else. It does NOT read applyinfo's Estimated Delay,
+// which is the field the design's objection was actually about: that one prints
+// "-" on its first sample because process_rate is zero until a second iteration.
+func MasterAppend(ctx context.Context, d *backend.Docker, t *topology.Topology, from, master string) (int, error) {
+	res, err := d.Exec(ctx, from, t.DB, "cubrid applyinfo -r "+master+" "+t.DB+" 2>/dev/null")
+	if err != nil {
+		return 0, err
+	}
+	m := reAppend.FindStringSubmatch(res.Stdout)
+	if m == nil {
+		return 0, fmt.Errorf("no Append LSA in applyinfo -r %s", master)
+	}
+	return strconv.Atoi(m[1])
+}
 
 // Read gathers tier 1 and tier 2 for every node in the topology.
 func Read(ctx context.Context, d *backend.Docker, t *topology.Topology) (*Status, error) {
@@ -84,7 +116,42 @@ func Read(ctx context.Context, d *backend.Docker, t *topology.Topology) (*Status
 		}
 		st.Nodes = append(st.Nodes, node)
 	}
+	attachMasterReference(ctx, d, t, st)
 	return st, nil
+}
+
+// attachMasterReference turns the copy stage from unmeasurable into measured.
+// Without it a stalled copier shows a falling or zero apply lag -- the
+// reassuring direction -- because the applier keeps draining what is already on
+// disk while nothing new arrives.
+func attachMasterReference(ctx context.Context, d *backend.Docker, t *topology.Topology, st *Status) {
+	master := ""
+	for _, n := range st.Nodes {
+		if n.Server == "registered_and_active" {
+			if master != "" {
+				return // two masters: "the master's position" does not name one
+			}
+			master = n.Name
+		}
+	}
+	if master == "" {
+		return
+	}
+	for i := range st.Nodes {
+		n := &st.Nodes[i]
+		if n.Name == master || n.Repl == nil || n.Repl.Copied == nil || !n.Live {
+			continue
+		}
+		append_, err := MasterAppend(ctx, d, t, n.Name, master)
+		if err != nil {
+			st.Notes = append(st.Notes, Note{"no_master_reference",
+				n.Name + ": the master's append position could not be read, so copy progress is not reported"})
+			continue
+		}
+		lag := append_ - *n.Repl.Copied
+		n.Repl.MasterAppend, n.Repl.CopyLag = &append_, &lag
+		n.Repl.RefSource = "applyinfo -r " + master
+	}
 }
 
 // readRepl reads db_ha_apply_info over SQL. Everything it can go wrong in is a
@@ -125,12 +192,6 @@ func readRepl(ctx context.Context, d *backend.Docker, t *topology.Topology, node
 		*notes = append(*notes, Note{"ambiguous_apply_info",
 			node + " has more than one db_ha_apply_info row; the figures are not attributable to one source"})
 	}
-	// The copy stage cannot be measured from here. eof_lsa is written by
-	// applylogdb, so a stalled applier freezes it at a healthy-looking value and
-	// a stalled copier makes the apply lag *fall*. A true copy figure needs the
-	// master's append position as a second source, which is M2.2.
-	*notes = append(*notes, Note{"no_master_reference",
-		node + ": copy progress is not reported, because db_ha_apply_info alone cannot support it"})
 	return r
 }
 

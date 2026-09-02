@@ -81,11 +81,28 @@ when they need it ([`../findings/failback.md`](../findings/failback.md)).
 1. **`repl status` reports two stages, never one number.** Copy progress and
    apply progress are separate figures with separate provenance. There is no
    field called `delay`.
-2. **Copy progress requires a master-side reference.** The tool reads the
-   master's append position itself — the reference `cubrid applyinfo -r` uses —
-   and computes the difference. It does not parse `applyinfo`'s output: that is
-   `printf` text, and its first sample always prints `-` because `process_rate`
-   is zero until a second iteration (`log_applier.c:7456-7478`).
+2. **Copy progress requires a master-side reference — and it is read from
+   `applyinfo -r`, which amends what this document used to say.** The intent was
+   for the tool to read the master's append position itself rather than parse
+   that output. The engine exposes it nowhere else: `db_ha_apply_info` is the
+   only HA catalog view and it describes the applier rather than the log, so
+   there is no SQL for it. The tool therefore parses **one labelled line**,
+   `Append LSA`, and nothing else.
+
+   The original objection stands and is narrower than it read: it was about
+   `Estimated Delay`, which prints `-` on a first sample because `process_rate`
+   is zero until a second iteration (`log_applier.c:7456-7478`). That field is
+   still not read. Reading a labelled integer is not the same as trusting a
+   derived estimate, and the alternative to reading it is not reporting the copy
+   stage at all — which is what the tool did until this reference existed.
+
+   Measured, and it is what the second source buys. Under load, with the applier
+   suspended: `apply_lag` freezes at **3** while `copy_lag` grows **1705 → 3499 →
+   5188**. With the copier suspended: `apply_lag` reads **0** — the reassuring
+   direction — while `copy_lag` grows **7192 → 8787 → 10482**. Resuming the
+   copier moves the backlog across the stages in one step, `copy_lag` 14,911 to
+   0 and `apply_lag` 0 to 12,416, which is a transition a single "delay" number
+   cannot express.
 3. **Every figure carries its sample time and its source.** A row `applylogdb`
    wrote four seconds ago is reported as four seconds old, because during an
    apply stall a stale row looks perfectly healthy.

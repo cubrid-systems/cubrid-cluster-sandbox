@@ -175,8 +175,14 @@ func cmdReplStatus(c *Ctx) (any, error) {
 		}
 		out[n.Name] = n.Repl
 		if !c.JSON && !c.Quiet {
-			fmt.Fprintf(c.Out, "%-16s applied=%s  apply_lag=%s pages  fail=%s  copy=not reported  (%s, read %s)\n",
-				n.Name, dash(n.Repl.Applied), dash(n.Repl.ApplyLag), dash(n.Repl.Fail),
+			// Two stages, never one number, and each with its provenance. There
+			// is no field called "delay".
+			copy := "not reported"
+			if n.Repl.CopyLag != nil {
+				copy = fmt.Sprintf("%d pages behind %s", *n.Repl.CopyLag, n.Repl.RefSource)
+			}
+			fmt.Fprintf(c.Out, "%-16s copy=%-34s apply_lag=%s pages  fail=%s  (%s, read %s)\n",
+				n.Name, copy, dash(n.Repl.ApplyLag), dash(n.Repl.Fail),
 				n.Repl.Source, n.Repl.SampledAt)
 		}
 	}

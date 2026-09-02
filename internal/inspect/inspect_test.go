@@ -35,3 +35,28 @@ func TestParsers(t *testing.T) {
 		t.Fatalf("changemode parse = %v", m)
 	}
 }
+
+// The master-side reference is one labelled line out of applyinfo -r. It is the
+// only place the engine exposes the master's append position -- db_ha_apply_info
+// is the sole HA catalog view and it describes the applier, not the log.
+func TestAppendLSAParse(t *testing.T) {
+	out := `
+ ***  Active Info. ***
+DB name                        : m22
+EOF LSA                        : 171 | 13976
+Append LSA                     : 171 | 13976
+HA server state                : active
+`
+	m := reAppend.FindStringSubmatch(out)
+	if m == nil {
+		t.Fatal("Append LSA did not parse")
+	}
+	if m[1] != "171" {
+		t.Errorf("page id = %q, want 171", m[1])
+	}
+	// Estimated Delay is deliberately not read: it prints "-" on a first sample
+	// because process_rate is zero until a second iteration.
+	if reAppend.MatchString("Estimated Delay                : -") {
+		t.Error("the delay estimate must not be mistaken for the append position")
+	}
+}
