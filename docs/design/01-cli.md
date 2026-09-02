@@ -76,7 +76,7 @@ csb cluster create [--preset ha] [--nodes N] [--name NAME]
                    [--cpus N] [--from FILE]
 csb cluster up                 start everything, in the order that works
 csb cluster down               graceful stop, servers flushed
-csb cluster destroy            containers, network, volumes
+csb cluster destroy [--purge]  containers, network, volumes
 csb cluster status             per-node liveness, HA role, process state
 csb cluster describe           the reproducible artifact (§5)
 csb cluster quiesce [--mode ro|so] [--mechanism broker|load]
@@ -88,6 +88,11 @@ csb cluster ls                 clusters on this machine
 exists; `down` is graceful — it runs the shutdown flush, which is a distinct
 scenario from `node kill` and produces different engine behaviour
 ([`04-faults.md`](04-faults.md) §2).
+
+`destroy` removes the containers, the network and the node volumes, and **keeps
+the describe artifact and the run record**: the cluster is gone, but what it did
+is evidence and destroying it is a separate decision. `--purge` makes that
+decision.
 
 `quiesce` blocks writes and `resume` releases them. It sits on `cluster` rather
 than under `fault` because it is an operational state the tool enters on purpose,
@@ -281,7 +286,8 @@ code of the command that was supposed to cause it.**
 --timeout DURATION override the default bound on any engine wait (default 180s)
 --quiet / -q       suppress progress, keep errors
 --verbose / -v     show the engine commands being run
---version          the binary's version, without needing a noun
+--version          the binary's version. Only as the first argument: `cluster
+                   create --version 11.5` selects an engine release
 ```
 
 Two environment variables, because a path and a default cluster are not worth a

@@ -26,14 +26,14 @@ func notYet(doc string) func(*Ctx) (any, error) {
 
 var registry = []Command{
 	// ---- cluster ---------------------------------------------------------
-	{Noun: "cluster", Verb: "create", Args: "", Summary: "build and start a topology", Mutates: true,
-		Run: notYet("02-topology.md")},
+	{Noun: "cluster", Verb: "create", Summary: "build a topology", Mutates: true,
+		Flags: createFlags, Run: cmdClusterCreate},
 	{Noun: "cluster", Verb: "up", Summary: "start an existing cluster, in the order that works", Mutates: true,
 		Run: notYet("03-assembly.md")},
 	{Noun: "cluster", Verb: "down", Summary: "graceful stop, servers flushed", Mutates: true,
 		Run: notYet("03-assembly.md")},
 	{Noun: "cluster", Verb: "destroy", Summary: "containers, network, volumes", Mutates: true,
-		Run: notYet("03-assembly.md")},
+		Flags: destroyFlags, Run: cmdClusterDestroy},
 	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state",
 		Run: notYet("05-inspect.md")},
 	{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe},

@@ -80,11 +80,14 @@ var nouns = []string{"cluster", "node", "fault", "repl", "ha", "load", "record"}
 
 // Main runs one invocation and returns the process exit code.
 func Main(args []string, stdout, stderr io.Writer) int {
+	// --version is only the binary's version when it comes first: "cluster create
+	// --version 11.5" selects an engine release, and a global flag that swallowed
+	// it would silently do the wrong thing (docs/design/01-cli.md §3, §7).
+	if len(args) > 0 && (args[0] == "--version" || args[0] == "-version") {
+		fmt.Fprintf(stdout, "csb %s\n", Version)
+		return ExitOK
+	}
 	for _, a := range args {
-		if a == "--version" || a == "-version" {
-			fmt.Fprintf(stdout, "csb %s\n", Version)
-			return ExitOK
-		}
 		if a == "--help" || a == "-h" || a == "help" {
 			usage(stdout)
 			return ExitOK

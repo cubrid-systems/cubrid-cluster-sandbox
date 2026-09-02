@@ -15,8 +15,9 @@ says what order they get built in and where the project is.
 
 ## Where it is
 
-**Phase 0 complete (2026-08-27). Phase 1 started 2026-09-02** with M1.1, which
-doubles as the validation slice for the language decision. One external
+**Phase 0 complete (2026-08-27). Phase 1 started 2026-09-02**; M1.1, M1.2 and
+M1.3 are done, and `cluster create` reaches the `defined` state — containers on
+a network, nothing started. The assembly that carries it to `serving` is M1.4. One external
 dependency is outstanding and it shapes phase 1 rather than blocking it — see
 *Open* below.
 
@@ -45,8 +46,8 @@ verification needed, and can ask it what state it is in.
 | # | Item | Acceptance |
 |---|---|---|
 | M1.1 | Command surface and machine-readable output (`design/01-cli.md`) | **done 2026-09-02** — every command has a `--json` form, the envelope is one type, and the exit codes are implemented and tested. The verbs behind the surface are M1.2–M1.7; until they land each exits 1 with a `not_implemented` note rather than pretending |
-| M1.2 | Topology model — the `ha` preset, node count, per-node overrides (`design/02-topology.md`) | a two-node HA cluster from one command and one configuration input |
-| M1.3 | Container backend — image, network, run-as-invoking-user, `NET_ADMIN`, `--init` | a host-built `install.out` runs by path with no image build |
+| M1.2 | Topology model — the `ha` preset, node count, per-node overrides (`design/02-topology.md`) | **done 2026-09-02** — presets `ha` and `single`, everything derived from the cluster name, parameters routed by file with `--set-hidden` as the escape hatch, and the describe artifact is the same value the tool builds from |
+| M1.3 | Container backend — image, network, run-as-invoking-user, `NET_ADMIN`, `--init` | **done 2026-09-02** — a host-built `install.out` runs by path and is in no image; the base image is built once from a recipe tagged by its own hash. The engine's glibc floor is read from the ELF and checked against the image before anything starts |
 | M1.4 | Assembly — config generation, the slave chain, start ordering (`design/03-assembly.md`) | zero manual interventions; a first-time user needs no ordering knowledge |
 | M1.5 | Event verbs — `stop`, `kill`, `partition`, `heal`, `promote`, role-addressed | the CBRD-26983 scenario set reproduces the id sequence `1,2,21,22,41,42,61` |
 | M1.6 | Inspector tier 1 + tier 2 (`design/05-inspect.md`) | liveness, HA role and replication position without parsing human-formatted text |

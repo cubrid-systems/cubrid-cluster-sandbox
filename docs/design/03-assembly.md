@@ -143,10 +143,27 @@ Not preferences; each one is load-bearing.
 | `--shm-size` raised | CUBRID's shared memory does not fit the 64 MB default |
 
 The base image needs nothing else. `ubuntu:24.04` with `python3`, `iproute2`,
-`iputils-ping` and `procps` is the whole of it — no Dockerfile is needed for the
-engine itself, because the build is bind-mounted. `python3` earns its place
-twice: the seeding step already needs it, and the load driver runs inside the
-node rather than on the host ([`06-load.md`](06-load.md) §6).
+`iputils-ping` and `procps` is the whole of it. `python3` earns its place twice:
+the seeding step already needs it, and the load driver runs inside the node
+rather than on the host ([`06-load.md`](06-load.md) §6).
+
+**There is a base image, and there is never an engine image.** The distinction is
+the one that decides whether this tool is usable while you are changing the
+engine, so it is worth stating plainly:
+
+- The **base image** is those four packages. The tool builds it once from a
+  recipe it carries, tagged with the hash of that recipe — so an unchanged recipe
+  is never rebuilt, and a changed one is a different image rather than a
+  silently stale one.
+- The **engine** is bind-mounted read-only from the host tree and is in no image
+  at all. Rebuilding the engine rebuilds nothing here; the container sees the new
+  binaries because they are the same files. Measured: a stock `ubuntu:24.04`,
+  running as the invoking user with a host-built tree mounted at
+  `/opt/cubrid-ro`, runs that tree's `cubrid_rel` unmodified.
+
+That is what [`../DESIGN.md`](../DESIGN.md) §2 G2 asks for — the build under test
+is an argument — and it is why the four packages are a fixed recipe rather than
+a per-cluster one.
 
 **What does not carry over from `cubrid-contrib/sandbox` is its image.** That is
 a *build* image — devtoolset-8, cmake, ant, bison — on a base that reached end of

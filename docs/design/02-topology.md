@@ -103,9 +103,10 @@ the read-only tree out of symlinks.
 
 **The failure mode this creates is real and must be caught, not debugged.** A
 tree built on a different distribution fails to load in the container. The tool
-checks the base image's libc against the build's requirements *before* starting
-a server, and fails with that sentence rather than with a linker error
-([`../DESIGN.md`](../DESIGN.md) §7).
+reads the highest `GLIBC_` symbol version the build requires — out of the ELF
+itself, so nothing needs to run first — compares it with the image's own
+`ldd --version`, and refuses with that sentence rather than with a linker error
+([`../DESIGN.md`](../DESIGN.md) §7). It is a precondition failure, exit 3.
 
 ## 4. The `describe` artifact
 
