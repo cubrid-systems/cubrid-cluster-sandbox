@@ -804,6 +804,19 @@ cannot be reaped — hence `--init` alongside `NET_ADMIN` in §4 layer 3 — and
 just-demoted node has no `db_ha_apply_info` row at all, which is the third
 distinct way that view misleads.
 
+**2026-09-02 — Go, and the argument that reversed.** `design/ADR-001` is
+accepted: Go for the provisioner, shell for anything an operator reads, edits or
+runs on a real host. The draft five days earlier proposed Python and rejected Go
+on one argument — Go wins on distribution and loses on who can fix it, because
+nobody in this project's ecosystem writes it. `cubrid-operator` was already Go;
+`cubrid-testkit`, the consumer G6 exists for, accepted Go the same week, on
+drivers that read almost identically to this project's. The projects share a
+maintainer, so the "only Go author in their week" turned out to be the same
+developer, weekly. One constraint comes with it: **the boundary with testkit
+stays the CLI and its JSON, not a shared package** — sharing a language must not
+convert a process boundary into a build-time dependency. M1.1 is the validation
+slice.
+
 **2026-08-28 — load and the record are components, not scenario furniture.**
 Designing the six gaps the requirements pass left produced one architectural
 change and four vocabulary ones. §4 gains a **sixth component**, the load

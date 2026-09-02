@@ -115,6 +115,11 @@ the original master. A script that asks what the team requires "of failback" wil
 be answered about the wrong operation. It has to name the operation it means
 before it goes out.
 
-**Implementation language.** [`design/ADR-001`](design/ADR-001-implementation-language.md)
-proposes Python for the provisioner and shell for the operator-facing scripts.
-Proposed, not accepted — decide before M1.1.
+**Implementation language — decided 2026-09-02.**
+[`design/ADR-001`](design/ADR-001-implementation-language.md) accepts **Go** for
+the provisioner and shell for the operator-facing scripts. The earlier draft
+proposed Python and rejected Go on the argument that nobody in this project's
+ecosystem writes it; `cubrid-testkit` accepting Go under the same maintainer
+inverted that argument rather than weakening it. M1.1 doubles as the validation
+slice: if the schema types, the subprocess orchestration and the build-and-ship
+story go badly there, the ADR is amended rather than defended.

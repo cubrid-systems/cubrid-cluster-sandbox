@@ -23,7 +23,7 @@ which is what has to exist before anything is built.
 | [`05-inspect.md`](05-inspect.md) | 5 | What the inspector reads, and what it is not allowed to claim |
 | [`06-load.md`](06-load.md) | **6** | The workload driver — two kinds of load, and the rate contract that decides whether a measurement means anything |
 | [`07-record.md`](07-record.md) | — | The evidence artifact: what happened to the cluster, and both intervals for every role change |
-| [`ADR-001-implementation-language.md`](ADR-001-implementation-language.md) | — | Python for the provisioner, shell for the operator-facing scripts. **Proposed** |
+| [`ADR-001-implementation-language.md`](ADR-001-implementation-language.md) | — | Go for the provisioner, shell for the operator-facing scripts. **Accepted 2026-09-02** |
 
 [`../DESIGN.md`](../DESIGN.md) §4 named five layers. **Load is a sixth**, and it
 is a late addition: phase 0 assumed a scenario brings its own traffic. The
@@ -79,13 +79,6 @@ invalid rather than published ([`06-load.md`](06-load.md),
 [`07-record.md`](07-record.md)).
 
 ## Not yet decided
-
-**Implementation language — proposed, not accepted.**
-[`ADR-001`](ADR-001-implementation-language.md) argues for Python in the
-provisioner and shell for anything an operator reads, edits, or runs on a real
-host. Go wins on distribution and is rejected on ecosystem grounds; the
-reasoning and the conditions for reopening it are in the ADR. Decide before
-M1.1.
 
 **Whether `cubrid-testkit` can consume a cluster with no host-facing port.**
 Access is `node exec` and `node shell`, which is what keeps port bookkeeping
