@@ -93,7 +93,10 @@ def db_statement(rnd, n):
 
 def db_worker(wid, base):
     rnd = random.Random(seed + wid)
-    # Per-worker pacing: the whole cluster's rate divided by the workers.
+    # Per-worker pacing. This is rate CONTROL, not a simulated delay: the target
+    # is divided by the workers and each one waits that long between statements.
+    # Network latency is a different thing with a different verb (fault lag
+    # --mechanism delay, which puts netem on the interface).
     per = (rate / workers) if rate else 0
     interval = (1.0 / per) if per else 0
     # Interleaved by worker across every driver, so the workers never collide

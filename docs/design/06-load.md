@@ -192,8 +192,9 @@ a cap, and `latency_complete` says whether the distribution is all of them.
 
 ## 8. Several clients, one rate
 
-`--rate` is the **cluster's** rate. With N clients it is divided among them, each
-driver is started with its share, and both figures are reported — the total and
+`--rate` is the **aggregate target across every driver**, not a figure the cluster
+reports about itself. With N clients it is divided among them, each driver is
+started with its share, and both figures are reported — the total and
 each client's — because "the load" and "what this client managed" are different
 questions.
 
