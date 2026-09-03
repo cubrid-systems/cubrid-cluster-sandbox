@@ -92,7 +92,7 @@
 <!-- base image -->
 <rect class="soft" x="14" y="400" width="852" height="46" rx="6"/>
 <text class="h" x="28" y="420" font-size="11">base image — ubuntu:24.04 plus python3, iproute2, iptables, iputils-ping, procps</text>
-<text class="dd" x="28" y="436">Built once from a recipe the tool carries, tagged with that recipe&#39;s hash. There is a base image, and there is never an engine image — that distinction is what makes the tool usable while you are changing the engine.</text>
+<text class="dd" x="28" y="436">Built once from a recipe the tool carries, tagged with that recipe&#39;s hash. There is a base image, and there is never an engine image.</text>
 
 <text class="dd" x="14" y="470">Each container requirement is load-bearing: NET_ADMIN because both fault mechanisms are route operations · --init because cubrid heartbeat stop never returns without a reaping PID 1</text>
 <text class="dd" x="14" y="484">· iputils-ping because hb_check_ping shells out, and a missing binary reads as HB_PING_FAILURE — which makes every master demote itself on any heartbeat loss.  docs/design/03-assembly.md §4</text>
