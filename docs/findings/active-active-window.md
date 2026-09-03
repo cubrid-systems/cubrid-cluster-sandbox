@@ -104,7 +104,14 @@ ha resync     would take path "resume" — fail_counter is 0:
 ```
 
 Every gauge says healthy. The canary — a write made now, which has to arrive —
-arrives. `ha resync`, asked what repair this cluster needs, correctly reports
+arrives, **and takes a very long time to do it**. Measured across three healed
+clusters: **0.63 s** on a healthy pair, **25.97 s** on the diverged one above,
+and **53 s** on a third where the split brain had healed cleanly with no
+divergence at all. So the slowness is not a symptom of the divergence; it is what
+a healed split brain does to replication for the best part of a minute, and a
+check with the default thirty-second wait reports a stall that is not one. That
+is why `repl check --wait` exists and why the scenario in `scenarios/` names a
+longer one. `ha resync`, asked what repair this cluster needs, correctly reports
 that replication is not broken, because it is not: it is carrying new writes
 fine. It simply never carried one old one, and no view in the engine remembers
 that.

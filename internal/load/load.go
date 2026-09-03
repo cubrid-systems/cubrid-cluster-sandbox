@@ -38,10 +38,17 @@ type Spec struct {
 	Node        string  `json:"node"`
 	RequireRate bool    `json:"require_rate,omitempty"`
 
-	// KeyLo is where this driver's slice of the key space starts. Several
+	// KeyLo and KeyHi bound this driver's slice of the key space. Several
 	// clients writing one table each take a disjoint range and resume inside it,
 	// which needs no coordination between them and survives a restart.
+	//
+	// BOTH bounds, and the upper one was missing at first. Resuming asked for
+	// MAX(i) above the lower bound and got the global maximum, which sits in
+	// some other client's range -- so the first driver walked into the second's
+	// keys and collided with them, 200 statements out of 204, on the second run
+	// against a table that already had rows.
 	KeyLo int `json:"key_lo,omitempty"`
+	KeyHi int `json:"key_hi,omitempty"`
 }
 
 // Status is what happened. achieved sits next to requested always, because a

@@ -392,7 +392,12 @@ func cmdHaFailback(c *Ctx) (any, error) {
 	}
 	out := map[string]any{"from": from, "to": to, "seconds": secs, "changed": true, "caught_up": caught}
 	if verified {
-		can, cerr := inspect.Check(c.Ctx, a.D, t, to, from, "", 30*time.Second)
+		// Ninety seconds, not thirty. Replication takes a long time to resume
+		// after a role change -- measured at 53 s on a cleanly healed pair and
+		// 25.97 s on a diverged one, against 0.63 s on a healthy cluster -- so a
+		// thirty-second wait reports a stall that is not one
+		// (docs/findings/active-active-window.md).
+		can, cerr := inspect.Check(c.Ctx, a.D, t, to, from, "", 90*time.Second)
 		steps[6].Done = cerr == nil && can.Arrived
 		if steps[6].Done {
 			steps[6].Evidence = fmt.Sprintf("%s is standby again and a write on %s arrived in %.2fs", from, to, can.Seconds)

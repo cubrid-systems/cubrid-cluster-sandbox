@@ -110,7 +110,7 @@ func cmdLoadStart(c *Ctx) (any, error) {
 			ForSeconds: c.dur("for").Seconds(), Table: c.str("table"), Seed: seed + i,
 			Batch: atoiOr(c.str("batch"), 1),
 			DB:    target, Node: node, RequireRate: c.fs.Lookup("require-rate").Value.String() == "true",
-			KeyLo: i * keyRangePerClient,
+			KeyLo: i * keyRangePerClient, KeyHi: (i + 1) * keyRangePerClient,
 		}
 		if err := d.Start(c.Ctx, spec); err != nil {
 			return nil, Usage("%v", err)

@@ -9,6 +9,7 @@
       "await": { "masters": 2 }, "within": "120s" },
     { "note": "heal it", "run": ["fault", "clear"],
       "await": { "masters": 1, "standbys": 1 }, "within": "180s" },
-    { "note": "and replication still carries a write", "run": ["repl", "check"] }
+    { "note": "and replication still carries a write",
+      "run": ["repl", "check", "--wait", "120s"] }
   ]
 }

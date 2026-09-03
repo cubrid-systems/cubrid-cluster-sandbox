@@ -131,9 +131,12 @@ func (t *Topology) WriteCTPConf(w io.Writer, instance, user string) error {
 	if instance == "" {
 		instance = t.Cluster
 	}
+	// DB nodes only. A client is part of the cluster and not of the HA group, and
+	// writing one into an ha_repl conf would tell CTP to treat a workload node as
+	// a database peer.
 	var master string
 	var slaves []string
-	for _, n := range t.Nodes {
+	for _, n := range t.DBNodes() {
 		if n.Role == "master" && master == "" {
 			master = n.Name
 			continue

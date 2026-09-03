@@ -71,6 +71,25 @@ func (c *csb) run(args ...string) (*cli.Envelope, int) {
 	return &e, code
 }
 
+// runNoCluster is for a verb that makes its own cluster, so the suite must not
+// hand it one.
+func (c *csb) runNoCluster(args ...string) (*cli.Envelope, int) {
+	c.t.Helper()
+	full := append(append([]string{}, args...), "--json")
+	cmd := exec.Command(c.bin, full...)
+	cmd.Env = append(os.Environ(), "CSB_HOME="+c.home)
+	out, err := cmd.Output()
+	code := 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		code = ee.ExitCode()
+	}
+	var e cli.Envelope
+	if jerr := json.Unmarshal(out, &e); jerr != nil {
+		c.t.Fatalf("csb %s produced no envelope: %v\n%s", strings.Join(args, " "), jerr, out)
+	}
+	return &e, code
+}
+
 func (c *csb) must(args ...string) map[string]any {
 	c.t.Helper()
 	e, code := c.run(args...)
@@ -204,6 +223,17 @@ func TestSurface(t *testing.T) {
 		cluster: fmt.Sprintf("e2e%d", time.Now().Unix()%100000)}
 	t.Logf("cluster %s, state under %s", c.cluster, c.home)
 
+	// The tools directory belongs to the whole run: a subtest's TempDir is
+	// removed when that subtest ends, and the client would then be mounting a
+	// directory that no longer exists.
+	tools := filepath.Join(home, "tools")
+	if err := os.MkdirAll(tools, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tools, "e2e.sql"), []byte("SELECT 1 FROM db_root;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// The cluster is destroyed on success and KEPT on failure. Leaving containers
 	// behind costs the next run; throwing away the only copy of a cluster that
 	// just failed costs more, and this suite exists to find things that are hard
@@ -222,8 +252,12 @@ func TestSurface(t *testing.T) {
 
 	t.Run("create", func(t *testing.T) {
 		c.t = t
+		// Two clients, because the client surface is part of the tool now and a
+		// cluster that has one behaves differently from a cluster that does not:
+		// `load` runs somewhere else, and the broker is reachable from inside.
 		d := c.must("cluster", "create", "--name", c.cluster, "--build", build,
-			"--with-broker", "--timeout", "900s")
+			"--with-broker", "--clients", "2", "--tools", tools,
+			"--timeout", "900s")
 		if d["state"] != "serving" {
 			t.Fatalf("state = %v, want serving", d["state"])
 		}
@@ -451,11 +485,21 @@ func TestSurface(t *testing.T) {
 		c.t = t
 		// promote left the previous master out of the group; whichever node that
 		// was, it is the one service has to return to.
+		// A DB node, not a client: clients have no role and would never come
+		// "back in the group", which is what this waited three minutes for.
 		serving, _ := c.currentPair()
 		var away string
-		for n := range c.roles() {
-			if n != serving {
+		for n, st := range c.roles() {
+			if n != serving && st != "" {
 				away = n
+			}
+		}
+		if away == "" {
+			for _, n := range c.nodes("ha status") {
+				name, _ := n["name"].(string)
+				if role, _ := n["created_role"].(string); role != "" && name != serving {
+					away = name
+				}
 			}
 		}
 		// Putting a node back after a role change is a REBUILD, not a restart,
@@ -498,6 +542,83 @@ func TestSurface(t *testing.T) {
 		}
 	})
 
+	t.Run("a client node has two spaces and reaches the broker", func(t *testing.T) {
+		c.t = t
+		client := c.cluster + "-c1"
+		// /tools is the user's and read-only: a run must not be able to damage
+		// the scripts it was given.
+		if code := c.exec(client, "test -r /tools/e2e.sql"); code != 0 {
+			t.Errorf("the tools directory is not readable from the client")
+		}
+		if code := c.exec(client, "touch /tools/nope"); code == 0 {
+			t.Errorf("/tools accepted a write; it is supposed to be read-only")
+		}
+		// /results is ours and writable, and it outlives the cluster.
+		if code := c.exec(client, "touch /results/e2e-was-here"); code != 0 {
+			t.Errorf("/results refused a write")
+		}
+		// The broker, from inside, with no port published on the host. This is
+		// the path JDBC and CCI use.
+		master, _ := c.currentPair()
+		// The statement comes from /tools rather than the command line, which
+		// keeps a quoted SQL string out of a helper that splits on whitespace
+		// and proves the two mounts work together. dba has no password, so the
+		// empty one is the correct one -- passing anything else fails the
+		// connection and says nothing about reachability.
+		if code := c.exec(client, "broker_tester "+master+":33000 -D "+c.cluster+" -u dba -p '' -i /tools/e2e.sql"); code != 0 {
+			t.Errorf("the client could not reach the broker at %s:33000", master)
+		}
+	})
+
+	t.Run("two clients share one rate and collide over nothing", func(t *testing.T) {
+		c.t = t
+		c.must("load", "start", "--profile", "insert", "--rate", "20/s", "--for", "40s", "--timeout", "60s")
+		time.Sleep(20 * time.Second)
+		d := c.must("load", "status", "--timeout", "60s")
+		// Every client writes its own range of the key space. An interleave was
+		// tried first and produced 146 unique-constraint violations out of 1025
+		// statements, because each driver read MAX(i) at a different moment.
+		if errs, _ := d["errors_total"].(float64); errs != 0 {
+			t.Errorf("%v statement(s) failed across the clients; the key ranges are supposed to be disjoint", errs)
+		}
+		clients, _ := d["clients"].([]any)
+		if len(clients) != 2 {
+			t.Errorf("%d client(s) reported, want 2", len(clients))
+		}
+		c.must("load", "stop", "--timeout", "60s")
+	})
+
+	t.Run("the CTP fragment carries the pair and refuses a key it does not know", func(t *testing.T) {
+		c.t = t
+		out := filepath.Join(c.home, "ha_repl.conf")
+		c.must("cluster", "describe", "--format", "ctp", "--out", out, "--timeout", "60s")
+		b, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatalf("no fragment written: %v", err)
+		}
+		frag := string(b)
+		for _, want := range []string{
+			"env." + c.cluster + ".master.ssh.host=",
+			"env." + c.cluster + ".slave.ssh.host=",
+			"CONTAINER NAMES",     // the transport is named rather than implied
+			"cubrid_download_url", // and so is what does not apply
+		} {
+			if !strings.Contains(frag, want) {
+				t.Errorf("the fragment does not carry %q", want)
+			}
+		}
+		// A client node is not part of the HA group and must not appear as one.
+		if strings.Contains(frag, c.cluster+"-c1") {
+			t.Errorf("a client node was written into an ha_repl conf")
+		}
+		// And validation is kept on the way in.
+		bad := filepath.Join(c.home, "bad.conf")
+		if err := os.WriteFile(bad, []byte("env.i1.ha.ha_no_such_thing=1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		c.wantExit(cli.ExitUsage, "cluster", "create", "--name", "nope", "--from-ctp", bad, "--build", build, "--timeout", "30s")
+	})
+
 	t.Run("the record carries the run without being switched on", func(t *testing.T) {
 		c.t = t
 		d := c.must("record", "show", "--timeout", "60s")
@@ -538,6 +659,71 @@ func TestSurface(t *testing.T) {
 			if strings.Contains(html, forbidden) {
 				t.Errorf("the page reaches outside itself: %q", forbidden)
 			}
+		}
+	})
+
+	t.Run("a tailnet cluster addresses itself there and can still be cut", func(t *testing.T) {
+		c.t = t
+		key := os.Getenv("CSB_TS_AUTHKEY")
+		if key == "" {
+			t.Skip("set CSB_TS_AUTHKEY to exercise the tailnet option; it joins real machines to a real tailnet")
+		}
+		// Its own cluster, and destroyed at the end whatever happens, because
+		// these nodes become devices in somebody's tailnet.
+		name := c.cluster + "ts"
+		defer func() {
+			e, _ := c.runNoCluster("cluster", "destroy", "--cluster", name, "--purge", "--timeout", "300s")
+			if hasNote(e, "tailnet_devices_remain") {
+				t.Logf("tailnet devices remain and need removing from the admin console; use an ephemeral key")
+			}
+		}()
+		if e, code := c.runNoCluster("cluster", "create", "--name", name, "--network", "tailnet",
+			"--build", build, "--timeout", "900s"); code != cli.ExitOK {
+			t.Fatalf("tailnet create failed: %s", notes(e))
+		}
+		ts := &csb{t: t, bin: c.bin, home: c.home, cluster: name}
+		// The names have to mean the tailnet, or the cluster keeps talking over
+		// the bridge while believing otherwise and every cut becomes a no-op.
+		d := ts.must("node", "exec", name+"-n2", "--timeout", "60s", "--",
+			"ss", "-tn", "state", "established")
+		m, _ := d[name+"-n2"].(map[string]any)
+		if !strings.Contains(fmt.Sprint(m["stdout"]), "100.") {
+			t.Errorf("no connection is on a tailnet address:\n%v", m["stdout"])
+		}
+		// And the cut has to bite. On a tailnet a route in the main table does
+		// not: tailscale sends 100.64/10 to its own table at a lower priority.
+		ts.must("fault", "partition", name+"-n2", "--timeout", "60s")
+		ts.until("two masters on the tailnet", 120*time.Second, func() bool {
+			return len(mastersOf(ts.roles())) == 2
+		})
+		ts.must("fault", "clear", "--timeout", "60s")
+	})
+
+	t.Run("a scenario runs against a build and judges it", func(t *testing.T) {
+		c.t = t
+		// Its own cluster, because that is what a scenario does: it stands one
+		// up, walks the steps, and destroys it. Kept small -- what is under test
+		// is the runner, not the engine.
+		file := filepath.Join(c.home, "smoke.json")
+		body := `{
+  "name": "the pair serves and replication carries a write",
+  "cluster": { "preset": "ha" },
+  "steps": [
+    { "await": { "masters": 1, "standbys": 1 }, "within": "120s" },
+    { "run": ["repl", "check", "--wait", "60s"] },
+    { "note": "and a verb that should refuse", "run": ["ha", "promote", "all"], "expect_exit": 3 }
+  ]
+}`
+		if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		e, code := c.runNoCluster("scenario", "run", file, "--build", build, "--timeout", "900s")
+		if code != cli.ExitOK {
+			t.Fatalf("the scenario failed: %s", notes(e))
+		}
+		d, _ := e.Data.(map[string]any)
+		if d["passed"] != true {
+			t.Errorf("scenario data says it did not pass: %v", d)
 		}
 	})
 

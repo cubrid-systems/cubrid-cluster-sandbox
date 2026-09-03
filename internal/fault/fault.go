@@ -102,8 +102,18 @@ func (i *Injector) Kill(ctx context.Context, node string) error {
 func (i *Injector) Start(ctx context.Context, node string) error {
 	_, _ = i.D.Exec(ctx, node, i.T.DB, "cubrid service stop >/dev/null 2>&1; true")
 	logPath := "/work/" + node + "/heartbeat-start.log"
-	_, err := i.D.Exec(ctx, node, i.T.DB, "cubrid heartbeat start > "+logPath+" 2>&1; true")
-	return err
+	if _, err := i.D.Exec(ctx, node, i.T.DB, "cubrid heartbeat start > "+logPath+" 2>&1; true"); err != nil {
+		return err
+	}
+	// And the broker, if this cluster has one. `heartbeat start` does not start
+	// it, so a node put back after a promote or a failback came up serving and
+	// unreachable through the door -- which nothing noticed until a client node
+	// tried to use it.
+	if i.T.WithBroker {
+		_, _ = i.D.Exec(ctx, node, i.T.DB,
+			"cubrid broker start > /work/"+node+"/broker-start.log 2>&1; true")
+	}
+	return nil
 }
 
 // Partition cuts routes rather than interfaces.

@@ -27,6 +27,7 @@ workers = int(spec.get("concurrency") or 1)
 # 1025 statements, on the first run with two clients. A range needs no
 # coordination and survives a restart.
 key_lo = int(spec.get("key_lo") or 0)
+key_hi = int(spec.get("key_hi") or 0)
 duration = float(spec.get("for_seconds") or 0)
 table = spec.get("table") or "csb_load"
 db = spec["db"]
@@ -64,7 +65,10 @@ def prepare():
         # update needs rows to update; seed a deterministic block of them
         rows = ",".join("(%d,'%s')" % (n, "x" * 180) for n in range(1000))
         csql("INSERT INTO %s VALUES %s;" % (table, rows))
-    rc, out = csql("SELECT NVL(MAX(i),%d) FROM %s WHERE i >= %d;" % (key_lo, table, key_lo))
+    bound = "i >= %d" % key_lo
+    if key_hi:
+        bound += " AND i < %d" % key_hi
+    rc, out = csql("SELECT NVL(MAX(i),%d) FROM %s WHERE %s;" % (key_lo, table, bound))
     if rc == 0:
         for tok in out.split():
             if tok.strip().lstrip("-").isdigit():
