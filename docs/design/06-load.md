@@ -142,6 +142,14 @@ competes with the wrong cgroup: it would starve the engine only incidentally,
 and a `host-cpu` profile that does not share the engine's CPU quota does not
 reproduce the field's condition at all.
 
+**Which node depends on the profile, and that distinction was learned the hard
+way.** A `db` profile is a client's workload and belongs on a client node when
+there is one (§7). A `host` profile is not a workload at all — it exists to
+squeeze the engine's own cgroup — so it runs on the database node whatever else
+the cluster has. Moving every profile to the client left `host-cpu` burning a
+client's quota and the engine's untouched, which is the exact thing the sentence
+above says does not reproduce anything.
+
 The honest consequence is that a db driver consumes the resources it is
 measuring — `csql` processes on the master are CPU the master does not have. The
 design does not pretend otherwise: `load status` reports the driver's own CPU and

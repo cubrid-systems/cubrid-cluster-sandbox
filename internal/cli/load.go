@@ -55,10 +55,23 @@ func loadDriver(c *Ctx) (*load.Driver, []string, error) {
 	// leaving somebody to assume.
 	sel := c.str("node")
 	if sel == "" {
-		sel = "master"
-		if len(t.Clients()) > 0 {
+		switch {
+		case c.Verb != "start":
+			// stop and status do not know the profile and should find the load
+			// wherever it is; a node with none is skipped rather than an error.
+			sel = "all"
+		case load.Profiles[c.str("profile")] == "host":
+			// A HOST profile must run where it is meant to squeeze. Moving it to
+			// a client would burn a client's CPU quota and leave the engine's
+			// alone, which the design says outright does not reproduce the
+			// field's condition at all (docs/design/06-load.md §6). This broke
+			// the day the db profiles moved to the client and nothing else
+			// noticed.
+			sel = "master"
+		case len(t.Clients()) > 0:
 			sel = "client"
-		} else if c.Noun == "load" && c.Verb == "start" {
+		default:
+			sel = "master"
 			c.Note("load_on_the_engine", SevWarn,
 				"this cluster has no client node, so the driver runs inside the database node and competes with the engine for its CPU quota; driver_cost reports what that costs (cluster create --clients 1)")
 		}
