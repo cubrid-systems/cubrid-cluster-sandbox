@@ -161,6 +161,30 @@ eight hours of refused writes, caused by a wrong `db_ha_apply_info` row sending
 the applier after an archive that had been deleted. The state is real; our route into it
 is unexplained, and an unexplained reproduction is not evidence about an engine.
 
+**A node put back after its heartbeat was stopped can refuse to rejoin, and the
+reason is not in the output that reports the failure.** `cubrid heartbeat start`
+prints `++ cubrid server start: success`, `++ copylogdb start: success`,
+`++ applylogdb start: success` and then `++ HA processes start: fail` without
+naming which one. The applier's own log says it:
+
+```
+log applier: log applier started. required LSA: 192|496 ...
+log applier: invalid replication record. LSA: 192|496, forw LSA: 132458812569720|30840 ...
+Internal error: logical log page 192 may be corrupted.
+```
+
+The log is not damaged, it is **short**: `db_ha_apply_info` records a position the
+local replication log does not reach, because the node was stopped while its
+copier was mid-stream. `ha promote` does exactly that, by design. The applier asks
+for the page, does not find it, and exits rather than waiting.
+
+`node start` detects this — the diagnosis has to come from the applier's log,
+since the start output does not carry it — recopies the master's active log with
+`cub_admin copylogdb --start-page-id=-1`, and starts the node again, saying so in
+a note. That is the same copy step the slave rebuild performs
+([`04-faults.md`](04-faults.md) §8); here it is a repair on its own, and a much
+cheaper one than a rebuild.
+
 The tool still completes a promotion that is stuck, because the state is real
 whether or not we can say what put us in it.
 

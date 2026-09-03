@@ -157,6 +157,10 @@ unreproduced rather than dismissed.
   open. The distinction belongs next to the verb, and it now is.
 - **Nothing closes the gap but a rebuild**, and that is not a limitation of this
   tool. The standby's recorded position has moved past the write it is missing —
-  the canary that arrives is the proof — so no re-fetch will ever happen. The
-  field's closure is `ha_make_slavedb.sh`; `csb` reports the need and does not yet
-  perform it.
+  the canary that arrives is the proof — so no re-fetch will ever happen.
+  `ha resync --path slave` now performs the engine's own rebuild
+  (`ha_make_slavedb.sh`'s steps, without the ssh): online `backupdb` on the
+  master, `restoreslave` on the standby, rejoin. Three runs on diverged pairs:
+  **19 s, 21 s, 23 s**, each ending with every table matching and a canary
+  arriving in 0.08–0.61 s, against 25.97 s on the diverged cluster
+  ([`../design/04-faults.md`](../design/04-faults.md) §8).

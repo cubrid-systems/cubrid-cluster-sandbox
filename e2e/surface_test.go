@@ -39,8 +39,15 @@ type csb struct {
 // produces no envelope at all is a failure of the contract, not of the verb.
 func (c *csb) run(args ...string) (*cli.Envelope, int) {
 	c.t.Helper()
+	// The globals go BEFORE a bare `--`, because everything after it belongs to
+	// the program running on the node rather than to csb.
+	globals := []string{"--json", "--cluster", c.cluster}
 	full := append([]string{}, args...)
-	full = append(full, "--json", "--cluster", c.cluster)
+	if i := indexOf(full, "--"); i >= 0 {
+		full = append(append(append([]string{}, full[:i]...), globals...), full[i:]...)
+	} else {
+		full = append(full, globals...)
+	}
 	cmd := exec.Command(c.bin, full...)
 	cmd.Env = append(os.Environ(), "CSB_HOME="+c.home)
 	out, err := cmd.Output()
@@ -151,6 +158,21 @@ func (c *csb) until(what string, d time.Duration, cond func() bool) {
 	}
 }
 
+// currentPair is who is serving RIGHT NOW, which is not the create-time pair
+// once anything in this suite has moved the roles.
+func (c *csb) currentPair() (active, standby string) {
+	c.t.Helper()
+	for n, st := range c.roles() {
+		switch st {
+		case "registered_and_active":
+			active = n
+		case "registered_and_standby":
+			standby = n
+		}
+	}
+	return active, standby
+}
+
 func mastersOf(roles map[string]string) []string {
 	var m []string
 	for n, s := range roles {
@@ -182,10 +204,17 @@ func TestSurface(t *testing.T) {
 		cluster: fmt.Sprintf("e2e%d", time.Now().Unix()%100000)}
 	t.Logf("cluster %s, state under %s", c.cluster, c.home)
 
-	// The cluster outlives every subtest and is removed even when one fails,
-	// because a failed run that leaves containers behind costs the next run.
+	// The cluster is destroyed on success and KEPT on failure. Leaving containers
+	// behind costs the next run; throwing away the only copy of a cluster that
+	// just failed costs more, and this suite exists to find things that are hard
+	// to reproduce. Set CSB_E2E_KEEP=0 to destroy either way.
 	defer func() {
 		c.t = t // subtests moved it; the cleanup belongs to the outer test
+		if t.Failed() && os.Getenv("CSB_E2E_KEEP") != "0" {
+			t.Logf("KEEPING cluster %s under %s for inspection; csb cluster destroy --cluster %s --purge",
+				c.cluster, c.home, c.cluster)
+			return
+		}
 		if _, code := c.run("cluster", "destroy", "--purge", "--timeout", "300s"); code != cli.ExitOK {
 			t.Errorf("destroy exited %d", code)
 		}
@@ -309,25 +338,21 @@ func TestSurface(t *testing.T) {
 		}
 	})
 
-	t.Run("a dropped-packet partition leaves the route in place", func(t *testing.T) {
-		c.t = t
-		c.must("fault", "partition", standby, "--mechanism", "drop", "--timeout", "60s")
-		c.until("two masters", 90*time.Second, func() bool {
-			return len(mastersOf(c.roles())) == 2
-		})
-		c.must("fault", "clear", "--timeout", "60s")
-		c.until("one master again", 120*time.Second, func() bool {
-			return len(mastersOf(c.roles())) == 1
-		})
-	})
-
 	t.Run("a cleanly stopped group comes back", func(t *testing.T) {
 		c.t = t
+		was, _ := c.currentPair()
+		// It runs BEFORE the partition subtest on purpose. Run after one, it
+		// failed for reasons that had nothing to do with a clean stop: a group
+		// that has just healed a split brain sometimes needs a forced promotion
+		// to come back, and sometimes leaves the original master unregistered.
+		// That is worth knowing and it is a different question from this one.
+		//
 		// This is here because of what it once said. For a while this project
 		// reported that `down` then `up` left the original master stuck in
 		// registered_and_to_be_active; ten runs across five conditions never
 		// reproduced it and the claim was withdrawn without a cause. An
 		// unexplained observation deserves a standing check, not a paragraph.
+		t.Logf("roles before down: %v", c.roles())
 		c.must("cluster", "down", "--timeout", "300s")
 		d := c.must("cluster", "up", "--timeout", "600s")
 		if d["state"] != "serving" {
@@ -336,13 +361,74 @@ func TestSurface(t *testing.T) {
 		if d["promotion_forced"] == true {
 			t.Errorf("the group needed a forced promotion to come back: %v", d)
 		}
-		if m := mastersOf(c.roles()); len(m) != 1 || m[0] != master {
-			t.Errorf("after down/up the master is %v, want [%s]", m, master)
+		if m := mastersOf(c.roles()); len(m) != 1 || m[0] != was {
+			t.Errorf("after down/up the master is %v, want [%s] — the node that was serving before it", m, was)
 		}
+	})
+
+	t.Run("a dropped-packet partition leaves the route in place", func(t *testing.T) {
+		c.t = t
+		c.exec(master, "csql -u dba -c \"CREATE TABLE csb_e2e_split (i INT PRIMARY KEY)\" "+c.cluster)
+		c.exec(master, "csql -u dba -c \"INSERT INTO csb_e2e_split VALUES (1)\" "+c.cluster)
+
+		c.must("fault", "partition", standby, "--mechanism", "drop", "--timeout", "60s")
+		c.until("two masters", 90*time.Second, func() bool {
+			return len(mastersOf(c.roles())) == 2
+		})
+		// One row per side while neither can see the other. What the promoted
+		// standby writes comes back to the master on the heal; what the master
+		// writes never reaches the standby, and no gauge afterwards says so
+		// (docs/findings/active-active-window.md).
+		bothWrote := c.exec(master, "csql -u dba -c \"INSERT INTO csb_e2e_split VALUES (101)\" "+c.cluster) == 0 &&
+			c.exec(standby, "csql -u dba -c \"INSERT INTO csb_e2e_split VALUES (201)\" "+c.cluster) == 0
+
+		c.must("fault", "clear", "--timeout", "60s")
+		// One master is not enough to compare on: the other node can still be in
+		// to_be_active, and `repl diff` needs a settled pair rather than a
+		// settling one. Asking too early exits 3, which is the verb being right.
+		c.until("a settled pair", 180*time.Second, func() bool {
+			r := c.roles()
+			active, standby := 0, 0
+			for _, st := range r {
+				switch st {
+				case "registered_and_active":
+					active++
+				case "registered_and_standby":
+					standby++
+				}
+			}
+			return active == 1 && standby == 1
+		})
+		if !bothWrote {
+			t.Log("one side refused its write, so there is no divergence to repair here")
+			return
+		}
+
+		// The divergence, and then the rebuild that is the only thing that closes
+		// it. This is the most destructive verb in the tool and it runs every
+		// time the suite does.
+		if _, code := c.run("repl", "diff", "--timeout", "120s"); code != cli.ExitFailed {
+			t.Fatalf("a healed split brain reported no divergence (exit %d)", code)
+		}
+		d := c.must("ha", "resync", "--path", "slave", "--timeout", "900s")
+		t.Logf("rebuilt %v from %v; roles now %v", d["slave"], d["master"], c.roles())
+		if after, _ := d["diverged_after"].([]any); len(after) != 0 {
+			t.Fatalf("the rebuild left %v still differing", after)
+		}
+		if _, code := c.run("repl", "diff", "--timeout", "120s"); code != cli.ExitOK {
+			t.Errorf("repl diff still reports a divergence after the rebuild (exit %d)", code)
+		}
+
 	})
 
 	t.Run("promote makes the heartbeat decide", func(t *testing.T) {
 		c.t = t
+		// Whoever is standby now, not whoever was created as one: the roles have
+		// moved twice by this point in the suite.
+		_, standby := c.currentPair()
+		if standby == "" {
+			t.Fatalf("no standby to promote (roles: %v)", c.roles())
+		}
 		e, code := c.run("ha", "promote", standby, "--timeout", "300s")
 		if code != cli.ExitOK {
 			t.Fatalf("promote exited %d: %s", code, notes(e))
@@ -355,7 +441,7 @@ func TestSurface(t *testing.T) {
 			t.Errorf("promotion took %v s", d["seconds"])
 		}
 		// Asking again is a no-op rather than a second promotion.
-		d2 := c.must("ha", "promote", standby, "--timeout", "60s")
+		d2 := c.must("ha", "promote", standby, "--timeout", "120s")
 		if d2["changed"] != false {
 			t.Errorf("promoting the master again reported a change: %v", d2)
 		}
@@ -363,34 +449,43 @@ func TestSurface(t *testing.T) {
 
 	t.Run("failback returns service and proves replication", func(t *testing.T) {
 		c.t = t
-		c.must("node", "start", master, "--timeout", "200s")
-		c.until(master+" back in the group", 120*time.Second, func() bool {
-			return strings.HasPrefix(c.roles()[master], "registered_and_")
+		// promote left the previous master out of the group; whichever node that
+		// was, it is the one service has to return to.
+		serving, _ := c.currentPair()
+		var away string
+		for n := range c.roles() {
+			if n != serving {
+				away = n
+			}
+		}
+		c.must("node", "start", away, "--timeout", "200s")
+		c.until(away+" back in the group", 180*time.Second, func() bool {
+			return strings.HasPrefix(c.roles()[away], "registered_and_")
 		})
 
 		// --dry-run changes nothing, and says so.
-		d := c.must("ha", "failback", "--dry-run", "--timeout", "120s")
+		d := c.must("ha", "failback", "--to", away, "--dry-run", "--timeout", "120s")
 		if d["changed"] != false {
 			t.Fatalf("--dry-run reported a change: %v", d)
 		}
-		if len(mastersOf(c.roles())) != 1 || c.roles()[master] == "registered_and_active" {
+		if c.roles()[away] == "registered_and_active" {
 			t.Fatalf("--dry-run moved the roles: %v", c.roles())
 		}
 
-		e, code := c.run("ha", "failback", "--yes", "--quiesce", "--timeout", "400s")
+		e, code := c.run("ha", "failback", "--to", away, "--yes", "--quiesce", "--timeout", "400s")
 		if code != cli.ExitOK {
 			t.Fatalf("failback exited %d: %s", code, notes(e))
 		}
 		fb, _ := e.Data.(map[string]any)
-		if fb["to"] != master {
-			t.Fatalf("service went to %v, want %s", fb["to"], master)
+		if fb["to"] != away {
+			t.Fatalf("service went to %v, want %s", fb["to"], away)
 		}
 		// Roles alone say the group agrees, not that replication carries
 		// anything, so the verb has to have proved it with a write.
 		if _, ok := fb["canary_seconds"].(float64); !ok {
 			t.Errorf("failback did not verify replication: %v", fb)
 		}
-		if c.roles()[master] != "registered_and_active" {
+		if c.roles()[away] != "registered_and_active" {
 			t.Errorf("roles after failback: %v", c.roles())
 		}
 	})
@@ -450,6 +545,17 @@ func (c *csb) pair() (master, standby string) {
 	return master, standby
 }
 
+// exec runs one command on a node and returns its exit status, which is how the
+// suite tells "the node accepted this write" from "it refused".
+func (c *csb) exec(node, command string) int {
+	c.t.Helper()
+	e, _ := c.run(append([]string{"node", "exec", node, "--timeout", "60s", "--"}, strings.Fields(command)...)...)
+	d, _ := e.Data.(map[string]any)
+	m, _ := d[node].(map[string]any)
+	code, _ := m["exit"].(float64)
+	return int(code)
+}
+
 func (c *csb) pingRC(node string) int {
 	c.t.Helper()
 	d := c.must("node", "exec", node, "--timeout", "60s", "--",
@@ -459,6 +565,15 @@ func (c *csb) pingRC(node string) int {
 	var rc int
 	fmt.Sscanf(strings.TrimSpace(out), "rc=%d", &rc)
 	return rc
+}
+
+func indexOf(args []string, want string) int {
+	for i, a := range args {
+		if a == want {
+			return i
+		}
+	}
+	return -1
 }
 
 func exists(p string) bool {

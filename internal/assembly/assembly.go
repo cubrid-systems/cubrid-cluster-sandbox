@@ -460,10 +460,30 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 	stuck := 0
 	var blocked error
 	for {
-		st, _ := a.serverState(ctx, a.Master().Name)
-		states[a.Master().Name] = st
-		if st == "registered_and_active" {
+		// Any node being active is what "serving" means, not the create-time one
+		// being active. `Master()` is a create-time label and the design says so;
+		// waiting on it specifically made `cluster up` impossible after a
+		// legitimate failover -- the roles had swapped, the group was serving, and
+		// up sat waiting for a node that was correctly a standby until it timed
+		// out. Found by the end-to-end suite, on a pair whose roles a healed split
+		// brain had exchanged.
+		serving, waiting := "", ""
+		for _, n := range a.T.Nodes {
+			st, _ := a.serverState(ctx, n.Name)
+			states[n.Name] = st
+			if st == "registered_and_active" && serving == "" {
+				serving = n.Name
+			}
+			if st == "registered_and_to_be_active" && waiting == "" {
+				waiting = n.Name
+			}
+		}
+		if serving != "" {
 			break
+		}
+		st := states[a.Master().Name]
+		if waiting != "" {
+			st = "registered_and_to_be_active"
 		}
 		// A node can hold to_be_active for a long time: the field has one that
 		// did for eight hours, refusing writes, because a wrong db_ha_apply_info
@@ -477,7 +497,7 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 		if st == "registered_and_to_be_active" {
 			stuck++
 			if stuck >= 5 { // ~10 s of it, which is well past the normal transit
-				forced, err := a.completePromotion(ctx)
+				forced, err := a.completePromotion(ctx, waiting)
 				if err != nil {
 					// Not safe *yet* is the usual case: the applier still has a
 					// page or two to drain. Keep the reason and keep waiting --
@@ -495,15 +515,12 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 			if blocked != nil {
 				return states, blocked
 			}
-			return states, fmt.Errorf("master %s did not reach registered_and_active (last: %q)",
-				a.Master().Name, st)
+			return states, fmt.Errorf("no node reached registered_and_active (states: %v)", states)
 		}
 		time.Sleep(2 * time.Second)
 	}
-	for _, n := range a.T.Nodes[1:] {
-		st, _ := a.serverState(ctx, n.Name)
-		states[n.Name] = st
-		if st == "" {
+	for _, n := range a.T.Nodes {
+		if states[n.Name] == "" {
 			return states, fmt.Errorf("%s never registered; its start log says: %s", n.Name, a.StartLog(n.Name))
 		}
 	}
@@ -591,8 +608,11 @@ func (a *Assembler) applyPosition(ctx context.Context, node string) (eof, final,
 // replication log arriving late, which is the lab's stated reason for refusing
 // to force it in general. So the tool checks first and refuses if it cannot
 // prove the case, rather than deciding on the operator's behalf.
-func (a *Assembler) completePromotion(ctx context.Context) (bool, error) {
-	m := a.Master().Name
+func (a *Assembler) completePromotion(ctx context.Context, node string) (bool, error) {
+	m := node
+	if m == "" {
+		m = a.Master().Name
+	}
 	eof, final, fail, ok := a.applyPosition(ctx, m)
 	if !ok {
 		return false, nil // no row yet; keep waiting rather than guessing

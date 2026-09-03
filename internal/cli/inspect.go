@@ -315,8 +315,58 @@ func cmdNodeStop(c *Ctx) (any, error) {
 func cmdNodeKill(c *Ctx) (any, error) {
 	return nodeAction(c, func(i *fault.Injector, n string) error { return i.Kill(c.Ctx, n) })
 }
+
+// cmdNodeStart starts a node and, if its applier refuses to start because its
+// replication log is short of the position it was told to resume from, recopies
+// that log and starts it again.
+//
+// The condition is not exotic and it is not caused by anything unusual: stopping
+// a node's heartbeat mid-stream is enough. `ha promote` does exactly that, and a
+// node put back afterwards can come up with every process reporting success and
+// `cubrid heartbeat start` reporting "HA processes start: fail" -- with nothing
+// in that output naming which process, because the reason is in the applier's own
+// log: "logical log page N may be corrupted", which is true of a log that is
+// short rather than damaged (docs/design/03-assembly.md §3).
 func cmdNodeStart(c *Ctx) (any, error) {
-	return nodeAction(c, func(i *fault.Injector, n string) error { return i.Start(c.Ctx, n) })
+	out, err := nodeAction(c, func(i *fault.Injector, n string) error { return i.Start(c.Ctx, n) })
+	if err != nil {
+		return out, err
+	}
+	a, t, lerr := loadCluster(c)
+	if lerr != nil {
+		return out, nil // started; the recovery below is a bonus, not the job
+	}
+	names, _ := a.Resolve(c.Ctx, c.Args[0])
+	masters, merr := a.Resolve(c.Ctx, "master")
+	if merr != nil || len(masters) != 1 {
+		return out, nil // no single master to copy from, so nothing to recover with
+	}
+	for _, n := range names {
+		if n == masters[0] {
+			continue
+		}
+		st, _ := inspect.Read(c.Ctx, a.D, t)
+		joined := false
+		for _, node := range st.Nodes {
+			if node.Name == n && strings.HasPrefix(node.Server, "registered_and_") {
+				joined = true
+			}
+		}
+		if joined || !a.ApplierLogShort(c.Ctx, n) {
+			continue
+		}
+		c.Note("replication_log_short", SevWarn,
+			n+" did not rejoin: its applier was told to resume from a position its replication log does not reach. Recopying the log from "+masters[0])
+		if cerr := a.CopyActiveLog(c.Ctx, n, masters[0]); cerr != nil {
+			return out, Failed("log_copy_failed", "%v", cerr)
+		}
+		inj := &fault.Injector{D: a.D, T: t}
+		if serr := inj.Start(c.Ctx, n); serr != nil {
+			return out, Failed("restart_failed", "%v", serr)
+		}
+		c.Note("replication_log_recopied", SevInfo, n+"'s replication log was recopied from "+masters[0]+" and the node started again")
+	}
+	return out, nil
 }
 
 func partitionFlags(fs *flag.FlagSet) {
@@ -1008,13 +1058,45 @@ func cmdHaResync(c *Ctx) (any, error) {
 				"%d table(s) differ and rebuilding one is not built here yet; the field's path is a table rebuild from the master, or ha_make_slavedb.sh for the whole slave", len(diffs))
 		}
 	case "slave":
-		// The refusal is the honest answer and it now carries the finding behind
-		// it. Nothing in the engine will close this gap on its own: the standby's
+		// Nothing in the engine closes this gap on its own: the standby's
 		// recorded position has already moved past the missing write -- a canary
 		// written afterwards arrives -- so nothing will ever re-fetch it. Only a
-		// rebuild resets that bookkeeping.
-		return nil, Failed("not_implemented",
-			"rebuilding a slave in place is the online rebuild the field does with ha_make_slavedb.sh, and it is not built here yet; cluster destroy and cluster create rebuild the pair. Replication will not catch this up on its own: the standby's position is already past what it is missing")
+		// rebuild resets that bookkeeping, and this is the engine's own rebuild.
+		if err := a.RebuildSlave(c.Ctx, master, slave); err != nil {
+			return out, Failed("rebuild_failed", "%v", err)
+		}
+		deadline := time.Now().Add(c.Timeout / 2)
+		back := false
+		for {
+			st2, rerr := inspect.Read(c.Ctx, a.D, t)
+			if rerr == nil {
+				for _, n := range st2.Nodes {
+					if n.Name == slave && n.Server == "registered_and_standby" {
+						back = true
+					}
+				}
+			}
+			if back || time.Now().After(deadline) || c.Ctx.Err() != nil {
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
+		if !back {
+			return out, &Error{Code: ExitTimeout, Note: "rebuilt_but_not_standby",
+				Msg: slave + " was rebuilt but has not reached registered_and_standby"}
+		}
+		// A rebuild that leaves the two sides still disagreeing has not repaired
+		// anything, and the only way to know is to compare again.
+		if d, derr := inspect.CompareTables(c.Ctx, a.D, t, master, slave, nil); derr == nil {
+			out["diverged_after"] = d.Differ
+			if len(d.Differ) > 0 {
+				return out, Failed("still_diverged",
+					"%s was rebuilt and %d table(s) still differ: %s", slave, len(d.Differ), strings.Join(d.Differ, ", "))
+			}
+			c.Note("rebuilt", SevInfo, slave+" was rebuilt from an online backup of "+master+" and every user table now matches")
+		} else {
+			c.Note("not_compared_after", SevWarn, "the rebuild finished but the two sides could not be compared: "+derr.Error())
+		}
 	default:
 		return nil, Usage("unknown --path %q (want resume, table or slave)", path)
 	}

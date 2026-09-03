@@ -48,6 +48,10 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		// doing its job.
 		{"a verb whose flags do not parse", []string{"repl", "watch", "--cluster", "nope", "--nonsense"}, ExitUsage},
 		{"a command that works", []string{"cluster", "ls", "--timeout", "5s"}, ExitOK},
+		// Everything after a bare -- belongs to the program being run on the
+		// node. Reading -u as one of ours made exit 2 out of a command that
+		// should have got as far as looking for the cluster.
+		{"flags after -- are not ours", []string{"node", "exec", "master", "--cluster", "nope", "--", "csql", "-u", "dba", "-c", "SELECT 1"}, ExitPrecondition},
 	}
 	for _, c := range cases {
 		got, _, _ := invoke(t, home, c.args...)

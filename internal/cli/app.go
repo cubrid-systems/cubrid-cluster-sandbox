@@ -196,6 +196,20 @@ func dispatch(cmd Command, rest []string, stdout, stderr io.Writer) (int, error)
 // parseInterspersed lets flags and positional arguments mix, because
 // "csb fault partition master --keep ping-host" reads the way a person writes it.
 func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	// A bare `--` ends flag parsing: everything after it belongs to another
+	// program. It has to be honoured here rather than left to the flag package,
+	// because the loop below re-parses whatever Parse leaves behind and that
+	// re-enables flag parsing for the remainder -- so `node exec n1 -- csql -u
+	// dba` failed with "flag provided but not defined: -u", which is this tool
+	// reading someone else's flags. Found by the end-to-end suite.
+	var verbatim []string
+	for i, a := range args {
+		if a == "--" {
+			verbatim = args[i+1:]
+			args = args[:i]
+			break
+		}
+	}
 	var positional []string
 	for {
 		if err := fs.Parse(args); err != nil {
@@ -203,7 +217,7 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 		}
 		rest := fs.Args()
 		if len(rest) == 0 {
-			return positional, nil
+			return append(positional, verbatim...), nil
 		}
 		positional = append(positional, rest[0])
 		args = rest[1:]

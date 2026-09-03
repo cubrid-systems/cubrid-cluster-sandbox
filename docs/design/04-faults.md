@@ -333,7 +333,38 @@ leaves, and replication will not carry it
 **And it will not carry it later either.** The standby's recorded position is
 already past the write it is missing — a canary written afterwards arrives — so
 nothing re-fetches it. Only a rebuild resets that bookkeeping, which is why the
-answer is `slave` and why the field's closure is `ha_make_slavedb.sh`.
+answer is `slave`.
+
+**The `slave` path performs the engine's own rebuild.** Not this project's
+invention: the steps and their order are `share/scripts/ha/ha_make_slavedb.sh`
+from the build in use, with the `ssh` and `scp` removed because both nodes'
+database directories are on the same host.
+
+```
+cubrid backupdb -z --no-check -C -D <dir> <db>@localhost   on the master, online
+rm -rf <db>*                                              on the standby
+copy the backup, then <db>_bkvinf                         in that order
+cubrid restoreslave -s master -m <master> -B <dir> <db>    on the standby
+cubrid heartbeat start                                    and it rejoins
+```
+
+**`restoreslave` is a different command from `restoredb`, and that difference is
+the whole reason this works.** A plain restore produces a copy of the master; it
+does not produce a database that knows where replication should resume.
+`restoreslave` takes the source's state and the master's host name and writes the
+bookkeeping a slave needs — which is exactly the bookkeeping a healed split brain
+leaves wrong.
+
+One ordering detail is not obvious and the script has it for the same reason:
+`<db>_bkvinf` is copied **after** the old database is removed, because it lives
+among the files that removal deletes.
+
+Measured three times on diverged pairs: **19 s, 21 s and 23 s**, each ending with
+`registered_and_standby`, every user table matching, and a canary arriving in
+0.08–0.61 s against the 25.97 s the same check took on the diverged cluster. The
+verb compares again afterwards and fails with `still_diverged` if the rebuild did
+not actually repair anything, because a repair that reports success without
+checking is the failure mode this whole section exists to avoid.
 
 **And `resync` never zeroes the counter to make its output tidy.** The engine
 deliberately leaves `fail_counter` standing, because a zero would let an operator
