@@ -151,7 +151,55 @@ second one is the one with something in it.
   machines it should be a third machine rather than either of the two.
 - **The auth key is never stored.** It is a flag or an environment variable, used
   at create and not written to `describe`, which is an artifact people paste into
-  issues.
+  issues. **Use an ephemeral key.** `tailscale logout` expires a node's key and
+  does *not* delete the device: a non-ephemeral node stays in the tailnet's
+  device list until somebody removes it from the admin console or the API, and
+  this tool has neither. `cluster destroy` logs each node out and then says which
+  ones will remain, because the moment to tell somebody is now rather than when
+  they next open the console and find machines they do not recognise.
+
+## Measured on a real tailnet, 2026-09-03
+
+A two-node HA pair reached `serving` on a tailnet with this host as the witness.
+The replication connections were on tailnet addresses in both directions —
+`100.107.179.126:39994 → 100.68.97.118:31523` and back, on the server's own port
+— which is the check that matters, because names that resolve to the bridge would
+look identical from outside and would make every cut a no-op.
+
+**And the first cut WAS a no-op, which is why it was run.** `partition` adds a
+blackhole route, and on a tailnet that lands in the `main` table:
+
+```
+5270:  from all lookup 52        ← tailscale's rule, consulted first
+32766: from all lookup main      ← where the blackhole went
+```
+
+`ip route get` still answered `dev tailscale0 table 52`, the peer stayed
+reachable, and the fault verb did nothing at all — the worst outcome available to
+a fault injector, and the same class of failure as the missing `iptables` that
+the end-to-end suite caught. **A mechanism nobody has run is a mechanism nobody
+has**, and this is the second time that sentence has earned its place.
+
+The fix is table-agnostic and says the same thing: a policy rule at priority
+1000, below tailscale's 5210–5270, so there is no route at all and `connect()`
+fails at once rather than hanging. The packet-level mechanism needs no change,
+because netfilter does not care which table would have carried the packet.
+
+With that, on the tailnet:
+
+| | |
+|---|---|
+| peer after the cut | unreachable |
+| witness after the cut | still reachable — which is the whole point of choosing one outside the pair |
+| two masters | within ~5 s |
+| the engine's own words | `[Failback] [Cancelled] Ping check succeeded for the hosts registered in ha_ping_hosts, determining that it is not a network partition.` |
+| after `fault clear` | one master and one standby again, ~10 s, original roles |
+
+So the `ping-survives` flavour reproduces on a tailnet with a tailnet witness.
+**The mechanism changed and the meaning did not**, which is what the contract was
+written to make possible. The sampling here is at five-second granularity and is
+not a comparison against the bridge's 9 s: that would need the switchover
+harness, and it is the next thing worth running rather than a number to quote.
 
 ## Consequences
 

@@ -274,12 +274,20 @@ func (d *Docker) Nodes(ctx context.Context, cluster string) ([]NodeState, error)
 // Destroy removes the containers and the network. It reports what it removed
 // rather than failing on what was already gone: destroy after an interrupted
 // create is the normal case, not the exception.
-func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed []string, err error) {
+// Destroy removes the containers and the network, and reports anything of ours
+// left somewhere else -- which for a tailnet cluster is the devices, because
+// `tailscale logout` expires a node's key and does NOT delete the device unless
+// the auth key was an ephemeral one. Measured the hard way: a destroyed cluster
+// left two machines in a tailnet's device list.
+func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed, leftBehind []string, err error) {
 	nodes, nerr := d.Nodes(ctx, cluster)
 	if nerr != nil {
-		return nil, nerr
+		return nil, nil, nerr
 	}
 	for _, n := range nodes {
+		if left := d.logOutOfTailnet(ctx, n.Name); left != "" {
+			leftBehind = append(leftBehind, left)
+		}
 		if _, e := d.docker(ctx, "rm", "-f", n.Name); e == nil {
 			removed = append(removed, n.Name)
 		}
@@ -287,7 +295,24 @@ func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed 
 	if res, _ := d.R.Run(ctx, "docker", "network", "rm", network); res != nil && res.ExitCode == 0 {
 		removed = append(removed, network)
 	}
-	return removed, nil
+	return removed, leftBehind, nil
+}
+
+// logOutOfTailnet expires a node's key and returns the device name if it is
+// likely to remain listed.
+//
+// A non-ephemeral node stays in the tailnet's device list after logout, showing
+// as logged out rather than disappearing, and removing it needs the admin
+// console or the API. This tool has neither, so it reports rather than pretends.
+func (d *Docker) logOutOfTailnet(ctx context.Context, node string) string {
+	res, err := d.Privileged(ctx, node, "command -v tailscale >/dev/null || exit 3; tailscale logout")
+	if err != nil || res == nil {
+		return ""
+	}
+	if res.ExitCode == 3 {
+		return "" // not a tailnet node
+	}
+	return node
 }
 
 // ---- the backend contract ------------------------------------------------

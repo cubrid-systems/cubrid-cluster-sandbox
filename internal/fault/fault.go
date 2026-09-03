@@ -190,9 +190,9 @@ func (i *Injector) cut(ctx context.Context, from, to, ip, mechanism string, undo
 		return fmt.Errorf("no address for %s", to)
 	}
 	if undo {
-		return i.D.Reach(ctx, from, ip, mechanism)
+		return i.D.ReachOn(ctx, i.T, from, ip, mechanism)
 	}
-	return i.D.Unreach(ctx, from, ip, mechanism)
+	return i.D.UnreachOn(ctx, i.T, from, ip, mechanism)
 }
 
 // asRoot runs a command inside a node as uid 0. Route rules, iptables and the

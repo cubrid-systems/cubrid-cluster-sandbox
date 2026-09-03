@@ -526,9 +526,19 @@ func cmdClusterDestroy(c *Ctx) (any, error) {
 	}
 
 	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}}
-	removed, err := d.Destroy(c.Ctx, c.Cluster, network)
+	removed, leftBehind, err := d.Destroy(c.Ctx, c.Cluster, network)
 	if err != nil {
 		return nil, Failed("destroy_failed", "%v", err)
+	}
+	// Destroying a cluster removes it from this machine. It does not remove it
+	// from a tailnet: `tailscale logout` expires the key and leaves the device
+	// listed unless the auth key was ephemeral. Somebody has to know that, and
+	// the moment to tell them is now rather than when they next open the admin
+	// console and find machines they do not recognise.
+	if len(leftBehind) > 0 {
+		c.Note("tailnet_devices_remain", SevWarn,
+			"these nodes were logged out of the tailnet but stay in its device list until removed from the admin console or the API: "+
+				strings.Join(leftBehind, ", ")+". An ephemeral auth key removes them automatically; a reusable one does not")
 	}
 
 	workdir := filepath.Join(c.Store.ClusterDir(c.Cluster), "work")

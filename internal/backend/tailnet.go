@@ -67,6 +67,57 @@ func (d *Docker) TailnetAddr(ctx context.Context, node string) (string, error) {
 	return strings.Fields(ip)[0], nil
 }
 
+// UnreachOn and ReachOn express an unreachability on the network the topology
+// actually uses, because HOW a cut is expressed depends on it and WHAT a cut is
+// does not.
+//
+// On a tailnet a route in the main table is a no-op, and this was measured
+// rather than reasoned: tailscale installs a policy rule at priority 5270 that
+// sends every 100.64.0.0/10 packet to its own table, and `main` is not consulted
+// until 32766. `ip route add blackhole` landed in main, `ip route get` still
+// answered `dev tailscale0 table 52`, and the peer stayed reachable -- a fault
+// injector doing nothing at all, which is the worst thing it can do.
+//
+// A policy rule at a lower priority than tailscale's is table-agnostic and says
+// the same thing: no route, so connect() fails at once rather than hanging. The
+// packet-level mechanism needs no change, because netfilter does not care which
+// table would have carried the packet.
+func (d *Docker) UnreachOn(ctx context.Context, t *topology.Topology, from, addr, mechanism string) error {
+	if t.NetworkKind == topology.NetTailnet && mechanism != "drop" {
+		return d.tailnetRule(ctx, from, addr, false)
+	}
+	return d.Unreach(ctx, from, addr, mechanism)
+}
+
+func (d *Docker) ReachOn(ctx context.Context, t *topology.Topology, from, addr, mechanism string) error {
+	if t.NetworkKind == topology.NetTailnet && mechanism != "drop" {
+		return d.tailnetRule(ctx, from, addr, true)
+	}
+	return d.Reach(ctx, from, addr, mechanism)
+}
+
+// tailnetRulePriority sits below tailscale's own rules, which start at 5210.
+const tailnetRulePriority = "1000"
+
+func (d *Docker) tailnetRule(ctx context.Context, from, addr string, undo bool) error {
+	if addr == "" {
+		return fmt.Errorf("no address to cut from %s", from)
+	}
+	verb := "add"
+	if undo {
+		verb = "del"
+	}
+	cmd := "ip rule " + verb + " to " + addr + " blackhole priority " + tailnetRulePriority
+	res, err := d.Privileged(ctx, from, cmd)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 && !undo {
+		return fmt.Errorf("%s on %s: %s", cmd, from, tailTrim(res.Stderr))
+	}
+	return nil
+}
+
 // Addr resolves by the topology's network kind, so callers ask for "the address
 // a peer is reached at" and do not care which network answers.
 func (d *Docker) AddrOn(ctx context.Context, t *topology.Topology, node string) (string, error) {
