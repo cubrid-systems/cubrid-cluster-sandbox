@@ -160,11 +160,24 @@ promotion. The `to_be_active` stall was never explained
 ([`design/03-assembly.md`](design/03-assembly.md) §3); an unexplained
 observation deserves a check that runs every time, not a paragraph.
 
-**Why M3.1 moved.** Its acceptance is a sentence about a consumer, and that
-consumer does not exist yet — `cubrid-testkit` is docs and an empty `impl/`. The
-surface it would call is built and machine-readable, so nothing here is blocked;
-what is missing is somebody on the other side to be wrong about it. Two things
-have to be decided *with* testkit rather than guessed at ahead of it:
+**Why M3.1 moved.** Its acceptance is a sentence about a consumer, and the
+consumer is not ready to make the call yet. `cubrid-testkit` now has a Go module,
+a `cmd/testkit`, and an `internal/` with a `topology` package in it — it is no
+longer docs and an empty directory — but its own README still says *design, not
+code*: phases 0 to 2 are done and phase 3, the `shell` task in Go, has not
+landed. Nothing here is blocked; the surface it would call is built and
+machine-readable. What is missing is a first real call from the other side.
+
+**Its ADR-014 has already decided the half that is theirs**, and it decides it in
+our favour: *"The system under test has a topology; the runner does not have a
+fleet."* `ha_repl` needs a master and a slave and that looks like a fleet — it is
+not, and the runner will not manage one. Whatever stands that pair up is
+therefore somebody else, which is the opening this milestone is named after. The
+same ADR notes that *"a runner scoped to one machine is a runner you can give a
+container to"*, which bears directly on the first question below.
+
+Two things still have to be decided *with* testkit rather than guessed at ahead
+of it:
 
 - **Whether a cluster with no host-facing port is usable.** Access is
   `node exec` and `node shell`, which is what keeps port bookkeeping absent
