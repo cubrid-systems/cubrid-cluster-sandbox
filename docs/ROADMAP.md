@@ -201,7 +201,17 @@ client of the same JSON the CLI emits rather than a parallel path (§9 OQ6). Wha
 it must not become is a second surface with its own way of asking. A wider topology catalogue: replica nodes,
 broker/CAS tiers, shard configurations, CDC consumers — each brings its own
 configuration surface and its own fault verbs, and the migration from presets to
-a declarative document is triggered here. **A Kubernetes backend behind the same topology model — and it is `cubrid-operator`
+a declarative document is triggered here. **A tailnet so a topology can span machines** ([`DESIGN.md`](DESIGN.md) §9 OQ11).
+`ha_node_list` works today because both containers sit on one docker network, and
+that is the single structural limit here — every other skeletal item runs into it
+first. Tailscale would give each node a stable address without publishing a port,
+which keeps §6's refusal of port bookkeeping rather than reversing it. What it
+costs is that the fault verbs are defined against the docker network's cut and
+would have to be re-measured rather than ported, and that a control plane lands
+in the path of `cluster create` for a tool built to run offline. Provisionally a
+backend option, not a default, decided together with the fork below.
+
+**A Kubernetes backend behind the same topology model — and it is `cubrid-operator`
 that is on the other side of it.** The operator already has a `CubridDB` CRD that
 deploys, configures HA, schedules backups, scales and reports status, which is
 the same topology this project models against a different backend. Two ways they

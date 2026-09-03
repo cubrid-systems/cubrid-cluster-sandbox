@@ -892,3 +892,41 @@ reads as a failed ping — so an image without it makes every master demote itse
 on any heartbeat loss. And **seeding must wait for a `createdb` completion
 signal**, not for the `databases.txt` entry, which appears first and yields a
 slave that dies in recovery.
+
+**OQ11 — Should a topology be able to span machines, and is Tailscale how?**
+*Owner*: this project. *Raised* 2026-09-03. *Verification*: a two-node cluster
+whose nodes are on different hosts reaches `serving`, and the fault verbs still
+mean what §5 of `design/04-faults.md` says they mean.
+
+The question is not "how does a consumer reach the nodes" — that one is answered,
+cheaply, by a docker-exec `Channel` (`design/02-topology.md` §7). It is the
+ceiling underneath it: **`ha_node_list` works today because both containers sit
+on one docker network, and that is the single structural limit this tool has.**
+Every topology in the catalogue that is still skeletal — replicas, broker tiers,
+shards, a Kubernetes backend — runs into it first.
+
+A tailnet would lift it. Each node gets a stable address and a name that resolves
+from anywhere, without publishing a port, so §6's refusal to keep port
+bookkeeping survives in spirit rather than being reversed. It would also make
+CTP's frozen `ssh.host` literally true again, which is worth knowing when the
+decision to fill it with a container name is a decision we took this week.
+
+Three things have to be answered before it is a design rather than an idea:
+
+- **The fault verbs are defined against the cut mechanism.** `partition` is
+  `ip route add blackhole <peer>` on the docker network, and `--keep` preserving
+  the ping host is what makes `ping-survives` and `no-ping-hosts` different
+  scenarios at all. Over a tunnel the cut is a different operation and the ping
+  host is not the docker gateway, so the project's most carefully measured
+  behaviour would have to be re-measured, not ported.
+- **It puts a control plane in the path of `cluster create`.** This tool is
+  built to work on a machine with no network — the run record is asserted to
+  carry no external reference — and an auth key is a credential that must not
+  reach `describe`.
+- **It is not needed by the consumer that exists.** testkit's ADR-014 says the
+  runner runs in one place. So this is scope for the multi-machine question, and
+  it should be decided with the Kubernetes/`cubrid-operator` fork (OQ4) rather
+  than ahead of it.
+
+The provisional answer is therefore **yes as a backend option, no as a default**,
+and it is worth a spike behind a flag before it is worth an ADR.
