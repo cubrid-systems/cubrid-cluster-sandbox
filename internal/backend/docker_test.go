@@ -21,7 +21,7 @@ func TestNodePlanCarriesEveryContainerRequirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	top.Image = "csb-base:test"
-	argv := NodePlan(top, top.Nodes[0], "/work/hadb", 1000, 1000)
+	argv := NodePlan(top, top.Nodes[0], "/work/hadb", "/res", 1000, 1000)
 	line := strings.Join(argv, " ")
 
 	must := map[string]string{
@@ -45,7 +45,7 @@ func TestNodePlanCarriesEveryContainerRequirement(t *testing.T) {
 func TestNodePlanOmitsCPUsWhenUnset(t *testing.T) {
 	top, _ := topology.Resolve(topology.Options{Name: "hadb"})
 	top.Image = "img"
-	if line := strings.Join(NodePlan(top, top.Nodes[0], "/w", 0, 0), " "); strings.Contains(line, "--cpus") {
+	if line := strings.Join(NodePlan(top, top.Nodes[0], "/w", "/res", 0, 0), " "); strings.Contains(line, "--cpus") {
 		t.Errorf("an unset quota must not become --cpus 0: %s", line)
 	}
 }

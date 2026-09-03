@@ -17,7 +17,27 @@ const Schema = "csb/v1"
 type Node struct {
 	Name string `json:"name"`
 	Role string `json:"role"` // the role at create time, not now
+
+	// Kind separates a database node from a client node. A client is part of the
+	// CLUSTER -- same network, same labels, destroyed with it -- and is not part
+	// of the HA GROUP: it never appears in ha_node_list, and putting it there
+	// would be a configuration error rather than a bigger cluster.
+	//
+	// It exists because the load driver was running inside the master, competing
+	// with the engine for the CPU quota given to the engine. That was a
+	// compromise, not a design, and `driver_cost` was this project measuring its
+	// own distortion. A client node also gives a JDBC or CCI client somewhere to
+	// run that can reach the broker without publishing a port, and gives CTP's
+	// ha_repl the controller its conf has always required beside the pair.
+	Kind string `json:"kind,omitempty"` // db (default) | client
 }
+
+const (
+	KindDB     = "db"
+	KindClient = "client"
+)
+
+func (n Node) IsClient() bool { return n.Kind == KindClient }
 
 type Resources struct {
 	CPUs    float64 `json:"cpus,omitempty"`
@@ -42,6 +62,7 @@ type Topology struct {
 	PingMode    string           `json:"ping_mode"`
 	PingHost    string           `json:"ping_host,omitempty"`
 	NetworkKind string           `json:"network_kind,omitempty"` // docker (default) | tailnet
+	Tools       string           `json:"tools,omitempty"`        // host directory the clients get read-only
 	WithBroker  bool             `json:"with_broker"`
 	Nodes       []Node           `json:"nodes"`
 	Engine      *engine.Identity `json:"engine,omitempty"`
@@ -57,6 +78,8 @@ type Options struct {
 	Image      string
 	PingMode   string
 	Network    string // docker (default) | tailnet
+	Clients    int    // client nodes beside the HA group
+	Tools      string // a host directory the clients get read-only
 	WithBroker bool
 	CPUs       float64
 	ShmSize    string
@@ -174,8 +197,14 @@ func Resolve(o Options) (*Topology, error) {
 		if preset == "single" {
 			role = "standalone"
 		}
-		t.Nodes = append(t.Nodes, Node{Name: fmt.Sprintf("%s-n%d", name, i), Role: role})
+		t.Nodes = append(t.Nodes, Node{Name: fmt.Sprintf("%s-n%d", name, i), Role: role, Kind: KindDB})
 	}
+	// Clients are named apart from the database nodes so that neither the eye
+	// nor a selector can confuse them, and they carry no HA role at all.
+	for i := 1; i <= o.Clients; i++ {
+		t.Nodes = append(t.Nodes, Node{Name: fmt.Sprintf("%s-c%d", name, i), Kind: KindClient})
+	}
+	t.Tools = o.Tools
 
 	for _, kv := range o.Set {
 		k, v, err := split(kv)
@@ -212,10 +241,37 @@ func (t *Topology) NodeNames() []string {
 	return out
 }
 
+// DBNodes are the nodes that form the HA group. Everything about the assembly --
+// the config, the seeding, the node list, the roles -- is about these and not
+// about the clients standing beside them.
+func (t *Topology) DBNodes() []Node {
+	out := make([]Node, 0, len(t.Nodes))
+	for _, n := range t.Nodes {
+		if !n.IsClient() {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func (t *Topology) Clients() []Node {
+	var out []Node
+	for _, n := range t.Nodes {
+		if n.IsClient() {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // HANodeList is the same on every node -- that is how each learns who its peer
 // is (docs/design/03-assembly.md §5).
 func (t *Topology) HANodeList() string {
-	return "cubrid@" + strings.Join(t.NodeNames(), ":")
+	var names []string
+	for _, n := range t.DBNodes() {
+		names = append(names, n.Name)
+	}
+	return "cubrid@" + strings.Join(names, ":")
 }
 
 // HiddenKeys, sorted, for the note that says a cluster carries unvalidated

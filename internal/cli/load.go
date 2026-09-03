@@ -12,6 +12,7 @@ import (
 
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/load"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
 
 func loadStartFlags(fs *flag.FlagSet) {
@@ -22,7 +23,7 @@ func loadStartFlags(fs *flag.FlagSet) {
 	fs.String("table", "", "table to write (default csb_load)")
 	fs.Int("seed", 42, "fixes the key sequence, so two runs are the same experiment")
 	fs.Int("batch", 1, "rows per statement; rows/s is rate x batch")
-	fs.String("node", "master", "which node runs the load")
+	fs.String("node", "", "which node runs the load (default: a client if there is one, else the master)")
 	fs.Bool("require-rate", false, "exit 1 if the driver could not hold the rate")
 }
 
@@ -44,9 +45,23 @@ func loadDriver(c *Ctx) (*load.Driver, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	// A client if there is one, else the master.
+	//
+	// Running the driver inside the database node was a compromise and never a
+	// design: it competes with the engine for the CPU quota given to the engine,
+	// which is why `driver_cost` exists at all. A client node is where a
+	// workload belongs, so it is the default the moment one exists -- and when
+	// there is none the tool says where the load actually went rather than
+	// leaving somebody to assume.
 	sel := c.str("node")
 	if sel == "" {
 		sel = "master"
+		if len(t.Clients()) > 0 {
+			sel = "client"
+		} else if c.Noun == "load" && c.Verb == "start" {
+			c.Note("load_on_the_engine", SevWarn,
+				"this cluster has no client node, so the driver runs inside the database node and competes with the engine for its CPU quota; driver_cost reports what that costs (cluster create --clients 1)")
+		}
 	}
 	names, rerr := a.Resolve(c.Ctx, sel)
 	if rerr != nil || len(names) != 1 {
@@ -66,11 +81,24 @@ func cmdLoadStart(c *Ctx) (any, error) {
 	}
 	conc, _ := strconv.Atoi(c.str("concurrency"))
 	seed, _ := strconv.Atoi(c.str("seed"))
+	// A client has no database of its own, so it addresses the master's by name
+	// -- `<db>@<host>` rather than `<db>`, which resolves to localhost and fails
+	// on a node that is not serving one. The driver was written when it always
+	// ran inside the database node; the first load on a client failed 484
+	// statements out of 484 saying so.
+	target := d.T.DB
+	if isClient(d.T, node) {
+		master, merr := clusterMaster(c)
+		if merr != nil {
+			return nil, merr
+		}
+		target = d.T.DB + "@" + master
+	}
 	spec := load.Spec{
 		Profile: c.str("profile"), Rate: rate, Concurrency: conc,
 		ForSeconds: c.dur("for").Seconds(), Table: c.str("table"), Seed: seed,
 		Batch: atoiOr(c.str("batch"), 1),
-		DB:    d.T.DB, Node: node, RequireRate: c.fs.Lookup("require-rate").Value.String() == "true",
+		DB:    target, Node: node, RequireRate: c.fs.Lookup("require-rate").Value.String() == "true",
 	}
 	if err := d.Start(c.Ctx, spec); err != nil {
 		return nil, Usage("%v", err)
@@ -194,4 +222,25 @@ func cmdLoadStop(c *Ctx) (any, error) {
 		}
 	}
 	return map[string]any{"node": node, "status": st}, nil
+}
+
+func isClient(t *topology.Topology, node string) bool {
+	for _, n := range t.Nodes {
+		if n.Name == node {
+			return n.IsClient()
+		}
+	}
+	return false
+}
+
+func clusterMaster(c *Ctx) (string, error) {
+	a, _, err := loadCluster(c)
+	if err != nil {
+		return "", err
+	}
+	names, rerr := a.Resolve(c.Ctx, "master")
+	if rerr != nil || len(names) != 1 {
+		return "", Precondition("no_master", "a load from a client needs a master to write to: %v", rerr)
+	}
+	return names[0], nil
 }

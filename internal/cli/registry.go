@@ -78,8 +78,12 @@ func init() {
 
 		// ---- load ------------------------------------------------------------
 		{Noun: "load", Verb: "start", Summary: "a rate it has to hold", Mutates: true, Flags: loadStartFlags, Run: cmdLoadStart},
-		{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStop},
-		{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStatus},
+		{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Flags: func(fs *flag.FlagSet) {
+			fs.String("node", "", "which node (default: a client if there is one, else the master)")
+		}, Run: cmdLoadStop},
+		{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Flags: func(fs *flag.FlagSet) {
+			fs.String("node", "", "which node (default: a client if there is one, else the master)")
+		}, Run: cmdLoadStatus},
 
 		// ---- scenario --------------------------------------------------------
 		{Noun: "scenario", Verb: "run", Args: "<file>", Summary: "a sequence and what it should reach", Mutates: true,

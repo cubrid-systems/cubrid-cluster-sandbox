@@ -56,7 +56,7 @@ func (a *Assembler) confDir(node string) string {
 
 // Master is the node the topology created as master. After a failover the roles
 // have swapped; this is the create-time role, which is what the assembly means.
-func (a *Assembler) Master() topology.Node { return a.T.Nodes[0] }
+func (a *Assembler) Master() topology.Node { return a.T.DBNodes()[0] }
 
 // ---- state -------------------------------------------------------------
 
@@ -90,10 +90,10 @@ func (a *Assembler) State(ctx context.Context) (string, error) {
 }
 
 func (a *Assembler) seeded() bool {
-	if len(a.T.Nodes) < 2 {
+	if len(a.T.DBNodes()) < 2 {
 		return true // a single node has nothing to seed
 	}
-	_, err := os.Stat(filepath.Join(a.dbDir(a.T.Nodes[1].Name), a.T.DB+"_lgat"))
+	_, err := os.Stat(filepath.Join(a.dbDir(a.T.DBNodes()[1].Name), a.T.DB+"_lgat"))
 	return err == nil
 }
 
@@ -286,14 +286,17 @@ func (a *Assembler) StartBroker(ctx context.Context) error {
 	if !a.T.WithBroker {
 		return nil
 	}
-	for _, n := range a.T.Nodes {
+	// The broker fronts a database, so it belongs to the nodes that have one. A
+	// client node reaches it across the network like any other client -- which
+	// is the point of a client node.
+	for _, n := range a.T.DBNodes() {
 		logPath := "/work/" + n.Name + "/broker-start.log"
 		if _, err := a.D.Exec(ctx, n.Name, a.T.DB,
 			"cubrid broker start > "+logPath+" 2>&1; true"); err != nil {
 			return err
 		}
 	}
-	a.step("broker %s started on %d node(s)", BrokerName, len(a.T.Nodes))
+	a.step("broker %s started on %d node(s)", BrokerName, len(a.T.DBNodes()))
 	return nil
 }
 
@@ -331,7 +334,7 @@ func (a *Assembler) CreateDB(ctx context.Context) error {
 // ${DB}_lgat__lock, which vanishes mid-copy and breaks the chain, so it is
 // excluded rather than copied and deleted afterwards.
 func (a *Assembler) Seed(ctx context.Context) error {
-	if len(a.T.Nodes) < 2 {
+	if len(a.T.DBNodes()) < 2 {
 		return nil
 	}
 	src := a.dbDir(a.Master().Name)
@@ -341,7 +344,7 @@ func (a *Assembler) Seed(ctx context.Context) error {
 	}
 	names = append(names, filepath.Join(src, "databases.txt"))
 
-	for _, n := range a.T.Nodes[1:] {
+	for _, n := range a.T.DBNodes()[1:] {
 		dst := a.dbDir(n.Name)
 		if err := os.MkdirAll(dst, 0o755); err != nil {
 			return err
@@ -413,8 +416,8 @@ func copyFile(src, dst string) error {
 // the only case anybody reads it in.
 func (a *Assembler) StartHeartbeat(ctx context.Context) error {
 	var wg sync.WaitGroup
-	errs := make([]error, len(a.T.Nodes))
-	for i, n := range a.T.Nodes {
+	errs := make([]error, len(a.T.DBNodes()))
+	for i, n := range a.T.DBNodes() {
 		wg.Add(1)
 		go func(i int, node string) {
 			defer wg.Done()
@@ -468,7 +471,7 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 		// out. Found by the end-to-end suite, on a pair whose roles a healed split
 		// brain had exchanged.
 		serving, waiting := "", ""
-		for _, n := range a.T.Nodes {
+		for _, n := range a.T.DBNodes() {
 			st, _ := a.serverState(ctx, n.Name)
 			states[n.Name] = st
 			if st == "registered_and_active" && serving == "" {
@@ -519,7 +522,7 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 		}
 		time.Sleep(2 * time.Second)
 	}
-	for _, n := range a.T.Nodes {
+	for _, n := range a.T.DBNodes() {
 		if states[n.Name] == "" {
 			return states, fmt.Errorf("%s never registered; its start log says: %s", n.Name, a.StartLog(n.Name))
 		}
@@ -545,7 +548,7 @@ func (a *Assembler) Up(ctx context.Context) (map[string]string, error) {
 	if err := a.Seed(ctx); err != nil {
 		return nil, err
 	}
-	a.step("heartbeat start on %d node(s), concurrently", len(a.T.Nodes))
+	a.step("heartbeat start on %d node(s), concurrently", len(a.T.DBNodes()))
 	if err := a.StartHeartbeat(ctx); err != nil {
 		return nil, err
 	}
@@ -560,7 +563,7 @@ func (a *Assembler) Up(ctx context.Context) (map[string]string, error) {
 // Down stops every node gracefully: the server flushes, which is a different
 // scenario from a crash and produces different engine behaviour.
 func (a *Assembler) Down(ctx context.Context) error {
-	for _, n := range a.T.Nodes {
+	for _, n := range a.T.DBNodes() {
 		res, err := a.D.Exec(ctx, n.Name, a.T.DB, "cubrid service stop")
 		if err != nil {
 			return err
@@ -643,9 +646,21 @@ func (a *Assembler) Resolve(ctx context.Context, sel string) ([]string, error) {
 	switch sel {
 	case "all":
 		return a.T.NodeNames(), nil
+	case "client":
+		// A client is addressed by what it is, not by a role it does not have.
+		// It is never returned by master or slave, because a workload node that
+		// answered to "master" would be a very bad surprise.
+		var out []string
+		for _, n := range a.T.Clients() {
+			out = append(out, n.Name)
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("this cluster has no client node (cluster create --clients N)")
+		}
+		return out, nil
 	case "master", "slave":
 		var master, standby []string
-		for _, n := range a.T.Nodes {
+		for _, n := range a.T.DBNodes() {
 			st, _ := a.serverState(ctx, n.Name)
 			switch st {
 			case "registered_and_active", "registered_and_to_be_active":

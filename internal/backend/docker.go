@@ -151,7 +151,7 @@ func (d *Docker) NetworkGateway(ctx context.Context, name string) (string, error
 // NodePlan is the argv for one container, kept separate from running it so the
 // container requirements in docs/design/03-assembly.md §4 can be asserted
 // without a docker daemon.
-func NodePlan(t *topology.Topology, node topology.Node, workdir string, uid, gid int) []string {
+func NodePlan(t *topology.Topology, node topology.Node, workdir, resultsDir string, uid, gid int) []string {
 	args := []string{
 		"run", "-d",
 		"--name", node.Name,
@@ -177,6 +177,22 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir string, uid, gid
 		args = append(args, "--device", "/dev/net/tun")
 	}
 	nodeWork := filepath.Join(workdir, node.Name)
+	if node.IsClient() {
+		// A client has no database volumes -- it is not part of the HA group and
+		// has nothing to serve. What it gets instead is somewhere to read the
+		// user's own tooling from and somewhere to write results that outlive
+		// the cluster.
+		//
+		// /tools is READ-ONLY and is a path on the host that this tool never
+		// touches: your scripts stay in your repository, the same way --build
+		// takes an engine tree where it already is rather than copying it.
+		// /results is ours, writable, and kept unless the cluster is purged --
+		// the same rule the run record follows, for the same reason.
+		if t.Tools != "" {
+			args = append(args, "-v", t.Tools+":/tools:ro")
+		}
+		args = append(args, "-v", filepath.Join(resultsDir, node.Name)+":/results")
+	}
 	args = append(args,
 		"-v", workdir+":/work",
 		"-v", filepath.Join(nodeWork, "db")+":/db", // the same container path on every node
@@ -198,7 +214,7 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir string, uid, gid
 // behind, and the answer is to pick up from the state found rather than to make
 // the user clean up first (docs/design/03-assembly.md §1). An existing container
 // is started if it is stopped and left alone if it is running.
-func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topology.Node, workdir string, uid, gid int) error {
+func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topology.Node, workdir, resultsDir string, uid, gid int) error {
 	if err := os.MkdirAll(filepath.Join(workdir, node.Name, "db"), 0o755); err != nil {
 		return err
 	}
@@ -209,7 +225,7 @@ func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topo
 		_, err := d.docker(ctx, "start", node.Name)
 		return err
 	}
-	_, err := d.docker(ctx, NodePlan(t, node, workdir, uid, gid)...)
+	_, err := d.docker(ctx, NodePlan(t, node, workdir, resultsDir, uid, gid)...)
 	return err
 }
 

@@ -359,3 +359,54 @@ Verified end to end on the real `CTP/conf/ha_repl.conf`: a cluster created from
 it carried `max_clients=200` validated and `ha_max_heartbeat_gap=10` unvalidated
 with both notes, and `describe --format ctp` wrote the pair back with the
 database name and both parameters.
+
+## 8. Client nodes — where a workload actually belongs
+
+```
+csb cluster create --clients N --tools <dir>
+```
+
+A node now has a **kind**. A `client` is part of the *cluster* — same network,
+same labels, destroyed with it — and is not part of the *HA group*: it never
+appears in `ha_node_list`, carries no role, and is not returned by the `master`
+or `slave` selectors. It is addressed as `client` or `client[n]`, because a
+workload node that answered to "master" would be a very bad surprise.
+
+**It exists because the load driver was running inside the master.** That was a
+compromise and never a design: the driver competed with the engine for the CPU
+quota given to the engine, and `driver_cost` was this project measuring its own
+distortion. `load` now runs on a client when there is one, and says so in a note
+when there is not.
+
+Two spaces, and they are not the same space.
+
+| | | |
+|---|---|---|
+| `/tools` | **yours**, read-only | a host directory you name, mounted the way `--build` mounts an engine tree: it stays where it is, this tool never writes to it, and a run cannot damage your scripts |
+| `/results` | **ours**, writable | `clusters/<name>/results/<client>/`, kept when the cluster is destroyed and removed only by `--purge` — the same rule the run record follows, for the same reason: destroying the machine is not a reason to destroy the report |
+
+Measured 2026-09-03 on a pair plus one client:
+
+- the user's own `hello.sql` under `/tools` ran from the client against the
+  master (`csql -u dba -i /tools/hello.sql <db>@<master>`) and the row arrived on
+  the standby;
+- `/tools` refused a write — `Read-only file system`;
+- **the broker answered from the client with no port published on the host**:
+  `broker_tester <master>:33000 -D <db> -u dba` connected and returned a row.
+  That is the path JDBC and CCI use, and it is the answer to whether a client can
+  reach the cluster without reversing §6's refusal to keep port bookkeeping — it
+  can, from inside;
+- `/results` survived `cluster destroy`;
+- and the load ran from the client at **19.8/s against 20/s requested, no
+  errors, p50 26.3 ms, p99 230.6 ms**.
+
+That last line is the one to read carefully. The latencies are higher than the
+in-node figures because they now cross a network, which is what a client's
+latency has always been — **the numbers are not comparable with anything this
+tool measured before, and they are the right ones.**
+
+The first load from a client failed all 484 of its statements, saying
+`Failed to connect to database server on host localhost`. The driver was written
+when it always ran inside the database node, so it addressed the database by
+name alone; from a client it has to address the master's, `<db>@<host>`. Nothing
+about that was visible until a client existed.

@@ -37,6 +37,8 @@ func createFlags(fs *flag.FlagSet) {
 	fs.String("ping-mode", "icmp", "icmp, tcp or none")
 	fs.String("network", "docker", "docker (one host's bridge) or tailnet (nodes join a tailnet)")
 	fs.String("ts-authkey", "", "tailnet auth key; or CSB_TS_AUTHKEY. Never stored in the artifact")
+	fs.Int("clients", 0, "client nodes beside the HA group: where a workload runs")
+	fs.String("tools", "", "a host directory the clients get read-only at /tools")
 	fs.String("ping-host", "", "the witness a node pings to tell 'the peer is gone' from 'I am gone'")
 	fs.Bool("with-broker", false, "run a broker, which is the door quiesce closes")
 	fs.Float64("cpus", 0, "CPU quota per node; host-load profiles are meaningless without it")
@@ -206,6 +208,7 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 
 	cpus, _ := strconv.ParseFloat(c.str("cpus"), 64)
 	nodes, _ := strconv.Atoi(c.str("nodes"))
+	clients, _ := strconv.Atoi(c.str("clients"))
 	set, setHidden := repeated(c, "set"), repeated(c, "set-hidden")
 	if conf := c.str("from-ctp"); conf != "" {
 		fromConf, fromHidden, cerr := ctpSets(c, conf)
@@ -221,6 +224,7 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 	t, err := topology.Resolve(topology.Options{
 		Name: name, Preset: c.str("preset"), Nodes: nodes, DB: c.str("db"),
 		Image: c.str("image"), PingMode: c.str("ping-mode"), Network: c.str("network"),
+		Clients: clients, Tools: c.str("tools"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
 		CPUs:       cpus, Set: set, SetHidden: setHidden,
 		Engine: id,
@@ -328,9 +332,18 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 		c.Note("describe_not_snapshotted", SevWarn, err.Error())
 	}
 
+	// Results outlive the cluster on purpose: they are what somebody came for,
+	// and destroying the machine is not a reason to destroy the report. Same
+	// rule as the run record, same place, removed only by --purge.
+	resultsDir := filepath.Join(c.Store.ClusterDir(name), "results")
 	uid, gid := os.Getuid(), os.Getgid()
 	for _, n := range t.Nodes {
-		if err := d.CreateNode(c.Ctx, t, n, workdir, uid, gid); err != nil {
+		if n.IsClient() {
+			if err := os.MkdirAll(filepath.Join(resultsDir, n.Name), 0o755); err != nil {
+				return nil, Failed("store_unwritable", "%v", err)
+			}
+		}
+		if err := d.CreateNode(c.Ctx, t, n, workdir, resultsDir, uid, gid); err != nil {
 			return nil, Failed("node_failed", "%v", err)
 		}
 	}
