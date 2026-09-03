@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,6 +99,9 @@ func (a *Assembler) seeded() bool {
 }
 
 var regState = regexp.MustCompile(`registered_and_[a-z_]+`)
+
+// client[n] is one-based, because the nodes are named -c1, -c2.
+var clientIndexed = regexp.MustCompile(`^client\[([0-9]+)\]$`)
 
 func (a *Assembler) serverState(ctx context.Context, node string) (string, error) {
 	res, err := a.D.Exec(ctx, node, a.T.DB, "cubrid heartbeat status 2>/dev/null")
@@ -686,6 +690,14 @@ func (a *Assembler) Resolve(ctx context.Context, sel string) ([]string, error) {
 			return nil, fmt.Errorf("%d nodes are standby; use slave[n] to name one", len(standby))
 		}
 		return standby, nil
+	}
+	if m := clientIndexed.FindStringSubmatch(sel); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		clients := a.T.Clients()
+		if n < 1 || n > len(clients) {
+			return nil, fmt.Errorf("client[%d]: this cluster has %d client node(s), numbered from 1", n, len(clients))
+		}
+		return []string{clients[n-1].Name}, nil
 	}
 	for _, n := range a.T.Nodes {
 		if n.Name == sel {

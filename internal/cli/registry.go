@@ -58,6 +58,8 @@ func init() {
 		{Noun: "fault", Verb: "partition", Args: "<selector>", Summary: "cut routes, not interfaces", Mutates: true, Flags: partitionFlags, Run: cmdFaultPartition},
 		{Noun: "fault", Verb: "lag", Args: "<selector>", Summary: "stage-targeted replication lag", Mutates: true, Flags: lagFlags, Run: cmdFaultLag},
 		{Noun: "fault", Verb: "splitbrain", Summary: "two masters, on request", Mutates: true, Flags: splitbrainFlags, Run: cmdFaultSplitbrain},
+		{Noun: "fault", Verb: "contend", Args: "<selector>", Summary: "starve the engine of cpu or io", Mutates: true,
+			Flags: contendFlags, Run: cmdFaultContend},
 		{Noun: "fault", Verb: "failcount", Summary: "move fail_counter deliberately", Mutates: true, Flags: failcountFlags, Run: cmdFaultFailcount},
 		{Noun: "fault", Verb: "ping-unavailable", Args: "<selector>", Summary: "the engine cannot ask", Mutates: true, Flags: pingFlags, Run: cmdFaultPingUnavailable},
 		{Noun: "fault", Verb: "clear", Args: "[<selector>]", Summary: "reverse a condition", Mutates: true, Run: cmdFaultClear},
@@ -75,17 +77,6 @@ func init() {
 		{Noun: "ha", Verb: "promote", Args: "<selector>", Summary: "promote a node", Mutates: true, Flags: promoteFlags, Run: cmdHaPromote},
 		{Noun: "ha", Verb: "failback", Summary: "return to the original master; interactive", Mutates: true, Flags: failbackFlags, Run: cmdHaFailback},
 		{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Flags: resyncFlags, Run: cmdHaResync},
-
-		// ---- load ------------------------------------------------------------
-		{Noun: "load", Verb: "start", Summary: "a rate it has to hold", Mutates: true, Flags: loadStartFlags, Run: cmdLoadStart},
-		{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Flags: func(fs *flag.FlagSet) {
-			fs.String("node", "", "which node (default: a client if there is one, else the master)")
-		}, Run: cmdLoadStop},
-		{Noun: "load", Verb: "driver", Summary: "the program load start runs, to read or to replace",
-			Flags: driverFlags, Run: cmdLoadDriver},
-		{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Flags: func(fs *flag.FlagSet) {
-			fs.String("node", "", "which node (default: a client if there is one, else the master)")
-		}, Run: cmdLoadStatus},
 
 		// ---- scenario --------------------------------------------------------
 		{Noun: "scenario", Verb: "run", Args: "<file>", Summary: "a sequence and what it should reach", Mutates: true,
@@ -206,7 +197,6 @@ func cmdClusterDescribe(c *Ctx) (any, error) {
 		return nil, Failed("describe_malformed", "%s is not valid JSON: %v", c.Store.DescribePath(c.Cluster), err)
 	}
 	doc = describeWithFaults(c, doc)
-	doc = describeWithLoad(c, doc)
 
 	// The CTP fragment is a second RENDERING of this artifact, never a second
 	// source: it is written from the same describe, so a cluster cannot describe

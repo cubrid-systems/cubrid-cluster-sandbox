@@ -16,18 +16,19 @@ const (
 	Master  Kind = iota // the node that is active now
 	Slave               // the single standby; ambiguous if there is more than one
 	Replica             // a replica node, always indexed
+	Client              // a client node: part of the cluster, not of the HA group
 	Name                // a node by name, when the scenario genuinely means that node
 	All                 // every node
 )
 
 type Selector struct {
 	Kind    Kind
-	Index   int    // for slave[n] / replica[n]; -1 when unindexed
+	Index   int    // for slave[n] / replica[n] / client[n]; -1 when unindexed
 	NodeRaw string // for Kind == Name
 	Raw     string
 }
 
-var indexed = regexp.MustCompile(`^(slave|replica)\[([0-9]+)\]$`)
+var indexed = regexp.MustCompile(`^(slave|replica|client)\[([0-9]+)\]$`)
 var nodeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // Parse turns one selector token into a Selector, or reports why it cannot.
@@ -41,6 +42,8 @@ func Parse(s string) (Selector, error) {
 		return Selector{Kind: Slave, Index: -1, Raw: s}, nil
 	case "all":
 		return Selector{Kind: All, Index: -1, Raw: s}, nil
+	case "client":
+		return Selector{Kind: Client, Index: -1, Raw: s}, nil
 	case "replica":
 		return Selector{}, fmt.Errorf("replica must be indexed, as replica[0]")
 	}
@@ -50,15 +53,18 @@ func Parse(s string) (Selector, error) {
 			return Selector{}, fmt.Errorf("bad index in %q", s)
 		}
 		k := Slave
-		if m[1] == "replica" {
+		switch m[1] {
+		case "replica":
 			k = Replica
+		case "client":
+			k = Client
 		}
 		return Selector{Kind: k, Index: n, Raw: s}, nil
 	}
 	if nodeName.MatchString(s) {
 		return Selector{Kind: Name, Index: -1, NodeRaw: s, Raw: s}, nil
 	}
-	return Selector{}, fmt.Errorf("not a selector: %q (want master, slave, slave[n], replica[n], a node name, or all)", s)
+	return Selector{}, fmt.Errorf("not a selector: %q (want master, slave, slave[n], replica[n], client, client[n], a node name, or all)", s)
 }
 
 func (s Selector) String() string { return s.Raw }

@@ -31,14 +31,18 @@ arm () {
   local a=$1 runno=$2 name="tba$(date +%s%N | tail -c 6)"
   export CSB_CLUSTER=$name
   echo "== arm $a (run $runno)"
-  $CSB cluster create --name "$name" --build "$ENGINE" --timeout 600s >/dev/null 2>&1 || {
+  $CSB cluster create --name "$name" --build "$ENGINE" --clients 1 --tools "$(pwd)/examples/load-client" --timeout 600s >/dev/null 2>&1 || {
     echo "   !! create failed"; return 1; }
   local n1 n2
   n1=$($CSB node exec master -- hostname --timeout 30s 2>/dev/null | tr -d '\r\n')
   n2=$($CSB node exec slave  -- hostname --timeout 30s 2>/dev/null | tr -d '\r\n')
 
   if [ "$a" = B ]; then
-    $CSB load start --profile insert --rate 40/s --batch 50 --for 300s --timeout 60s >/dev/null 2>&1
+    # Traffic comes from a program on a client node now; there is no built-in
+  # load verb, and loading data was never this project's job
+  # (examples/load-client/README.md).
+  $CSB node exec client --timeout 60s -- \
+    setsid nohup sh /tools/example.sh "$CSB_CLUSTER" "$CSB_CLUSTER-n1" 100000 20 ">/dev/null" "2>&1" "&" >/dev/null 2>&1
     sleep 20
   fi
 
@@ -89,7 +93,7 @@ arm_E () {
   local runno=$1 name="tba$(date +%s%N | tail -c 6)"
   export CSB_CLUSTER=$name
   echo "== arm E (run $runno): re-seed a live standby, then restart"
-  $CSB cluster create --name "$name" --build "$ENGINE" --timeout 600s >/dev/null 2>&1 || return 1
+  $CSB cluster create --name "$name" --build "$ENGINE" --clients 1 --tools "$(pwd)/examples/load-client" --timeout 600s >/dev/null 2>&1 || return 1
   local n1 n2 work
   n1=$($CSB node exec master -- hostname --timeout 30s 2>/dev/null | tr -d '\r\n')
   n2=$($CSB node exec slave  -- hostname --timeout 30s 2>/dev/null | tr -d '\r\n')

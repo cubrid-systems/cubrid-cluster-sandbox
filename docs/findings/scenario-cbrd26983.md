@@ -81,4 +81,4 @@ real, reproducible, and now recorded automatically with the settings that decide
 it, which is the apparatus that measurement never had.
 
 Varying the three parameters against this baseline is M2.5, and it needs the load
-driver first ([`../design/06-load.md`](../design/06-load.md)).
+driver first ([`../design/06-traffic.md`](../design/06-traffic.md)).

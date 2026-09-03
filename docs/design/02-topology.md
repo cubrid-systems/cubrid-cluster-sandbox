@@ -177,13 +177,13 @@ reproduce. This is the field a naive implementation drops.
 under 2000 inserts a second is not the same cluster as an idle one, and a
 cluster whose broker is read-only is not the same cluster as one taking writes.
 Both are states a person can be in the middle of when they hit something worth
-sharing ([`06-load.md`](06-load.md) §7, [`04-faults.md`](04-faults.md) §9).
+sharing ([`06-traffic.md`](06-traffic.md) §7, [`04-faults.md`](04-faults.md) §9).
 
 **`resources` is here because `host-cpu` load is meaningless without it.**
 "Saturated" on a 32-core workstation and on a 4-core CI runner are different
 experiments; the node's CPU quota is what makes *N threads against M cores* a
 reproducible statement rather than a coincidence
-([`06-load.md`](06-load.md) §5).
+([`06-traffic.md`](06-traffic.md) §5).
 
 ### Rebuilding from it
 
@@ -369,8 +369,9 @@ csb cluster create --clients N --tools <dir>
 A node now has a **kind**. A `client` is part of the *cluster* — same network,
 same labels, destroyed with it — and is not part of the *HA group*: it never
 appears in `ha_node_list`, carries no role, and is not returned by the `master`
-or `slave` selectors. It is addressed as `client` or `client[n]`, because a
-workload node that answered to "master" would be a very bad surprise.
+or `slave` selectors. It is addressed as `client` or `client[n]` — one-based, matching the
+`-c1`, `-c2` names — because a workload node that answered to "master" would be
+a very bad surprise.
 
 **It exists because the load driver was running inside the master.** That was a
 compromise and never a design: the driver competed with the engine for the CPU

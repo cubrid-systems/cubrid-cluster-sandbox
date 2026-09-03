@@ -119,7 +119,7 @@ numbers side by side and let the disagreement be visible, which is the thing
 nobody has yet done in one place.
 
 **`validity` is explicit and never inferred.** A run is invalid when a load did
-not hold its rate ([`06-load.md`](06-load.md) §3), when a fault was already in
+not hold its rate ([`06-traffic.md`](06-traffic.md) §3), when a fault was already in
 force at the start, or when the node clocks disagree by more than the interval
 being measured. Reasons are codes, the same shape as `notes`
 ([`01-cli.md`](01-cli.md) §4), and each corresponds to something that has

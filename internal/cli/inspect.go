@@ -12,7 +12,6 @@ import (
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/assembly"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/fault"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/inspect"
-	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/load"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
@@ -260,6 +259,20 @@ func cmdReplDiff(c *Ctx) (any, error) {
 			fmt.Fprintf(c.Out, "  skipped %s\n", sk)
 		}
 		printNotes(c)
+	}
+	// A difference under write traffic is lag, not divergence, and the verb has
+	// to say which it cannot tell apart. Equal counts are not equal data; the
+	// converse is just as true, and this cost the end-to-end suite two runs
+	// before it was said out loud.
+	behind := false
+	for _, n := range st.Nodes {
+		if n.Name == standby && n.Repl != nil && n.Repl.ApplyLag != nil && *n.Repl.ApplyLag > 0 {
+			behind = true
+		}
+	}
+	if len(d.Differ) > 0 && behind {
+		c.Note("may_be_lag", SevWarn,
+			"the standby is still applying, so a row-count difference here may be replication in flight rather than divergence: compare again when it has drained, or stop the writers first")
 	}
 	if len(d.Differ) > 0 {
 		return d, Failed("tables_differ",
@@ -616,33 +629,6 @@ func describeWithFaults(c *Ctx, doc map[string]any) map[string]any {
 	return doc
 }
 
-// describeWithLoad does the same for the workload. A cluster reproducing a bug
-// under 2000 inserts a second is not the same cluster as an idle one
-// (docs/design/06-load.md §7).
-func describeWithLoad(c *Ctx, doc map[string]any) map[string]any {
-	a, t, err := loadCluster(c)
-	if err != nil {
-		return doc
-	}
-	d := &load.Driver{D: a.D, T: t, Workdir: a.Workdir}
-	for _, n := range t.Nodes {
-		st, serr := d.Status(n.Name)
-		if serr != nil || st == nil || !st.Running {
-			continue
-		}
-		spec, _ := d.Spec(n.Name)
-		if spec == nil {
-			continue
-		}
-		b, _ := json.Marshal(spec)
-		var raw any
-		_ = json.Unmarshal(b, &raw)
-		doc["load"] = raw
-		return doc
-	}
-	return doc
-}
-
 // invalidities are the findings that make a run untrustworthy. They are stated
 // rather than inferred: a reader must not have to work out for themselves that
 // a measurement was taken while a fault was in force or while the nodes'
@@ -852,6 +838,61 @@ func cmdFaultSplitbrain(c *Ctx) (any, error) {
 	return out, nil
 }
 
+func contendFlags(fs *flag.FlagSet) {
+	fs.String("kind", "cpu", "cpu or io")
+	fs.Int("workers", 2, "how many busy loops")
+}
+
+// cmdFaultContend starves the engine of the resource it runs on.
+//
+// It used to be `load --profile host-cpu`, which was the wrong noun: this is not
+// a workload, it is a condition. It is held until cleared, it shows in
+// `fault ls`, and `clear` reverses it -- none of which was true while it lived
+// under a verb whose other half was a data driver.
+func cmdFaultContend(c *Ctx) (any, error) {
+	sel, err := selectorArg(c)
+	if err != nil {
+		return nil, err
+	}
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	names, rerr := a.Resolve(c.Ctx, sel)
+	if rerr != nil {
+		return nil, Precondition("unresolved_selector", "%v", rerr)
+	}
+	set, ferr := fault.Open(c.Store.ClusterDir(c.Cluster))
+	if ferr != nil {
+		return nil, Failed("fault_state", "%v", ferr)
+	}
+	kind := c.str("kind")
+	workers, _ := strconv.Atoi(c.str("workers"))
+	inj := &fault.Injector{D: a.D, T: t}
+	for _, n := range names {
+		if err := inj.Contend(c.Ctx, set, n, kind, workers); err != nil {
+			return nil, Failed("contention_failed", "%v", err)
+		}
+		if c.Record != nil {
+			_ = c.Record.Append(record.ActorTool, "fault.contend",
+				map[string]any{"node": n, "kind": kind, "workers": workers})
+		}
+		if !c.JSON && !c.Quiet {
+			fmt.Fprintf(c.Out, "contending for %s on %s (%d worker(s))\n", kind, n, workers)
+		}
+	}
+	if t.Resources.CPUs == 0 && kind == "cpu" {
+		// "Saturated" on a 32-core host and on a 4-core runner are different
+		// experiments; without a quota this is not reproducible.
+		c.Note("no_cpu_quota", SevWarn,
+			"these nodes have no CPU quota, so contention takes whatever the machine happens to have; create with --cpus to make it reproducible")
+	}
+	if !c.JSON && !c.Quiet {
+		printNotes(c)
+	}
+	return map[string]any{"nodes": names, "kind": kind, "workers": workers}, nil
+}
+
 func failcountFlags(fs *flag.FlagSet) {
 	fs.String("table", "", "table to break (default csb_failcount)")
 	fs.Int("rows", 5, "how many rows arrive before the primary key does")
@@ -907,18 +948,13 @@ func cmdClusterQuiesce(c *Ctx) (any, error) {
 			// Refuse rather than report success it cannot deliver: a cluster
 			// with no broker has no door to close.
 			return nil, Precondition("no_broker",
-				"this cluster has no broker, so there is no door to close. Create it with --with-broker, or use --mechanism load to stop this tool's own writer")
+				"this cluster has no broker, so there is no door to close. Create it with --with-broker")
 		}
 		if err := inj.Quiesce(c.Ctx, set, t.NodeNames(), c.str("mode"), assembly.BrokerName); err != nil {
 			return nil, Failed("quiesce_failed", "%v", err)
 		}
-	case "load":
-		d := &load.Driver{D: a.D, T: t, Workdir: a.Workdir}
-		for _, n := range t.Nodes {
-			_ = d.Stop(c.Ctx, n.Name)
-		}
 	default:
-		return nil, Usage("unknown --mechanism %q (want broker or load)", mech)
+		return nil, Usage("unknown --mechanism %q (want broker)", mech)
 	}
 
 	// Neither mechanism closes a door the tool does not own.
@@ -1138,6 +1174,26 @@ func cmdHaResync(c *Ctx) (any, error) {
 		if !back {
 			return out, &Error{Code: ExitTimeout, Note: "rebuilt_but_not_standby",
 				Msg: slave + " was rebuilt but has not reached registered_and_standby"}
+		}
+		// Wait for the applier before comparing. A rebuilt node under write
+		// traffic is behind by construction for a moment, and comparing then
+		// reports a divergence that is only lag -- which is exactly what it did
+		// the first time a workload was running during this check.
+		drainDeadline := time.Now().Add(2 * time.Minute)
+		for {
+			st3, rerr := inspect.Read(c.Ctx, a.D, t)
+			drained := rerr == nil
+			if rerr == nil {
+				for _, n := range st3.Nodes {
+					if n.Name == slave && n.Repl != nil && n.Repl.ApplyLag != nil && *n.Repl.ApplyLag > 0 {
+						drained = false
+					}
+				}
+			}
+			if drained || time.Now().After(drainDeadline) || c.Ctx.Err() != nil {
+				break
+			}
+			time.Sleep(2 * time.Second)
 		}
 		// A rebuild that leaves the two sides still disagreeing has not repaired
 		// anything, and the only way to know is to compare again.

@@ -139,6 +139,13 @@ func (a *Assembler) RebuildSlave(ctx context.Context, master, slave string) erro
 	if _, err := a.D.Exec(ctx, slave, db, "cubrid heartbeat start > "+logPath+" 2>&1; true"); err != nil {
 		return err
 	}
+	// And its broker, if the cluster has one. `heartbeat start` does not start
+	// it, and a rebuilt node that cannot be reached through the door is only
+	// half back.
+	if a.T.WithBroker {
+		_, _ = a.D.Exec(ctx, slave, db,
+			"cubrid broker start > /work/"+slave+"/broker-start.log 2>&1; true")
+	}
 	return nil
 }
 

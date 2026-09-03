@@ -2,18 +2,21 @@
   "name": "what actually decides when a cluster switches over",
   "cluster": {
     "preset": "ha",
+    "clients": 1,
+    "tools": "examples/load-client",
     "set_hidden": ["ha_calc_score_interval_in_msecs=${interval}"]
   },
   "matrix":  { "interval": [3000, 15000] },
   "repeats": 1,
   "steps": [
     { "await": { "masters": 1, "standbys": 1 }, "within": "60s" },
-    { "note": "under load, because an idle cluster is a different measurement",
-      "run": ["load", "start", "--profile", "insert", "--rate", "40/s", "--batch", "50", "--for", "300s"] },
-    { "note": "let the load establish a distribution", "await": { "masters": 1 }, "within": "30s" },
+    { "note": "traffic, because an idle cluster is a different measurement",
+      "run": ["node", "exec", "client", "--",
+              "setsid", "nohup", "sh", "/tools/example.sh", "${cluster}", "${cluster}-n1", "100000", "20", ">/dev/null", "2>&1", "&"] },
+    { "note": "let it establish", "await": { "masters": 1 }, "within": "30s" },
     { "note": "heartbeats stop arriving; nothing dies, and the slave has to take over",
       "run": ["fault", "partition", "master"],
       "await": { "master_is": "slave" }, "within": "180s" }
   ],
-  "measure": ["role_change.measured", "role_change.predicted", "load.achieved", "load.p50_ms", "load.p99_ms"]
+  "measure": ["role_change.measured", "role_change.predicted"]
 }

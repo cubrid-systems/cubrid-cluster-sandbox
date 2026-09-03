@@ -76,7 +76,7 @@ type Command struct {
 func (c Command) key() string { return c.Noun + " " + c.Verb }
 
 // Nouns, in the order docs/design/01-cli.md §1 lists them.
-var nouns = []string{"cluster", "node", "fault", "repl", "ha", "load", "scenario", "record"}
+var nouns = []string{"cluster", "node", "fault", "repl", "ha", "scenario", "record"}
 
 // Main runs one invocation and returns the process exit code.
 func Main(args []string, stdout, stderr io.Writer) int {

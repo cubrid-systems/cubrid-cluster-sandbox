@@ -25,7 +25,7 @@ Three things the language has to carry, and they pull differently:
   (have nothing you can assume).
 - **Orchestration and concurrency.** Driving `docker` and the engine's CLIs,
   starting the heartbeat on both nodes *at once*, sampling replication while a
-  load runs — and, since [`06-load.md`](06-load.md), **holding a stated rate and
+  load runs — and, since [`06-traffic.md`](06-traffic.md), **holding a stated rate and
   reporting when it could not.**
 
 And one thing that is easy to miss: **who reads the artifact matters more than

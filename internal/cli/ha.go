@@ -374,6 +374,19 @@ func cmdHaFailback(c *Ctx) (any, error) {
 		}
 	}
 
+	// The door. `failback` returns SERVICE, and service means a client can reach
+	// it -- a node that is serving with its broker down is not what was asked
+	// for. Nothing had noticed because until there were client nodes, nothing
+	// stood outside the database looking in.
+	if t.WithBroker {
+		if res, berr := a.D.Exec(c.Ctx, to, t.DB, "cubrid broker status 2>&1"); berr == nil &&
+			strings.Contains(res.Stdout, "not running") {
+			_, _ = a.D.Exec(c.Ctx, to, t.DB, "cubrid broker start > /work/"+to+"/broker-start.log 2>&1; true")
+			c.Note("broker_restarted", SevWarn,
+				"the broker on "+to+" was not running and was started: service returns through the door, not only in the roles")
+		}
+	}
+
 	// STEP 7. Roles, and then a write that has to arrive -- because roles alone
 	// say the group agrees, not that replication carries anything.
 	verified := false

@@ -35,7 +35,7 @@ Seven nouns, one per thing a user can hold in their head:
 | `fault` | the failure vocabulary |
 | `repl` | replication, as an observable |
 | `ha` | role transitions |
-| `load` | the workload driver ([`06-load.md`](06-load.md)) |
+| `load` | the workload driver ([`06-traffic.md`](06-traffic.md)) |
 | `record` | what happened to this cluster ([`07-record.md`](07-record.md)) |
 
 The last two are late additions and the reason is worth keeping: phase 0 assumed
@@ -231,21 +231,19 @@ than assumed ([`04-faults.md`](04-faults.md) §8). It is on `ha` rather than und
 `fault clear` because it changes data, and every verb that changes data should be
 where a reader expects to find a decision.
 
-### `load`
+### there is no `load`
 
-```
-csb load start [--profile insert|update|mixed|bulkload|host-cpu|host-io]
-               [--rate 2000/s] [--concurrency 4] [--for 60s]
-               [--table t] [--seed 42] [--require-rate]
-csb load stop
-csb load status                requested rate, achieved rate, and whether it held
-```
+There was one, and removing it is the design rather than an omission
+([`06-traffic.md`](06-traffic.md)). A driver built into a provisioning tool is a
+benchmark nobody asked for — it could not exceed about twenty statements a second
+because it spawned a client process per statement, and its numbers kept being
+read as the engine's. **Loading data is a program's job and the program is the
+user's**; this tool's job ends at giving it somewhere to run
+([`examples/load-client/`](../../examples/load-client/)).
 
-The profiles, the two kinds of load and why the rate is part of the contract are
-[`06-load.md`](06-load.md). One thing belongs here because it is a CLI promise:
-**`load status` always reports achieved next to requested**, and
-`--require-rate` turns a miss into exit 1. A driver that quietly under-delivers
-turns every figure measured beside it into a figure about the driver.
+What the driver did that was *not* a workload moved to where it belongs:
+`fault contend` starves the engine of the resource it runs on, which is a
+condition and now behaves like one.
 
 ### `record`
 
@@ -361,7 +359,7 @@ precondition has no contract at all. The end-to-end suite caught this one.
 A verb the surface defines and has not built exits **1** with a
 `not_implemented` note — not 2. The command exists, so "unknown verb" would be a
 lie, and a consumer needs to tell a gap from a typo. **Since 2026-09-03 no verb
-uses it**: the surface names 37 and all 37 are built, so the helper that returned
+uses it**: the surface names 35 and all 35 are built, so the helper that returned
 that answer is gone rather than kept warm. The rule above is what to do if the
 surface ever again promises something ahead of its implementation.
 

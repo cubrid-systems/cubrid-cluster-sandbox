@@ -233,7 +233,7 @@ Not preferences; each one is load-bearing.
 | `--cap-add=NET_ADMIN` | both fault mechanisms are route/qdisc operations ([`04-faults.md`](04-faults.md)) |
 | `--init` | without a reaping PID 1, `cubrid heartbeat stop` never returns |
 | `ping` in the image | `hb_check_ping` runs `popen("ping -w 1 -c 1 <host> …; echo $?")`. No binary → 127 → read as `HB_PING_FAILURE`, indistinguishable from a partitioned ping host, so **every master demotes itself on any heartbeat loss**. Its *absence* is now also a verb ([`04-faults.md`](04-faults.md) §10) |
-| `--cpus` set explicitly | a `host-cpu` load profile is only reproducible against a stated core count ([`06-load.md`](06-load.md) §5) |
+| `--cpus` set explicitly | a `host-cpu` load profile is only reproducible against a stated core count ([`06-traffic.md`](06-traffic.md) §5) |
 | run as the invoking user | files written to the mounted work directory stay editable on the host; the CBRD-26983 assembly lost time to a root-owned `backupdb` output |
 | one user-defined network | hostname resolution between peers, and a place to cut |
 | `--shm-size` raised | CUBRID's shared memory does not fit the 64 MB default |
@@ -241,7 +241,7 @@ Not preferences; each one is load-bearing.
 The base image needs nothing else. `ubuntu:24.04` with `python3`, `iproute2`,
 `iptables`, `iputils-ping` and `procps` is the whole of it. `python3` earns its
 place twice: the seeding step already needs it, and the load driver runs inside
-the node rather than on the host ([`06-load.md`](06-load.md) §6). `iptables`
+the node rather than on the host ([`06-traffic.md`](06-traffic.md) §6). `iptables`
 arrived last and late — two fault mechanisms are packet-level rather than
 route-level, and neither had ever run
 ([`04-faults.md`](04-faults.md) §10).

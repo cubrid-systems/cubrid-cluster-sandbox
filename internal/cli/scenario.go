@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/load"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 )
 
@@ -63,6 +62,8 @@ type Scenario struct {
 
 type ScenarioCluster struct {
 	Preset     string   `json:"preset,omitempty"`
+	Clients    int      `json:"clients,omitempty"`
+	Tools      string   `json:"tools,omitempty"`
 	Network    string   `json:"network,omitempty"`
 	WithBroker bool     `json:"with_broker,omitempty"`
 	Set        []string `json:"set,omitempty"`
@@ -192,6 +193,10 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		}
 		c.Cluster = name
 		c.Record = record.Open(c.Store.RecordPath(name))
+		// The cluster's name is a binding like any other, because a step that
+		// runs somebody's program on a client has to be able to name the
+		// database and the node it should talk to.
+		binding["cluster"] = name
 
 		create := []string{"cluster", "create", "--name", name, "--build", build}
 		if s.Cluster.Preset != "" {
@@ -202,6 +207,12 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		}
 		if s.Cluster.WithBroker {
 			create = append(create, "--with-broker")
+		}
+		if s.Cluster.Clients > 0 {
+			create = append(create, "--clients", fmt.Sprint(s.Cluster.Clients))
+		}
+		if s.Cluster.Tools != "" {
+			create = append(create, "--tools", s.Cluster.Tools)
 		}
 		for _, kv := range substituteAll(s.Cluster.Set, binding) {
 			create = append(create, "--set", kv)
@@ -339,37 +350,6 @@ func (c *Ctx) measurements(want []string) map[string]any {
 	if need("role_change.") {
 		m, p := c.roleChange()
 		got["role_change.measured"], got["role_change.predicted"] = m, p
-	}
-	if need("load.") {
-		// Both roles, first answer wins.
-		//
-		// By NAME, not by role. `master` is a query answered by the engine rather
-		// than a label, which is a feature of this tool -- and it means a
-		// failover moves it. A load started on the master and measured after the
-		// failover was read from the node that never ran it, and the table came
-		// back empty twice before this was the answer. A measurement must not be
-		// addressed by something that moves while it is being taken.
-		for _, sel := range []string{c.Cluster + "-n1", c.Cluster + "-n2"} {
-			var buf bytes.Buffer
-			code, _ := dispatchArgs([]string{"load", "status", "--json", "--node", sel}, c.Cluster, c.Timeout, &buf)
-			if code != 0 {
-				continue
-			}
-			var env struct {
-				Data load.Status `json:"data"`
-			}
-			if json.Unmarshal(buf.Bytes(), &env) != nil || env.Data.Sent == 0 {
-				continue
-			}
-			got["load.achieved"] = env.Data.AchievedV
-			got["load.held"] = env.Data.Held
-			if env.Data.Latency != nil {
-				got["load.p50_ms"] = env.Data.Latency.P50
-				got["load.p90_ms"] = env.Data.Latency.P90
-				got["load.p99_ms"] = env.Data.Latency.P99
-			}
-			break
-		}
 	}
 	if need("canary.") {
 		var buf bytes.Buffer

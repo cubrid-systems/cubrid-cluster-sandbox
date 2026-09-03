@@ -158,6 +158,9 @@ func (i *Injector) Clear(ctx context.Context, s *Set, target string) ([]Active, 
 		if a.Kind == "lag" {
 			i.clearLag(ctx, a)
 		}
+		if a.Kind == "contention" {
+			i.clearContention(ctx, a)
+		}
 		if a.Kind == "ping-unavailable" {
 			i.restorePing(ctx, a)
 		}
@@ -357,6 +360,61 @@ func (i *Injector) clearLag(ctx context.Context, a Active) {
 	}
 }
 
+// Contend starves the engine of the resource it is running on.
+//
+// This is not a workload and never was. It came from the field's failover-loop
+// recipe -- a build competing for the same CPU as the database -- and what makes
+// it reproduce that condition is precisely that it runs INSIDE the node, sharing
+// the cgroup the engine was given. A generator on a client node would starve the
+// wrong quota and reproduce nothing (docs/design/04-faults.md §11).
+//
+// It lived under `load` for a while, which was a mistake of vocabulary: it is a
+// condition, so it is held until cleared, it appears in `fault ls`, and `clear`
+// reverses it.
+func (i *Injector) Contend(ctx context.Context, s *Set, node, kind string, workers int) error {
+	if workers < 1 {
+		workers = 2
+	}
+	var body string
+	switch kind {
+	case "", "cpu":
+		kind = "cpu"
+		// Busy loops, one per worker, in the node's own cgroup.
+		body = fmt.Sprintf("for n in $(seq 1 %d); do (while :; do :; done) & done", workers)
+	case "io":
+		// Sustained writes and fsyncs to the database's own directory, which is
+		// the other half of a build: disk contention where the engine writes.
+		body = fmt.Sprintf(
+			"for n in $(seq 1 %d); do (while :; do dd if=/dev/zero of=/db/.csb_contend_$n bs=1M count=16 conv=fsync 2>/dev/null; done) & done",
+			workers)
+	default:
+		return fmt.Errorf("unknown contention %q (want cpu or io)", kind)
+	}
+	res, err := i.D.Exec(ctx, node, i.T.DB,
+		"setsid nohup sh -c '"+body+"; wait' >/dev/null 2>&1 < /dev/null & echo $!")
+	if err != nil {
+		return err
+	}
+	pid := strings.TrimSpace(lastLine(res.Stdout))
+	if pid == "" {
+		return fmt.Errorf("%s: contention did not start", node)
+	}
+	return s.add(Active{Kind: "contention", Target: node, Mechanism: kind, Pid: pid,
+		Since: time.Now().UTC().Format(time.RFC3339)})
+}
+
+// clearContention kills the process group the contention runs in, by the pid it
+// recorded. Never by pattern: a pattern matched against full command lines also
+// matches the shell running the match.
+func (i *Injector) clearContention(ctx context.Context, a Active) {
+	if a.Pid != "" {
+		_, _ = i.D.Exec(ctx, a.Target, i.T.DB, "kill -TERM -"+a.Pid+" 2>/dev/null; kill -9 -"+a.Pid+" 2>/dev/null; true")
+	}
+	if a.Mechanism == "io" {
+		_, _ = i.D.Exec(ctx, a.Target, i.T.DB, "rm -f /db/.csb_contend_* 2>/dev/null; true")
+	}
+}
+
 // FailCount moves fail_counter deliberately.
 //
 // The recipe is the field's own, written down in the team's HA study notes:
@@ -533,4 +591,9 @@ func (i *Injector) CompareTable(ctx context.Context, master, slave, table string
 		return m, 0, err
 	}
 	return m, s, nil
+}
+
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	return lines[len(lines)-1]
 }

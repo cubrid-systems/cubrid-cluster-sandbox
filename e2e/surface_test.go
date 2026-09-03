@@ -233,6 +233,16 @@ func TestSurface(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tools, "e2e.sql"), []byte("SELECT 1 FROM db_root;\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The real example, from the repository. The suite's traffic comes from the
+	// same file a newcomer runs, so a change that breaks the example breaks the
+	// suite rather than being discovered by them.
+	example, err := os.ReadFile("../examples/load-client/example.sh")
+	if err != nil {
+		t.Fatalf("the example loader is missing: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tools, "example.sh"), example, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// The cluster is destroyed on success and KEPT on failure. Leaving containers
 	// behind costs the next run; throwing away the only copy of a cluster that
@@ -331,7 +341,11 @@ func TestSurface(t *testing.T) {
 
 	t.Run("watch sees the stage that is stalled, not the one that says so", func(t *testing.T) {
 		c.t = t
-		c.must("load", "start", "--profile", "insert", "--rate", "40/s", "--for", "60s", "--timeout", "60s")
+		// A batch of fifty per statement, because the copy stage is measured in
+		// log PAGES and single-row inserts barely move one.
+		master, _ := c.currentPair()
+		c.startTraffic(master)
+		defer c.stopTraffic()
 		c.must("fault", "lag", standby, "--stage", "apply", "--mechanism", "suspend", "--timeout", "60s")
 
 		e, code := c.run("repl", "watch", "--for", "10s", "--interval", "1s", "--timeout", "60s")
@@ -355,7 +369,6 @@ func TestSurface(t *testing.T) {
 			t.Errorf("the frozen view reported movement: %v", applyT)
 		}
 		c.must("fault", "clear", standby, "--timeout", "60s")
-		c.must("load", "stop", "--timeout", "60s")
 	})
 
 	t.Run("ping-unavailable breaks the check, not the network", func(t *testing.T) {
@@ -483,6 +496,13 @@ func TestSurface(t *testing.T) {
 
 	t.Run("failback returns service and proves replication", func(t *testing.T) {
 		c.t = t
+		// With traffic, because an idle cluster is a different system here: an
+		// applier one page short of drained stays one page short, and the
+		// promotion this verb performs will not complete until it drains.
+		serving0, _ := c.currentPair()
+		c.startTraffic(serving0)
+		defer c.stopTraffic()
+
 		// promote left the previous master out of the group; whichever node that
 		// was, it is the one service has to return to.
 		// A DB node, not a client: clients have no role and would never come
@@ -570,22 +590,17 @@ func TestSurface(t *testing.T) {
 		}
 	})
 
-	t.Run("two clients share one rate and collide over nothing", func(t *testing.T) {
+	t.Run("contention is a condition, not a workload", func(t *testing.T) {
 		c.t = t
-		c.must("load", "start", "--profile", "insert", "--rate", "20/s", "--for", "40s", "--timeout", "60s")
-		time.Sleep(20 * time.Second)
-		d := c.must("load", "status", "--timeout", "60s")
-		// Every client writes its own range of the key space. An interleave was
-		// tried first and produced 146 unique-constraint violations out of 1025
-		// statements, because each driver read MAX(i) at a different moment.
-		if errs, _ := d["errors_total"].(float64); errs != 0 {
-			t.Errorf("%v statement(s) failed across the clients; the key ranges are supposed to be disjoint", errs)
+		// It used to be `load --profile host-cpu`, which was the wrong noun: it
+		// is held until cleared and it belongs in `fault ls`.
+		master, _ := c.currentPair()
+		c.must("fault", "contend", master, "--kind", "cpu", "--workers", "2", "--timeout", "60s")
+		d := c.must("fault", "ls", "--timeout", "30s")
+		if !strings.Contains(fmt.Sprint(d), "contention") {
+			t.Errorf("fault ls does not show the contention: %v", d)
 		}
-		clients, _ := d["clients"].([]any)
-		if len(clients) != 2 {
-			t.Errorf("%d client(s) reported, want 2", len(clients))
-		}
-		c.must("load", "stop", "--timeout", "60s")
+		c.must("fault", "clear", master, "--timeout", "60s")
 	})
 
 	t.Run("the CTP fragment carries the pair and refuses a key it does not know", func(t *testing.T) {
@@ -765,6 +780,24 @@ func (c *csb) exec(node, command string) int {
 	m, _ := d[node].(map[string]any)
 	code, _ := m["exit"].(float64)
 	return int(code)
+}
+
+// startTraffic and stopTraffic bracket the subtests that need a cluster which is
+// not idle. The old built-in driver could be stopped precisely; a program on a
+// client cannot, so the suite has to do it -- and it has to, because traffic
+// changes what the fault verbs mean. A row-count comparison under writes reports
+// a difference that is only lag, and a promotion on an idle cluster can wait
+// forever for an applier that is one page short with nothing to push it.
+func (c *csb) startTraffic(master string) {
+	c.t.Helper()
+	c.exec("client[1]", "setsid nohup sh /tools/example.sh "+c.cluster+" "+master+" 1000000 20 50 >/dev/null 2>&1 &")
+	time.Sleep(5 * time.Second)
+}
+
+func (c *csb) stopTraffic() {
+	c.t.Helper()
+	c.exec("client[1]", "pkill -f example.sh; pkill -x csql; true")
+	time.Sleep(2 * time.Second)
 }
 
 func (c *csb) pingRC(node string) int {

@@ -10,7 +10,7 @@ For engine developers, QA, and external contributors. Part of
 [CUBRID Systems Research](https://github.com/cubrid-systems).
 
 > **Where it is:** phases 0, 1 and 2 are complete; phase 3 is in progress.
-> Thirty-seven verbs across eight nouns, all built and driven against a real
+> Thirty-five verbs across seven nouns, all built and driven against a real
 > engine by `make e2e`. See [Status](#status).
 
 ## Prerequisites
@@ -163,29 +163,32 @@ substitutes into the cluster parameters and every step, and `measure` names what
 to collect from a closed list of fields the tool already emits
 ([`docs/design/01-cli.md`](docs/design/01-cli.md)).
 
-## Load
+## Traffic
+
+There is no `load` verb. Loading data is a program's job and the program is
+yours — this tool's job is the place it runs.
 
 ```bash
-csb load start --profile insert --rate 2000/s --batch 200 --require-rate
-csb load status --json
-csb load stop
+csb cluster create --name demo --clients 1 --with-broker \
+    --tools ./examples/load-client --build ~/cubrid/install.out
+
+csb node exec client -- sh /tools/example.sh demo demo-n1 500 20
 ```
 
-The driver targets a rate, holds it, and reports whether it held it;
-`--require-rate` turns a miss into exit 1. `--batch` separates volume from rate —
-`rows/s` is `rate × batch` — and both are reported separately. Latency comes back
-as p50/p90/p99 per statement, absent below twenty samples.
+A **client node** is part of the cluster and not of the HA group. `--tools DIR`
+is your directory, mounted read-only at `/tools`; `/results` is writable and
+survives `cluster destroy`; and the broker answers at `<node>:33000` from inside
+with no port published on your machine, which is the path JDBC and CCI take.
+`csql`, `loaddb` and `broker_tester` are already there. Replace `example.sh` with
+whatever loads your data
+([`examples/load-client/`](examples/load-client/)).
 
-Profiles are two different things and are not interchangeable: `insert`,
-`update`, `mixed` and `bulkload` saturate the master's transaction path;
-`host-cpu` and `host-io` saturate the node itself, which is what makes heartbeat
-responses miss their window.
-
-`--clients N` puts the driver on a node of its own — part of the cluster, not
-part of the HA group — instead of inside the master, where it competes with the
-engine for the engine's CPU quota. `--tools DIR` mounts a host directory
-read-only at `/tools` on those nodes
-([`docs/design/06-load.md`](docs/design/06-load.md)).
+There used to be a built-in driver. It could not exceed about twenty statements a
+second because it spawned a client process per statement, and its numbers kept
+being read as the engine's; removing it is the design
+([`docs/design/06-traffic.md`](docs/design/06-traffic.md)). What it did that was
+not a workload is now `csb fault contend --kind cpu|io`, which starves the engine
+of the resource it runs on — a condition, held until cleared.
 
 ## The interface
 
@@ -193,10 +196,9 @@ read-only at `/tools` on those nodes
 |---|---|
 | `cluster` | `create` `up` `down` `destroy` `status` `describe` `quiesce` `resume` `ls` |
 | `node` | `start` `stop` `kill` `status` `logs` `shell` `exec` |
-| `fault` | `partition` `lag` `splitbrain` `failcount` `ping-unavailable` `clear` `ls` |
+| `fault` | `partition` `lag` `splitbrain` `contend` `failcount` `ping-unavailable` `clear` `ls` |
 | `repl` | `status` `check` `watch` `diff` |
 | `ha` | `status` `promote` `failback` `resync` |
-| `load` | `start` `stop` `status` |
 | `scenario` | `run` |
 | `record` | `show` `export` |
 

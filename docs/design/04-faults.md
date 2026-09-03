@@ -412,7 +412,7 @@ Two mechanisms, because a sandbox has two doors:
 | Mechanism | What it closes | Requires |
 |---|---|---|
 | `broker` | the door applications come through — the field's mechanism | a broker in the topology (`--with-broker`, [`02-topology.md`](02-topology.md) §1) |
-| `load` | this tool's own driver, the only writer in a default sandbox | a load running ([`06-load.md`](06-load.md)) |
+| `load` | this tool's own driver, the only writer in a default sandbox | a load running ([`06-traffic.md`](06-traffic.md)) |
 
 **And the honest limit belongs in the output, not in a footnote.** Neither
 mechanism closes a door the tool does not own: a user's own `csql` session on the

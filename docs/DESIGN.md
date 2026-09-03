@@ -313,7 +313,7 @@ component the survey did not predict** (item 6). This section fixes the
    **states a rate, holds it, and reports when it could not** — this project's
    own lag figures are uncalibrated precisely because its phase-0 driver was
    open-loop, so every injected number is a delta on an already-saturated
-   pipeline ([`design/06-load.md`](design/06-load.md)).
+   pipeline ([`design/06-traffic.md`](design/06-traffic.md)).
 
    Its artifact pair is the **run record** — `describe` says what cluster this
    was, the record says what happened to it, including for every role change

@@ -31,7 +31,11 @@ run () {                       # run <param> <value> <other-setting> [run-no]
 
   # Under load, because a threshold reached on an idle cluster is not the
   # threshold the field meets.
-  $CSB load start --profile insert --rate 40/s --batch 50 --for 180s --timeout 60s >/dev/null 2>&1
+  # Traffic comes from a program on a client node now; there is no built-in
+  # load verb, and loading data was never this project's job
+  # (examples/load-client/README.md).
+  $CSB node exec client --timeout 60s -- \
+    setsid nohup sh /tools/example.sh "$CSB_CLUSTER" "$CSB_CLUSTER-n1" 100000 20 ">/dev/null" "2>&1" "&" >/dev/null 2>&1
   sleep 8
 
   # A partition, not a kill: the gap governs MISSED HEARTBEATS, and a dead
