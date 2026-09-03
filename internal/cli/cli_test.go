@@ -43,7 +43,7 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		{"a verb that needs a cluster and was given none", []string{"record", "show"}, ExitUsage},
 		{"a cluster that does not exist", []string{"record", "show", "--cluster", "nope"}, ExitPrecondition},
 		// There is no longer a "specified but not built" case to put here: the
-		// surface names 36 verbs and all 36 are built. This line was pointed at
+		// surface names 37 verbs and all 37 are built. This line was pointed at
 		// repl watch and failed loudly the day it landed, which is the test
 		// doing its job.
 		{"a verb whose flags do not parse", []string{"repl", "watch", "--cluster", "nope", "--nonsense"}, ExitUsage},
@@ -193,6 +193,20 @@ func TestRegistryCoversEveryNoun(t *testing.T) {
 	for _, n := range nouns {
 		if !seen[n] {
 			t.Errorf("noun %q has no verbs", n)
+		}
+	}
+	// And the other direction, which is the one that bit: `scenario` was added
+	// to the registry and not to `nouns`, so it worked and was invisible --
+	// absent from --help, and reported as an unknown noun when somebody
+	// mistyped one of its verbs. A registry the help does not list is a verb
+	// nobody can find.
+	listed := map[string]bool{}
+	for _, n := range nouns {
+		listed[n] = true
+	}
+	for n := range seen {
+		if !listed[n] {
+			t.Errorf("noun %q is in the registry and not in `nouns`, so --help does not list it", n)
 		}
 	}
 }

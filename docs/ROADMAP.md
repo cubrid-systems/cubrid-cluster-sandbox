@@ -45,7 +45,7 @@ test.
 **The surface no longer promises anything it does not do.** Six verbs were
 specified and unbuilt through phases 1 and 2 — `node logs`, `node shell`,
 `fault ping-unavailable`, `repl watch`, `ha promote`, `ha failback` — and M3.3
-built all six. **Thirty-six verbs across seven nouns**, and the helper that answered
+built all six. **Thirty-seven verbs across eight nouns**, and the helper that answered
 `not_implemented` is gone because nothing calls it.
 
 Two things are outstanding and neither is blocked work. **M3.1** needs a consumer

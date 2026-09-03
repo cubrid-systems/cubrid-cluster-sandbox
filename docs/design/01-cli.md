@@ -361,7 +361,7 @@ precondition has no contract at all. The end-to-end suite caught this one.
 A verb the surface defines and has not built exits **1** with a
 `not_implemented` note — not 2. The command exists, so "unknown verb" would be a
 lie, and a consumer needs to tell a gap from a typo. **Since 2026-09-03 no verb
-uses it**: the surface names 36 and all 36 are built, so the helper that returned
+uses it**: the surface names 37 and all 37 are built, so the helper that returned
 that answer is gone rather than kept warm. The rule above is what to do if the
 surface ever again promises something ahead of its implementation.
 
