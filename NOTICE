@@ -1,0 +1,16 @@
+cubrid-cluster-sandbox
+Copyright 2026 CUBRID Systems Research
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+This product includes the operator-facing shell scripts under harness/, which
+are part of the same work and carry the same licence.
+
+The procedure in internal/assembly/rebuild.go follows the steps and ordering of
+`share/scripts/ha/ha_make_slavedb.sh`, which ships with CUBRID and is licensed
+by CUBRID Corporation. No code from that script is copied; what is reused is the
+sequence, and it is attributed where it is used.

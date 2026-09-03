@@ -35,6 +35,9 @@ func createFlags(fs *flag.FlagSet) {
 	fs.String("db", "", "database name (default: the cluster name)")
 	fs.String("image", "", "base image (default: the one csb builds from its own recipe)")
 	fs.String("ping-mode", "icmp", "icmp, tcp or none")
+	fs.String("network", "docker", "docker (one host's bridge) or tailnet (nodes join a tailnet)")
+	fs.String("ts-authkey", "", "tailnet auth key; or CSB_TS_AUTHKEY. Never stored in the artifact")
+	fs.String("ping-host", "", "the witness a node pings to tell 'the peer is gone' from 'I am gone'")
 	fs.Bool("with-broker", false, "run a broker, which is the door quiesce closes")
 	fs.Float64("cpus", 0, "CPU quota per node; host-load profiles are meaningless without it")
 	fs.Var(&repeatable{}, "set", "key=value, validated (repeatable)")
@@ -217,7 +220,7 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 	}
 	t, err := topology.Resolve(topology.Options{
 		Name: name, Preset: c.str("preset"), Nodes: nodes, DB: c.str("db"),
-		Image: c.str("image"), PingMode: c.str("ping-mode"),
+		Image: c.str("image"), PingMode: c.str("ping-mode"), Network: c.str("network"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
 		CPUs:       cpus, Set: set, SetHidden: setHidden,
 		Engine: id,
@@ -237,7 +240,7 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	c.Cluster, c.Env.Cluster = name, name
 	r := &run.Runner{Verbose: c.Verbose, Log: c.Err}
 	if t.Image == "" {
-		t.Image = backend.BaseImage()
+		t.Image = backend.ImageFor(t)
 	}
 	if len(t.Parameters.Hidden) > 0 {
 		c.Note("hidden_parameter_set", SevWarn,
@@ -246,7 +249,7 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	}
 
 	d := &backend.Docker{R: r}
-	built, err := d.EnsureImage(c.Ctx)
+	built, err := d.EnsureImage(c.Ctx, t)
 	if err != nil {
 		return nil, Failed("image_unavailable", "%v", err)
 	}
@@ -286,11 +289,27 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	if t.PingMode != topology.PingNone {
 		// Resolved every time rather than taken from the artifact: an address is
 		// local to the machine that issued it, so a describe rebuilt elsewhere
-		// carries a gateway that is not this network's.
-		gw, gerr := d.NetworkGateway(c.Ctx, t.Network)
+		// carries a witness that is not this network's.
+		//
+		// On the bridge the witness is the gateway. On a tailnet there is no
+		// gateway, so it is a third member -- this host by default, which is
+		// already on the tailnet and which a cut between two nodes does not
+		// touch. --ping-host names a different one, and for a cluster spanning
+		// machines it should be a third machine rather than either of the two
+		// (docs/design/ADR-002-backend-contract.md).
+		var gw string
+		var gerr error
+		switch {
+		case c.str("ping-host") != "":
+			gw = c.str("ping-host")
+		case t.NetworkKind == topology.NetTailnet:
+			gw, gerr = backend.TailnetPingHost(c.Ctx, r)
+		default:
+			gw, gerr = d.NetworkGateway(c.Ctx, t.Network)
+		}
 		if gerr != nil || gw == "" {
 			c.Note("no_ping_host", SevWarn,
-				"could not resolve a ping host from "+t.Network+": this cluster cannot diagnose a partition, and a node left alone in the group will loop in to_be_active rather than finish a promotion")
+				"could not resolve a witness for this network: this cluster cannot diagnose a partition, and a node left alone in the group will loop in to_be_active rather than finish a promotion")
 		} else {
 			t.PingHost = gw
 		}
@@ -314,6 +333,44 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 		if err := d.CreateNode(c.Ctx, t, n, workdir, uid, gid); err != nil {
 			return nil, Failed("node_failed", "%v", err)
 		}
+	}
+
+	if t.NetworkKind == topology.NetTailnet {
+		key := c.str("ts-authkey")
+		if key == "" {
+			key = os.Getenv("CSB_TS_AUTHKEY")
+		}
+		addrs := map[string]string{}
+		for _, n := range t.Nodes {
+			if _, err := d.TailnetUp(c.Ctx, n.Name, key, n.Name); err != nil {
+				return nil, Failed("tailnet_failed", "%v", err)
+			}
+			ip, aerr := d.TailnetAddr(c.Ctx, n.Name)
+			if aerr != nil {
+				return nil, Failed("tailnet_failed", "%v", aerr)
+			}
+			addrs[n.Name] = ip
+		}
+		// Every node resolves every other node's NAME to its TAILNET address.
+		//
+		// ha_node_list is written with names and stays that way, so nothing in
+		// the assembly changes; what changes is what those names mean. Without
+		// this the names would still resolve, to bridge addresses, and the
+		// cluster would quietly keep talking over the bridge while believing it
+		// was on the tailnet -- and a cut expressed against a tailnet address
+		// would cut nothing.
+		var hosts strings.Builder
+		for name, ip := range addrs {
+			fmt.Fprintf(&hosts, "%s %s\n", ip, name)
+		}
+		for _, n := range t.Nodes {
+			if res, herr := d.Privileged(c.Ctx, n.Name,
+				"printf '%s' "+shellQuote(hosts.String())+" >> /etc/hosts"); herr != nil || res.ExitCode != 0 {
+				return nil, Failed("tailnet_failed", "%s: could not point the peer names at their tailnet addresses", n.Name)
+			}
+		}
+		c.Note("on_a_tailnet", SevInfo,
+			fmt.Sprintf("the nodes are tailnet members and address each other there; the witness for a partition is %s", t.PingHost))
 	}
 
 	a := &assembly.Assembler{D: d, T: t, Workdir: workdir}
@@ -634,4 +691,10 @@ func createFrom(c *Ctx, path string) (any, error) {
 		}
 	}
 	return res, nil
+}
+
+// shellQuote wraps a value for a single-quoted shell string, which is how the
+// hosts fragment travels into a node without a here-doc.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

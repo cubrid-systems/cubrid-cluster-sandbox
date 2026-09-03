@@ -130,6 +130,29 @@ about a split brain, whether its `CubridDB` status reports a divergence that
 already makes that kind. §9 OQ4 offered two readings; the contract says the
 second one is the one with something in it.
 
+## The tailnet option, as built
+
+`cluster create --network tailnet --ts-authkey <key>` (or `CSB_TS_AUTHKEY`).
+
+- **The recipe is a second recipe, not a flag on the first.** The image tag is
+  the hash of the recipe, so a tailnet image and a bridge image are different
+  images that never collide, and a cluster that does not want a tailnet neither
+  builds nor pulls one.
+- **The nodes stay on the bridge and also join the tailnet.** What changes is
+  what their names MEAN: every node's `/etc/hosts` points every peer name at its
+  tailnet address. `ha_node_list` is still written with names and the assembly is
+  untouched. Without this the names would still resolve — to bridge addresses —
+  and the cluster would quietly keep talking over the bridge while believing it
+  was on the tailnet, and a cut expressed against a tailnet address would cut
+  nothing.
+- **The witness is this host by default.** It is already on the tailnet by the
+  time it is provisioning nodes, it sits outside the pair, and a cut between two
+  nodes does not touch it. `--ping-host` names another; for a cluster spanning
+  machines it should be a third machine rather than either of the two.
+- **The auth key is never stored.** It is a flag or an environment variable, used
+  at create and not written to `describe`, which is an artifact people paste into
+  issues.
+
 ## Consequences
 
 1. `internal/fault` no longer contains the word `docker`. The cut, the privileged

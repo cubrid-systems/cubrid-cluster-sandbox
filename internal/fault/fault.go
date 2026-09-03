@@ -168,8 +168,10 @@ func (i *Injector) Clear(ctx context.Context, s *Set, target string) ([]Active, 
 	return cleared, s.save()
 }
 
+// addr is the address a cut is expressed against, and which network answers is
+// the topology's business rather than this package's.
 func (i *Injector) addr(ctx context.Context, node string) (string, error) {
-	return i.D.Addr(ctx, i.T.Network, node)
+	return i.D.AddrOn(ctx, i.T, node)
 }
 
 func mustAddr(ctx context.Context, i *Injector, node string) string {

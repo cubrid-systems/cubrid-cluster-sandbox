@@ -222,3 +222,11 @@ a reaping PID 1 `cubrid heartbeat stop` never returns.
   narrower — operational testing.
 - **CUBRID Ops** owns engine-internal metrics. This project leaves a documented
   seam and does not build a second collector.
+
+## Licence
+
+Apache License 2.0 — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+
+The slave rebuild follows the steps and ordering of CUBRID's own
+`share/scripts/ha/ha_make_slavedb.sh`. No code from it is copied; the sequence is
+reused and attributed where it is used.

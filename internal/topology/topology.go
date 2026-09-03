@@ -33,19 +33,20 @@ type Params struct {
 // Topology is also the describe artifact: the same value the tool builds from is
 // the one it hands to the next person, so they cannot drift.
 type Topology struct {
-	Schema     string           `json:"schema"`
-	Cluster    string           `json:"cluster"`
-	Preset     string           `json:"preset"`
-	DB         string           `json:"db"`
-	Network    string           `json:"network"`
-	Image      string           `json:"image"`
-	PingMode   string           `json:"ping_mode"`
-	PingHost   string           `json:"ping_host,omitempty"`
-	WithBroker bool             `json:"with_broker"`
-	Nodes      []Node           `json:"nodes"`
-	Engine     *engine.Identity `json:"engine,omitempty"`
-	Resources  Resources        `json:"resources,omitempty"`
-	Parameters Params           `json:"parameters,omitempty"`
+	Schema      string           `json:"schema"`
+	Cluster     string           `json:"cluster"`
+	Preset      string           `json:"preset"`
+	DB          string           `json:"db"`
+	Network     string           `json:"network"`
+	Image       string           `json:"image"`
+	PingMode    string           `json:"ping_mode"`
+	PingHost    string           `json:"ping_host,omitempty"`
+	NetworkKind string           `json:"network_kind,omitempty"` // docker (default) | tailnet
+	WithBroker  bool             `json:"with_broker"`
+	Nodes       []Node           `json:"nodes"`
+	Engine      *engine.Identity `json:"engine,omitempty"`
+	Resources   Resources        `json:"resources,omitempty"`
+	Parameters  Params           `json:"parameters,omitempty"`
 }
 
 type Options struct {
@@ -55,6 +56,7 @@ type Options struct {
 	DB         string
 	Image      string
 	PingMode   string
+	Network    string // docker (default) | tailnet
 	WithBroker bool
 	CPUs       float64
 	ShmSize    string
@@ -90,6 +92,13 @@ var commonKeys = map[string]bool{
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 
 const (
+	// The network a topology's nodes address each other on. `docker` is one
+	// host's bridge; `tailnet` makes each node a member of a tailnet, which is
+	// the only one of the two that can span machines
+	// (docs/design/ADR-002-backend-contract.md).
+	NetDocker  = "docker"
+	NetTailnet = "tailnet"
+
 	PingICMP = "icmp"
 	PingTCP  = "tcp"
 	PingNone = "none"
@@ -129,6 +138,13 @@ func Resolve(o Options) (*Topology, error) {
 		return nil, fmt.Errorf("unknown preset %q (want ha or single)", preset)
 	}
 
+	net := o.Network
+	if net == "" {
+		net = NetDocker
+	}
+	if net != NetDocker && net != NetTailnet {
+		return nil, fmt.Errorf("unknown --network %q (want docker or tailnet)", net)
+	}
 	ping := o.PingMode
 	if ping == "" {
 		ping = PingICMP
@@ -143,7 +159,7 @@ func Resolve(o Options) (*Topology, error) {
 	t := &Topology{
 		Schema: Schema, Cluster: name, Preset: preset,
 		DB: firstNonEmpty(o.DB, name), Network: name + "-net",
-		Image: o.Image, PingMode: ping, WithBroker: o.WithBroker,
+		Image: o.Image, PingMode: ping, NetworkKind: net, WithBroker: o.WithBroker,
 		Engine:    o.Engine,
 		Resources: Resources{CPUs: o.CPUs, ShmSize: firstNonEmpty(o.ShmSize, "1g")},
 		Parameters: Params{

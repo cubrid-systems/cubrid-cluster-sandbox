@@ -40,10 +40,38 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 `
 
+// tailnetDockerfile is the same recipe with a tailnet client in it, and it is a
+// SEPARATE recipe rather than a flag on the first because the image tag is the
+// hash of the recipe: two recipes are two images, and a cluster that does not
+// want a tailnet never builds or pulls one.
+const tailnetDockerfile = baseDockerfile + `RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl gnupg \
+ && curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg \
+      -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu noble main" \
+      > /etc/apt/sources.list.d/tailscale.list \
+ && apt-get update && apt-get install -y --no-install-recommends tailscale \
+ && rm -rf /var/lib/apt/lists/*
+`
+
+// Recipe is the image recipe a topology needs.
+func Recipe(t *topology.Topology) string {
+	if t != nil && t.NetworkKind == topology.NetTailnet {
+		return tailnetDockerfile
+	}
+	return baseDockerfile
+}
+
 // BaseImage is tagged by the hash of its own recipe, so a changed recipe is a
 // different image and an unchanged one is never rebuilt.
-func BaseImage() string {
-	sum := sha256.Sum256([]byte(baseDockerfile))
+func BaseImage() string { return imageFor(baseDockerfile) }
+
+// ImageFor is BaseImage for a topology, which is the same thing unless the
+// topology wants a tailnet.
+func ImageFor(t *topology.Topology) string { return imageFor(Recipe(t)) }
+
+func imageFor(recipe string) string {
+	sum := sha256.Sum256([]byte(recipe))
 	return "csb-base:" + hex.EncodeToString(sum[:])[:12]
 }
 
@@ -66,8 +94,12 @@ func (d *Docker) docker(ctx context.Context, args ...string) (*run.Result, error
 // EnsureImage builds the base image if this machine does not have it. Returns
 // true when it had to build, which the caller reports because the first run of
 // the tool is otherwise a mysterious minute.
-func (d *Docker) EnsureImage(ctx context.Context) (bool, error) {
-	tag := BaseImage()
+// EnsureImage builds the recipe THIS topology needs, which is not always the
+// base one: a tailnet topology has a tailnet client in it, and because the tag
+// is the hash of the recipe the two are different images that never collide.
+func (d *Docker) EnsureImage(ctx context.Context, t *topology.Topology) (bool, error) {
+	recipe := Recipe(t)
+	tag := imageFor(recipe)
 	if _, err := d.R.Run(ctx, "docker", "image", "inspect", tag); err == nil {
 		if res, _ := d.R.Run(ctx, "docker", "image", "inspect", tag); res != nil && res.ExitCode == 0 {
 			return false, nil
@@ -78,7 +110,7 @@ func (d *Docker) EnsureImage(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer os.RemoveAll(dir)
-	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(baseDockerfile), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(recipe), 0o644); err != nil {
 		return false, err
 	}
 	if _, err := d.docker(ctx, "build", "-q", "-t", tag, dir); err != nil {
@@ -138,6 +170,11 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir string, uid, gid
 	}
 	if t.Engine != nil && t.Engine.Path != "" {
 		args = append(args, "-v", t.Engine.Path+":/opt/cubrid-ro:ro")
+	}
+	if t.NetworkKind == topology.NetTailnet {
+		// tailscaled needs the tun device; NET_ADMIN the node already has,
+		// because the fault verbs need it too.
+		args = append(args, "--device", "/dev/net/tun")
 	}
 	nodeWork := filepath.Join(workdir, node.Name)
 	args = append(args,
