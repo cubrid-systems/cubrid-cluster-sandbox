@@ -250,6 +250,17 @@ route-level, and neither had ever run
 the one that decides whether this tool is usable while you are changing the
 engine, so it is worth stating plainly:
 
+**Whose rule this is, and whose it is not.** It is stated absolutely above and it
+is not universal — it is a rule for a tool whose user is changing the engine, and
+the whole of its value is that a build finished a minute ago is running a minute
+later with no image in the loop. For a production deployment the opposite is
+correct: an immutable, versioned, pullable image is exactly what a rollout onto
+an arbitrary node needs, and a bind mount from someone's home directory is not
+available there at all. `cubrid-operator` ships images because that is right for
+its audience. Carrying this rule into that one would be exporting a developer's
+loop into a place it does not apply
+([`ADR-002`](ADR-002-backend-contract.md), and §9 OQ4).
+
 - The **base image** is those five packages. The tool builds it once from a
   recipe it carries, tagged with the hash of that recipe — so an unchanged recipe
   is never rebuilt, and a changed one is a different image rather than a
