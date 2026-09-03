@@ -345,14 +345,33 @@ func cmdNodeStart(c *Ctx) (any, error) {
 		if n == masters[0] {
 			continue
 		}
-		st, _ := inspect.Read(c.Ctx, a.D, t)
-		joined := false
-		for _, node := range st.Nodes {
-			if node.Name == n && strings.HasPrefix(node.Server, "registered_and_") {
-				joined = true
+		// Give the node time to either join or fail. The applier writes its
+		// reason seconds after `heartbeat start` returns, so asking immediately
+		// finds a node that has neither joined nor explained itself yet -- which
+		// is how the first version of this recovery skipped every case it was
+		// written for.
+		joined, short := false, false
+		deadline := time.Now().Add(45 * time.Second)
+		for {
+			st, _ := inspect.Read(c.Ctx, a.D, t)
+			for _, node := range st.Nodes {
+				if node.Name == n && strings.HasPrefix(node.Server, "registered_and_") {
+					joined = true
+				}
 			}
+			if joined {
+				break
+			}
+			if a.ApplierLogShort(c.Ctx, n) {
+				short = true
+				break
+			}
+			if time.Now().After(deadline) || c.Ctx.Err() != nil {
+				break
+			}
+			time.Sleep(2 * time.Second)
 		}
-		if joined || !a.ApplierLogShort(c.Ctx, n) {
+		if joined || !short {
 			continue
 		}
 		c.Note("replication_log_short", SevWarn,
@@ -364,7 +383,30 @@ func cmdNodeStart(c *Ctx) (any, error) {
 		if serr := inj.Start(c.Ctx, n); serr != nil {
 			return out, Failed("restart_failed", "%v", serr)
 		}
-		c.Note("replication_log_recopied", SevInfo, n+"'s replication log was recopied from "+masters[0]+" and the node started again")
+		// Verify rather than assume. The cheap repair fixes a log that is merely
+		// short; it cannot fix a recorded position that belongs to a different
+		// log altogether, which is what a node demoted by a role change carries.
+		// The field's answer for that case is a rebuild, and saying so beats
+		// exiting 0 on a node that never came back.
+		rejoined := false
+		wait := time.Now().Add(60 * time.Second)
+		for {
+			st2, _ := inspect.Read(c.Ctx, a.D, t)
+			for _, node := range st2.Nodes {
+				if node.Name == n && strings.HasPrefix(node.Server, "registered_and_") {
+					rejoined = true
+				}
+			}
+			if rejoined || time.Now().After(wait) || c.Ctx.Err() != nil {
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
+		if !rejoined {
+			return out, Failed("rejoin_needs_rebuild",
+				"%s still will not rejoin after its replication log was recopied: its recorded position belongs to a log it no longer reads, which a role change leaves behind. That is a rebuild — `csb ha resync %s --path slave` — and it is the same answer the field gives (ha_make_slavedb.sh)", n, n)
+		}
+		c.Note("replication_log_recopied", SevInfo, n+"'s replication log was recopied from "+masters[0]+" and the node rejoined")
 	}
 	return out, nil
 }
@@ -935,15 +977,27 @@ func cmdHaResync(c *Ctx) (any, error) {
 			slave = n.Name
 		}
 	}
+	// A named node wins over the observed standby, and it does not have to BE a
+	// standby. The node that most needs rebuilding is the one that cannot rejoin
+	// at all -- unregistered, no role, nothing for the pair check to find -- and
+	// refusing it there sent the operator back to `cluster destroy`.
 	if len(c.Args) > 0 {
 		names, rerr := a.Resolve(c.Ctx, c.Args[0])
 		if rerr != nil || len(names) != 1 {
 			return nil, Precondition("unresolved_selector", "%v", rerr)
 		}
 		slave = names[0]
+		if slave == master {
+			return nil, Precondition("that_is_the_master",
+				"%s is the master; resync repairs the other node", slave)
+		}
 	}
-	if master == "" || slave == "" {
-		return nil, Precondition("not_a_pair", "resync needs one active and one standby node; found master=%q standby=%q", master, slave)
+	if master == "" {
+		return nil, Precondition("no_master", "resync rebuilds from a master and this group has none")
+	}
+	if slave == "" {
+		return nil, Precondition("no_standby",
+			"no node is registered as a standby; name the one to repair (csb ha resync <node>)")
 	}
 
 	fail := 0

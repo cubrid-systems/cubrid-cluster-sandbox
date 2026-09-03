@@ -212,7 +212,8 @@ turns every figure measured beside it into a figure about the driver.
 
 ```
 csb record show   [--since 5m] [--json]
-csb record export --out FILE   the timeline plus the describe that opened it
+csb record export --out FILE [--format json|html]
+                               the timeline plus the describe that opened it
 ```
 
 There is no `record start`: every command that changes cluster state appends,

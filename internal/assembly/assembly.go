@@ -497,7 +497,7 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 		if st == "registered_and_to_be_active" {
 			stuck++
 			if stuck >= 5 { // ~10 s of it, which is well past the normal transit
-				forced, err := a.completePromotion(ctx, waiting)
+				forced, err := a.CompletePromotion(ctx, waiting)
 				if err != nil {
 					// Not safe *yet* is the usual case: the applier still has a
 					// page or two to drain. Keep the reason and keep waiting --
@@ -608,7 +608,7 @@ func (a *Assembler) applyPosition(ctx context.Context, node string) (eof, final,
 // replication log arriving late, which is the lab's stated reason for refusing
 // to force it in general. So the tool checks first and refuses if it cannot
 // prove the case, rather than deciding on the operator's behalf.
-func (a *Assembler) completePromotion(ctx context.Context, node string) (bool, error) {
+func (a *Assembler) CompletePromotion(ctx context.Context, node string) (bool, error) {
 	m := node
 	if m == "" {
 		m = a.Master().Name

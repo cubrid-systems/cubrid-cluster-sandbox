@@ -145,3 +145,34 @@ rather than publishing one that is wrong by more than the effect.
 - It does not survive the cluster. `record export` is how a result leaves, and
   it carries the `describe` with it, because a timeline without the topology it
   ran against is not evidence.
+
+## 8. The page, and why it is not a front end
+
+```
+csb record export --out run.html          # --format follows the file name
+```
+
+The same document `--format json` writes, rendered. `Build` runs first and the
+page renders what it returns, which is the rule any front end over this surface
+has to keep: **render the artifacts, never become a second way of asking.** A
+page that computed its own view of a run would be a second source for the same
+facts, and the whole argument of this document is that a run has one.
+
+It carries **no external asset** — no CDN, no font, no script. A run record is
+something somebody attaches to a ticket, or opens six months later on a machine
+with no network, and an asset that fails to load takes the evidence with it. The
+e2e suite asserts the absence: a page containing `http://`, `https://` or
+`<script` fails the check.
+
+What it renders is what this document says has to travel together — both
+intervals for every role change side by side, the tool's events and the engine's
+own harvested lines in one timeline with the actor named, the reasons a run is
+not a clean measurement at the top rather than in a footnote, and the `describe`
+as it stood when the record opened. Nothing is summarised away: the detail of
+every entry is printed with its keys in a fixed order, because a document people
+compare across runs must not diff on map ordering.
+
+This is the smallest honest piece of the web front end the roadmap keeps
+skeletal. It answers the part that is not in question — the artifacts are already
+documents somebody reads — without inventing a server, a session, or a second
+vocabulary.

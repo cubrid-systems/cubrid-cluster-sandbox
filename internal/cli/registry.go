@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -72,7 +73,10 @@ var registry = []Command{
 	{Noun: "record", Verb: "show", Summary: "the timeline", Run: cmdRecordShow,
 		Flags: func(fs *flag.FlagSet) { fs.Duration("since", 0, "only entries newer than this") }},
 	{Noun: "record", Verb: "export", Summary: "timeline plus the describe that opened it", Run: cmdRecordExport,
-		Flags: func(fs *flag.FlagSet) { fs.String("out", "", "file to write") }},
+		Flags: func(fs *flag.FlagSet) {
+			fs.String("out", "", "file to write")
+			fs.String("format", "", "json or html (default: from the file name)")
+		}},
 }
 
 // ---- implemented commands -----------------------------------------------
@@ -269,9 +273,35 @@ func cmdRecordExport(c *Ctx) (any, error) {
 	}
 
 	doc := record.Build(c.Cluster, entries, describe, invalidities(c))
-	b, err := json.MarshalIndent(doc, "", "  ")
-	if err != nil {
-		return nil, Failed("export_failed", "%v", err)
+
+	// The format follows the name the caller gave the file. A run record is
+	// something people attach to a ticket, and a reader who asked for .html
+	// asked for a page rather than for JSON with a misleading extension.
+	format := c.str("format")
+	if format == "" {
+		format = "json"
+		if strings.HasSuffix(strings.ToLower(out), ".html") || strings.HasSuffix(strings.ToLower(out), ".htm") {
+			format = "html"
+		}
+	}
+	var b []byte
+	switch format {
+	case "json":
+		var jerr error
+		b, jerr = json.MarshalIndent(doc, "", "  ")
+		if jerr != nil {
+			return nil, Failed("export_failed", "%v", jerr)
+		}
+	case "html":
+		var buf bytes.Buffer
+		if herr := record.HTML(&buf, doc); herr != nil {
+			return nil, Failed("export_failed", "%v", herr)
+		}
+		b = buf.Bytes()
+		c.Note("rendered", SevInfo,
+			"the page renders the same document --format json writes, and carries no external asset: it opens on a machine with no network")
+	default:
+		return nil, Usage("unknown --format %q (json or html)", format)
 	}
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return nil, Failed("export_failed", "%v", err)

@@ -458,7 +458,15 @@ func TestSurface(t *testing.T) {
 				away = n
 			}
 		}
-		c.must("node", "start", away, "--timeout", "200s")
+		// Putting a node back after a role change is a REBUILD, not a restart,
+		// and that is the field's answer rather than this project's: the rejoin
+		// path in their tracker is ha_make_slavedb.sh. `node start` tries the
+		// cheap repair first and says so when it is not enough
+		// (docs/design/03-assembly.md §3).
+		if _, code := c.run("node", "start", away, "--timeout", "300s"); code != cli.ExitOK {
+			t.Logf("%s could not be restarted into the group; rebuilding it, which is what the field does", away)
+			c.must("ha", "resync", away, "--path", "slave", "--timeout", "900s")
+		}
 		c.until(away+" back in the group", 180*time.Second, func() bool {
 			return strings.HasPrefix(c.roles()[away], "registered_and_")
 		})
@@ -513,6 +521,23 @@ func TestSurface(t *testing.T) {
 		c.must("record", "export", "--out", out, "--timeout", "60s")
 		if !exists(out) {
 			t.Fatalf("export wrote nothing to %s", out)
+		}
+		// The page is the same document rendered, and it has to survive being
+		// opened on a machine with no network.
+		page := filepath.Join(c.home, "run.html")
+		c.must("record", "export", "--out", page, "--timeout", "60s")
+		b, rerr := os.ReadFile(page)
+		if rerr != nil {
+			t.Fatalf("no page written: %v", rerr)
+		}
+		html := string(b)
+		if !strings.Contains(html, c.cluster) || !strings.Contains(html, "ha.") {
+			t.Errorf("the page carries neither the cluster nor an engine event")
+		}
+		for _, forbidden := range []string{"http://", "https://", "<script"} {
+			if strings.Contains(html, forbidden) {
+				t.Errorf("the page reaches outside itself: %q", forbidden)
+			}
 		}
 	})
 

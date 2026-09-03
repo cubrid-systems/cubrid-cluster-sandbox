@@ -180,10 +180,32 @@ for the page, does not find it, and exits rather than waiting.
 
 `node start` detects this — the diagnosis has to come from the applier's log,
 since the start output does not carry it — recopies the master's active log with
-`cub_admin copylogdb --start-page-id=-1`, and starts the node again, saying so in
-a note. That is the same copy step the slave rebuild performs
-([`04-faults.md`](04-faults.md) §8); here it is a repair on its own, and a much
-cheaper one than a rebuild.
+`cub_admin copylogdb --start-page-id=-1`, and starts the node again. That is the
+same copy step the slave rebuild performs ([`04-faults.md`](04-faults.md) §8),
+and here it is a repair on its own, much cheaper than a rebuild.
+
+**Then it checks, because the cheap repair does not always work, and the case
+where it fails is the interesting one.** A log that is merely *short* is fixed by
+recopying it. A recorded position that belongs to a *different log altogether* is
+not, and that is what a node demoted by a role change carries: its
+`db_ha_apply_info` describes the peer's log in the peer's numbering, from a time
+when the roles were the other way round. Measured on such a node, the recopy
+moved the required LSA from 184 to 185 and it still would not start.
+
+**Putting that node back is a rebuild, not a restart** — and that is the field's
+answer rather than this project's: the rejoin path in their own tracker is
+`ha_make_slavedb.sh`
+([`../requirements/01-failback-field-evidence.md`](../requirements/01-failback-field-evidence.md)).
+`csb ha resync <node> --path slave` performs it, and on the node above it rejoined
+as `registered_and_standby` with every table matching. So `node start` exits 1
+and names that remedy rather than exiting 0 on a node that never came back —
+reporting a success it did not achieve is the failure mode this whole design
+keeps refusing.
+
+One precondition had to go with it: `ha resync` used to require an active and a
+standby, which excluded exactly the node most in need of a rebuild — one that is
+unregistered and has no role at all. A named node is now accepted whatever state
+it is in, as long as it is not the master.
 
 The tool still completes a promotion that is stuck, because the state is real
 whether or not we can say what put us in it.

@@ -63,15 +63,38 @@ func takeMasterAway(c *Ctx, a *assembly.Assembler, t *topology.Topology, current
 	}()
 
 	deadline := time.Now().Add(wait)
+	stuck := 0
 	for {
 		st, err := inspect.Read(c.Ctx, a.D, t)
 		if err == nil {
-			if n := nodeByName(st, target); n != nil && n.Server == "registered_and_active" {
-				select {
-				case <-returned:
-					return time.Since(start).Seconds(), true, nil
-				default:
-					return time.Since(start).Seconds(), false, nil
+			if n := nodeByName(st, target); n != nil {
+				if n.Server == "registered_and_active" {
+					select {
+					case <-returned:
+						return time.Since(start).Seconds(), true, nil
+					default:
+						return time.Since(start).Seconds(), false, nil
+					}
+				}
+				// The same completion `cluster up` performs, and for the same
+				// reason: a node can hold to_be_active indefinitely, and the move
+				// is safe exactly when it can be shown to be -- the applier
+				// drained and fail_counter at zero. Without this, promote and
+				// failback timed out on a state cluster up would have finished
+				// (docs/design/04-faults.md §2).
+				if n.Server == "registered_and_to_be_active" {
+					stuck++
+					if stuck >= 5 {
+						forced, ferr := a.CompletePromotion(c.Ctx, target)
+						if forced {
+							c.Note("promotion_completed", SevWarn,
+								target+" held to_be_active with its applier drained, so the promotion was completed with `changemode -m active -f`")
+							continue
+						}
+						if ferr != nil {
+							c.Note("promotion_not_safe", SevWarn, ferr.Error())
+						}
+					}
 				}
 			}
 		}
