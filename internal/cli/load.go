@@ -325,3 +325,50 @@ func clusterMaster(c *Ctx) (string, error) {
 	}
 	return names[0], nil
 }
+
+func driverFlags(fs *flag.FlagSet) {
+	fs.String("out", "", "write it to a file instead of standard output")
+}
+
+// cmdLoadDriver hands over the program `load start` runs.
+//
+// `csb load` is a demo client that happens to be built in. The driver itself is
+// unremarkable -- it opens a connection, paces statements, and writes a status
+// file -- and that is the point: **what is worth seeing is how it gets there.**
+// The tool copies this file into the node's own directory, which is the same
+// directory a client node exposes as /work, and runs it with `python3`. Your own
+// program takes exactly the same route: put it in the directory you pass to
+// --tools, and run it with `node exec client -- ...`.
+//
+// So this verb exists to stop the built-in load from being a black box that
+// looks like a feature. It is an example with a shortcut attached.
+func cmdLoadDriver(c *Ctx) (any, error) {
+	src := load.DriverSource()
+	if out := c.str("out"); out != "" {
+		if err := os.WriteFile(out, src, 0o644); err != nil {
+			return nil, Failed("driver_unwritable", "%v", err)
+		}
+		if !c.JSON && !c.Quiet {
+			fmt.Fprintf(c.Out, "wrote %s (%d bytes)\n", out, len(src))
+			fmt.Fprintf(c.Out, `
+This is what "load start" runs. It is copied to /work/<node>/load-driver.py
+inside the node and started with python3, reading a spec file and writing a
+status file beside it.
+
+Your own program goes the same way, without the copy:
+
+  csb cluster create --clients 1 --tools ./my-tools ...
+  csb node exec client -- python3 /tools/mine.py
+
+/tools is your directory, read-only. /results is writable and outlives the
+cluster. The broker is reachable from a client at <node>:33000 with no port
+published on your machine.
+`)
+		}
+		return map[string]any{"out": out, "bytes": len(src)}, nil
+	}
+	if !c.JSON && !c.Quiet {
+		c.Out.Write(src)
+	}
+	return map[string]any{"bytes": len(src)}, nil
+}

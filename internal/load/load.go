@@ -23,6 +23,12 @@ import (
 //go:embed driver.py
 var driverPy []byte
 
+// DriverSource is the program this tool copies into a node and runs. It is
+// handed out on request, because `load` is meant to be read as much as used:
+// the interesting part is not the driver, it is that a program on the host ends
+// up running inside a node against the cluster, and that path is yours to reuse.
+func DriverSource() []byte { return driverPy }
+
 // Spec is what was asked for. It travels in describe, because a cluster
 // reproducing a bug under 2000 inserts a second is not the same cluster as an
 // idle one.

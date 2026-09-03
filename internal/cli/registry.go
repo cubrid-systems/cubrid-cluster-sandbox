@@ -81,6 +81,8 @@ func init() {
 		{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Flags: func(fs *flag.FlagSet) {
 			fs.String("node", "", "which node (default: a client if there is one, else the master)")
 		}, Run: cmdLoadStop},
+		{Noun: "load", Verb: "driver", Summary: "the program load start runs, to read or to replace",
+			Flags: driverFlags, Run: cmdLoadDriver},
 		{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Flags: func(fs *flag.FlagSet) {
 			fs.String("node", "", "which node (default: a client if there is one, else the master)")
 		}, Run: cmdLoadStatus},

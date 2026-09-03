@@ -233,3 +233,38 @@ driver cannot reach belongs in a tool built for it — `sysbench`, a JDBC
 application, the site's own harness — running on the same client node, against
 the same broker, recorded in the same `/results`. **The tool's job is to provide
 the place, not to become the benchmark.**
+
+## 9. `load` is a demo client with a shortcut attached
+
+```
+csb load driver [--out mine.py]
+```
+
+The built-in driver is unremarkable — it opens a connection, paces statements,
+writes a status file — and it is not trying to be a benchmark. It cannot be one:
+it spawns a `csql` per statement, which is a ceiling measured at about 20
+statements a second per client (§8).
+
+**What is worth seeing is not the driver but how it gets there.** The tool copies
+this program into the node's own directory and runs it with `python3`, and a
+client node's `/tools` is the same route without the copy. So the verb exists to
+stop `load` looking like a feature when it is an example:
+
+```
+csb load driver --out mine.py            # here is the program I run
+# edit it, or throw it away and write your own
+csb cluster create --clients 1 --tools ./my-tools ...
+csb node exec client -- python3 /tools/mine.py
+```
+
+`/tools` is yours and read-only, `/results` is writable and outlives the cluster,
+and the broker answers at `<node>:33000` from inside with no port published on
+your machine (`02-topology.md` §8).
+
+That leaves the built-in `load` with two honest jobs and no third one. **Making
+the cluster busy** while something else is being measured — where what matters is
+that replication is moving, not that a rate was achieved — and **squeezing the
+engine's own cgroup** with the `host` profiles, which are contention rather than
+workload and run on the database node for that reason (§6). Anything that is
+really a performance question belongs to a tool built for it, on the client node,
+by the same path this verb shows you.
