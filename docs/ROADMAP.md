@@ -215,12 +215,18 @@ backend option, not a default, decided together with the fork below.
 that is on the other side of it.** The operator already has a `CubridDB` CRD that
 deploys, configures HA, schedules backups, scales and reports status, which is
 the same topology this project models against a different backend. Two ways they
-could meet, and they are not the same thing: the operator becomes **a second
-backend** behind `02-topology.md`'s model, or it becomes **a component under
-test** that this tool stands up and breaks. §9 OQ4 deferred the choice and it is
-still deferred — but the language decision changed the cost of it, since both
-projects are now Go and a shared topology model is the ADR's own named condition
-for reopening how far that sharing goes. The tier-3 monitoring seam, once the engine has a
+could meet, and the backend contract now says which: **a component under test,
+not a second backend.** Three of its eleven operations collide with Kubernetes —
+the host-side file access that seeding and the slave rebuild use does not exist in
+a pod, "there is never an engine image" collides with how a pod gets its engine,
+and `NetworkPolicy` cannot express "keep the route, drop the packets", which is
+the difference between two engine code paths that the split-brain finding rests
+on. The deepest objection is not in the contract at all: **an operator's job is to
+repair what this tool deliberately breaks**, so `node kill` is a scenario here and
+a fault to be corrected there. That is the operator behaving correctly, and it is
+what makes it a subject worth measuring rather than a substrate to build on —
+how fast it notices, what it does with a split brain, and whether its `CubridDB`
+status reports a divergence that `repl diff` can see and its gauges cannot. The tier-3 monitoring seam, once the engine has a
 machine-readable metrics contract.
 
 ## Open

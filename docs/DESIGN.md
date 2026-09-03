@@ -550,6 +550,23 @@ backend. *Owner*: deferred. *Verification*: the first operational-testing use
 case that actually wants it. Nothing in phase 1 depends on the answer, and §5
 A4 carries the reject for building on Kubernetes now.
 
+**→ Recommendation 2026-09-03, from writing the backend contract down**
+([`design/ADR-002-backend-contract.md`](design/ADR-002-backend-contract.md)):
+**a subject, not a backend.** Three of the eleven operations collide with
+Kubernetes — the host-side access that seeding and the slave rebuild use does not
+exist in a pod; `there is never an engine image` collides with how a pod gets its
+engine; and `NetworkPolicy` cannot express "keep the route, drop the packets",
+which is not decoration but the difference between two engine code paths that the
+split-brain finding rests on.
+
+The deepest one is not in the contract at all. **An operator's job is to repair
+what this tool deliberately breaks.** `node kill` is a scenario here and a fault
+to be corrected there, and the pod comes back — the operator behaving correctly.
+So the two do not meet as tool and backend. They meet as tool and subject: how
+fast the operator notices, what it does with a split brain, and whether its
+`CubridDB` status reports a divergence that `repl diff` can see and its gauges
+cannot. Those are measurements, and this tool already makes that kind.
+
 **OQ5 — Topology catalogue.** *Owner*: this project. *Verification*: the first
 topology a user asks for that the preset vocabulary cannot express. HA two-node
 is phase 1; replica nodes, broker/CAS tiers, shard configurations, and CDC
@@ -928,5 +945,22 @@ Three things have to be answered before it is a design rather than an idea:
   it should be decided with the Kubernetes/`cubrid-operator` fork (OQ4) rather
   than ahead of it.
 
-The provisional answer is therefore **yes as a backend option, no as a default**,
-and it is worth a spike behind a flag before it is worth an ADR.
+**Answered the same day by writing the contract down**
+([`design/ADR-002-backend-contract.md`](design/ADR-002-backend-contract.md)). The
+objection above was wrong, and wrong in a way the code made easy to believe:
+`internal/fault` reached around the backend and shelled out to `docker` itself,
+so the cut looked like a docker thing. Expressed by what it means — *make this
+peer unreachable from this node, by this mechanism* — it is not. A tailnet
+address is reached through an interface like any other, so the blackhole route
+and the packet filter both do exactly what they do now, with the same distinction
+between them.
+
+A tailnet changes **four** of the contract's eleven operations and leaves the
+fault verbs intact, which makes it a **network for a backend rather than a
+backend**. What has to be decided is the ping host: it is currently the docker
+gateway, chosen because it survives a cut between the nodes, and on a tailnet it
+becomes another member whose reachability during a partition is a property of the
+tailnet. The split-brain flavours would be **re-measured**, not re-designed.
+
+**Yes as a backend option, no as a default**, and the spike's scope is those four
+operations.

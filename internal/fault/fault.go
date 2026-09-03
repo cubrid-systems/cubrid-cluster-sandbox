@@ -169,16 +169,7 @@ func (i *Injector) Clear(ctx context.Context, s *Set, target string) ([]Active, 
 }
 
 func (i *Injector) addr(ctx context.Context, node string) (string, error) {
-	res, err := i.D.R.Run(ctx, "docker", "inspect", "-f",
-		"{{(index .NetworkSettings.Networks \""+i.T.Network+"\").IPAddress}}", node)
-	if err != nil {
-		return "", err
-	}
-	ip := strings.TrimSpace(res.Stdout)
-	if ip == "" {
-		return "", fmt.Errorf("%s has no address on %s", node, i.T.Network)
-	}
-	return ip, nil
+	return i.D.Addr(ctx, i.T.Network, node)
 }
 
 func mustAddr(ctx context.Context, i *Injector, node string) string {
@@ -186,45 +177,27 @@ func mustAddr(ctx context.Context, i *Injector, node string) string {
 	return ip
 }
 
-// cut adds or removes one direction. Route operations need NET_ADMIN and run as
-// root inside the node, which is why the container carries the capability.
+// cut asks the backend to make one direction unreachable, or to put it back.
+//
+// What a cut IS belongs here; how it is performed belongs to the backend. That
+// split is what lets `partition` mean the same thing on a second backend rather
+// than being re-invented against a different network
+// (docs/design/ADR-002-backend-contract.md).
 func (i *Injector) cut(ctx context.Context, from, to, ip, mechanism string, undo bool) error {
 	if ip == "" {
 		return fmt.Errorf("no address for %s", to)
 	}
-	var cmd string
-	switch mechanism {
-	case "drop":
-		// The route stays; the packets do not. connect() then hangs and times
-		// out, which is a different engine code path from "no route at all".
-		verb := "-A"
-		if undo {
-			verb = "-D"
-		}
-		cmd = "iptables " + verb + " OUTPUT -d " + ip + " -j DROP"
-	default:
-		verb := "add"
-		if undo {
-			verb = "del"
-		}
-		cmd = "ip route " + verb + " blackhole " + ip
+	if undo {
+		return i.D.Reach(ctx, from, ip, mechanism)
 	}
-	args := []string{"exec", "-u", "0", from, "sh", "-c", cmd}
-	res, err := i.D.R.Run(ctx, "docker", args...)
-	if err != nil {
-		return err
-	}
-	if res.ExitCode != 0 && !undo {
-		return fmt.Errorf("%s on %s: %s", cmd, from, strings.TrimSpace(res.Stderr))
-	}
-	return nil
+	return i.D.Unreach(ctx, from, ip, mechanism)
 }
 
 // asRoot runs a command inside a node as uid 0. Route rules, iptables and the
 // mode of a file the image installed are all root's, and the nodes otherwise run
 // as the invoking user.
 func (i *Injector) asRoot(ctx context.Context, node, cmd string) (*run.Result, error) {
-	return i.D.R.Run(ctx, "docker", "exec", "-u", "0", node, "sh", "-c", cmd)
+	return i.D.Privileged(ctx, node, cmd)
 }
 
 // PingUnavailable breaks the check the engine decides with, which is not the
@@ -347,8 +320,7 @@ func (i *Injector) Lag(ctx context.Context, s *Set, node, stage, mechanism, dela
 		}
 		// netem is the realism mechanism and cannot say which stage it slows,
 		// which is exactly why it is not the default.
-		res, err := i.D.R.Run(ctx, "docker", "exec", "-u", "0", node, "sh", "-c",
-			"tc qdisc add dev eth0 root netem delay "+delay)
+		res, err := i.asRoot(ctx, node, "tc qdisc add dev eth0 root netem delay "+delay)
 		if err != nil {
 			return err
 		}
@@ -369,8 +341,7 @@ func (i *Injector) clearLag(ctx context.Context, a Active) {
 			_, _ = i.D.Exec(ctx, a.Target, i.T.DB, "kill -CONT "+a.Pid)
 		}
 	case "delay":
-		_, _ = i.D.R.Run(ctx, "docker", "exec", "-u", "0", a.Target, "sh", "-c",
-			"tc qdisc del dev eth0 root")
+		_, _ = i.asRoot(ctx, a.Target, "tc qdisc del dev eth0 root")
 	}
 }
 

@@ -252,3 +252,86 @@ func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed 
 	}
 	return removed, nil
 }
+
+// ---- the backend contract ------------------------------------------------
+//
+// Everything below is named for what it MEANS rather than for how docker does
+// it, because these are the operations a second backend has to provide and the
+// fault verbs are defined against them. A tailnet or a Kubernetes backend will
+// cut differently; what must not differ is what a cut IS
+// (docs/design/ADR-002-backend-contract.md).
+//
+// They live here rather than in internal/fault because that package used to
+// shell out to `docker` itself -- an address lookup, the cut, and three
+// privileged execs -- which put backend knowledge in two places and would have
+// put it in four the moment a second backend existed.
+
+// Privileged runs a command inside a node as uid 0.
+//
+// Route rules, packet filters and the mode of a file the image installed are
+// root's; the nodes otherwise run as the invoking user. A backend that cannot
+// offer this cannot host the fault verbs, and saying so is better than each of
+// them discovering it separately.
+func (d *Docker) Privileged(ctx context.Context, node, command string) (*run.Result, error) {
+	return d.R.Run(ctx, "docker", "exec", "-u", "0", node, "sh", "-c", command)
+}
+
+// Addr is the address a peer is reached at on the cluster's own network. It is
+// what an unreachability is expressed against.
+func (d *Docker) Addr(ctx context.Context, network, node string) (string, error) {
+	res, err := d.R.Run(ctx, "docker", "inspect", "-f",
+		"{{(index .NetworkSettings.Networks \""+network+"\").IPAddress}}", node)
+	if err != nil {
+		return "", err
+	}
+	ip := strings.TrimSpace(res.Stdout)
+	if ip == "" {
+		return "", fmt.Errorf("%s has no address on %s", node, network)
+	}
+	return ip, nil
+}
+
+// Unreach makes one direction unreachable, and Reach puts it back.
+//
+// Two mechanisms, and the difference is not cosmetic: "drop" leaves the route in
+// the table and discards the packets, so connect() hangs and times out, while
+// the default removes the route entirely and connect() fails at once. Those are
+// different engine code paths, which is why the mechanism is part of the
+// operation rather than an implementation detail
+// (docs/design/04-faults.md §3).
+func (d *Docker) Unreach(ctx context.Context, from, addr, mechanism string) error {
+	return d.reachability(ctx, from, addr, mechanism, false)
+}
+
+func (d *Docker) Reach(ctx context.Context, from, addr, mechanism string) error {
+	return d.reachability(ctx, from, addr, mechanism, true)
+}
+
+func (d *Docker) reachability(ctx context.Context, from, addr, mechanism string, undo bool) error {
+	if addr == "" {
+		return fmt.Errorf("no address to cut from %s", from)
+	}
+	var cmd string
+	switch mechanism {
+	case "drop":
+		verb := "-A"
+		if undo {
+			verb = "-D"
+		}
+		cmd = "iptables " + verb + " OUTPUT -d " + addr + " -j DROP"
+	default:
+		verb := "add"
+		if undo {
+			verb = "del"
+		}
+		cmd = "ip route " + verb + " blackhole " + addr
+	}
+	res, err := d.Privileged(ctx, from, cmd)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 && !undo {
+		return fmt.Errorf("%s on %s: %s", cmd, from, strings.TrimSpace(res.Stderr))
+	}
+	return nil
+}
