@@ -37,6 +37,11 @@ type Spec struct {
 	DB          string  `json:"db"`
 	Node        string  `json:"node"`
 	RequireRate bool    `json:"require_rate,omitempty"`
+
+	// KeyLo is where this driver's slice of the key space starts. Several
+	// clients writing one table each take a disjoint range and resume inside it,
+	// which needs no coordination between them and survives a restart.
+	KeyLo int `json:"key_lo,omitempty"`
 }
 
 // Status is what happened. achieved sits next to requested always, because a

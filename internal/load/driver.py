@@ -14,6 +14,19 @@ status_path = sys.argv[2]
 profile = spec["profile"]
 rate = float(spec.get("rate") or 0)          # 0 means "as fast as it goes"
 workers = int(spec.get("concurrency") or 1)
+# Where this driver's workers sit in the global interleave, and how wide that
+# interleave is. With one client they are 0 and `workers`, which is what the
+# single-driver arithmetic below already did. With several clients each takes a
+# disjoint slice, so two drivers writing the same table never choose the same
+# primary key -- which would not be a load, it would be a benchmark of the
+# engine's error path.
+# Each driver writes its own RANGE of the key space, and finds where to resume
+# inside it. An interleave was tried first and was wrong: every driver read
+# MAX(i) at a different moment, so their offsets were relative to different
+# origins and they collided anyway -- 146 unique-constraint violations out of
+# 1025 statements, on the first run with two clients. A range needs no
+# coordination and survives a restart.
+key_lo = int(spec.get("key_lo") or 0)
 duration = float(spec.get("for_seconds") or 0)
 table = spec.get("table") or "csb_load"
 db = spec["db"]
@@ -51,12 +64,12 @@ def prepare():
         # update needs rows to update; seed a deterministic block of them
         rows = ",".join("(%d,'%s')" % (n, "x" * 180) for n in range(1000))
         csql("INSERT INTO %s VALUES %s;" % (table, rows))
-    rc, out = csql("SELECT NVL(MAX(i),0) FROM %s;" % table)
+    rc, out = csql("SELECT NVL(MAX(i),%d) FROM %s WHERE i >= %d;" % (key_lo, table, key_lo))
     if rc == 0:
         for tok in out.split():
             if tok.strip().lstrip("-").isdigit():
-                return int(tok.strip()) + 1
-    return 1
+                return max(int(tok.strip()) + 1, key_lo + 1)
+    return key_lo + 1
 
 
 def db_statement(rnd, n):
@@ -83,8 +96,9 @@ def db_worker(wid, base):
     # Per-worker pacing: the whole cluster's rate divided by the workers.
     per = (rate / workers) if rate else 0
     interval = (1.0 / per) if per else 0
-    # Interleaved by worker, so the workers never collide with each other and the
-    # run never collides with what a previous run left behind.
+    # Interleaved by worker across every driver, so the workers never collide
+    # with each other, the clients never collide with each other, and the run
+    # never collides with what a previous run left behind.
     n = base + wid - workers
     nxt = time.time()
     while not stop.is_set():

@@ -189,3 +189,38 @@ somebody might quote.
 not a percentile, and publishing one would be the same class of lie as a lag
 figure with no source. Every sample is kept rather than reservoir-sampled, up to
 a cap, and `latency_complete` says whether the distribution is all of them.
+
+## 8. Several clients, one rate
+
+`--rate` is the **cluster's** rate. With N clients it is divided among them, each
+driver is started with its share, and both figures are reported — the total and
+each client's — because "the load" and "what this client managed" are different
+questions.
+
+**Each client owns a disjoint range of the key space.** An interleave was tried
+first and was wrong in a way worth recording: every driver read `MAX(i)` at a
+different moment, so their offsets were relative to different origins, and the
+first two-client run produced **146 unique-constraint violations out of 1025
+statements**. A range needs no coordination between the drivers, survives a
+restart, and is bounded — CUBRID's `INT` is 32-bit and each client takes
+100,000,000 keys, so twenty-one clients is the limit. That is a number worth
+stating rather than discovering.
+
+**The distributions are not merged.** Each client reports its own; a percentile
+of percentiles is not a percentile, and the samples that would make a real one
+live on separate machines. The total line carries the rate, the count and the
+errors, which do add up.
+
+### What the second client immediately showed
+
+With one client the driver held 19.8/s of 20/s. With two asking for 20/s each it
+held **11.2/s each**, and the tail went from `p99 230 ms` to `p99 1244 ms` — with
+**no errors**, so nothing was failing. The limit is the driver, not the engine:
+it spawns a `csql` process per statement, and that cost does not divide.
+
+This is a real ceiling on using this driver for performance work, and it is why
+a client node takes a `--tools` directory. A workload that needs a rate this
+driver cannot reach belongs in a tool built for it — `sysbench`, a JDBC
+application, the site's own harness — running on the same client node, against
+the same broker, recorded in the same `/results`. **The tool's job is to provide
+the place, not to become the benchmark.**
