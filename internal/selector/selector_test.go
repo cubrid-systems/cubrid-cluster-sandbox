@@ -15,6 +15,12 @@ func TestParse(t *testing.T) {
 		{"slave[0]", Slave, 0, ""},
 		{"slave[12]", Slave, 12, ""},
 		{"replica[0]", Replica, 0, ""},
+		// A client node is part of the cluster and not of the HA group, and both
+		// forms have to parse. `client` reached Resolve without reaching the
+		// grammar once, so a step addressing client[1] failed and the traffic it
+		// was supposed to start silently never ran.
+		{"client", Client, -1, ""},
+		{"client[1]", Client, 1, ""},
 		{"n1", Name, -1, "n1"},
 		{"hadb-n2", Name, -1, "hadb-n2"},
 	}
@@ -38,6 +44,35 @@ func TestParse(t *testing.T) {
 	for _, in := range bad {
 		if got, err := Parse(in); err == nil {
 			t.Errorf("Parse(%q) = %+v, want an error", in, got)
+		}
+	}
+}
+
+// Every kind this package can return has to be spellable, or a caller that
+// handles it downstream is handling something Parse will never produce -- which
+// is the shape of the bug that motivated `client[n]`: Resolve knew the selector
+// and Parse rejected it, so it failed at the door rather than at the caller.
+func TestEveryKindHasASpelling(t *testing.T) {
+	spellings := map[Kind]string{
+		Master:  "master",
+		Slave:   "slave",
+		Replica: "replica[0]",
+		Client:  "client",
+		Name:    "hadb-n1",
+		All:     "all",
+	}
+	for k := Master; k <= All; k++ {
+		spelling, ok := spellings[k]
+		if !ok {
+			t.Fatalf("kind %d has no spelling in this test, which means a new kind was added without one", k)
+		}
+		got, err := Parse(spelling)
+		if err != nil {
+			t.Errorf("%q does not parse: %v", spelling, err)
+			continue
+		}
+		if got.Kind != k {
+			t.Errorf("%q parsed as kind %d, want %d", spelling, got.Kind, k)
 		}
 	}
 }
