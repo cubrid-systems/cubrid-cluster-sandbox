@@ -314,6 +314,27 @@ fail rows, above which sites rebuild
 Without `--path` the tool chooses and **reports how it decided**, which is the
 same rule the assembly follows: decide on observed state and say so.
 
+**A zero fail counter is not evidence that the two sides agree, and this command
+used to treat it as if it were.** On a cluster whose standby was permanently
+missing a row it answered *"resume — fail_counter is 0: replication is behind at
+worst, not broken"*. Both halves of that sentence were true and the conclusion
+was wrong. A split brain fails nothing — each side wrote its own log and both
+succeeded — so the counter never moves and the applier's log names no table,
+which is exactly when the divergence is largest. The comparison now comes from
+the catalog and runs **before** "nothing is wrong" is said out loud
+([`05-inspect.md`](05-inspect.md) §4a), and on that same cluster it now answers:
+
+```
+would take path "slave" — fail_counter is 0 and nothing failed to apply, but
+1 table(s) hold different row counts (w): that is what a healed split brain
+leaves, and replication will not carry it
+```
+
+**And it will not carry it later either.** The standby's recorded position is
+already past the write it is missing — a canary written afterwards arrives — so
+nothing re-fetches it. Only a rebuild resets that bookkeeping, which is why the
+answer is `slave` and why the field's closure is `ha_make_slavedb.sh`.
+
 **And `resync` never zeroes the counter to make its output tidy.** The engine
 deliberately leaves `fail_counter` standing, because a zero would let an operator
 conclude master and slave agree when they do not — the field's own argument

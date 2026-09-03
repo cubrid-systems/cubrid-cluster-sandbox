@@ -55,6 +55,7 @@ var registry = []Command{
 	{Noun: "repl", Verb: "check", Args: "[<selector>]", Summary: "a write that has to arrive", Mutates: true,
 		Flags: checkFlags, Run: cmdReplCheck},
 	{Noun: "repl", Verb: "watch", Summary: "sample and retain", Flags: watchFlags, Run: cmdReplWatch},
+	{Noun: "repl", Verb: "diff", Summary: "what the two databases actually hold", Flags: diffFlags, Run: cmdReplDiff},
 
 	// ---- ha --------------------------------------------------------------
 	{Noun: "ha", Verb: "status", Summary: "roles and the group", Run: cmdHaStatus},

@@ -247,6 +247,25 @@ func TestSurface(t *testing.T) {
 		}
 	})
 
+	t.Run("diff compares the databases, not the gauges", func(t *testing.T) {
+		c.t = t
+		// On a healthy pair this must find nothing and exit 0. The interesting
+		// case -- a healed split brain where every gauge reads healthy and the
+		// standby is missing a row -- is measured in
+		// harness/calc-score-window.sh, because it needs writes on both sides of
+		// a partition. What is guarded here is the catalog query underneath it:
+		// if db_class ever stops answering, this verb silently compares nothing
+		// and reports agreement, which is the worst thing it could do.
+		d := c.must("repl", "diff", "--timeout", "120s")
+		tables, _ := d["tables"].([]any)
+		if len(tables) == 0 {
+			t.Fatalf("repl diff found no user table to compare: %v", d)
+		}
+		if differ, _ := d["differ"].([]any); len(differ) != 0 {
+			t.Errorf("a healthy pair reported a divergence: %v", differ)
+		}
+	})
+
 	t.Run("watch sees the stage that is stalled, not the one that says so", func(t *testing.T) {
 		c.t = t
 		c.must("load", "start", "--profile", "insert", "--rate", "40/s", "--for", "60s", "--timeout", "60s")

@@ -144,9 +144,19 @@ unreproduced rather than dismissed.
 - **`ha_calc_score_interval_in_msecs` is a two-sided parameter.** It is the one
   setting shown to move the switchover threshold, and it moves this window by the
   same amount. Any recommendation to raise it has to state both.
-- **A healed split brain needs a divergence check, not a lag check.** Row counts,
-  or a comparison of the two sides — which is what `ha resync --path table`
-  compares and what the field does by hand. The gauges are the wrong instrument
-  and they answer confidently.
+- **A healed split brain needs a divergence check, not a lag check.** That is
+  `repl diff`, built the same day: it takes its table list from the catalog
+  rather than from the applier's error log, because a split brain fails nothing and that log
+  is empty exactly when the divergence is largest. On the cluster above it
+  reports `w  master=3  standby=2  DIFFERENT` while every gauge beside it reads
+  healthy ([`../design/05-inspect.md`](../design/05-inspect.md) §4a).
+- **`ha resync` no longer concludes "resume" from a zero fail counter.** It
+  compares first, and on that cluster now answers `slave` — naming the table and
+  saying that replication will not carry it.
 - **`repl check` should not be read as an equality proof.** It proves the path is
   open. The distinction belongs next to the verb, and it now is.
+- **Nothing closes the gap but a rebuild**, and that is not a limitation of this
+  tool. The standby's recorded position has moved past the write it is missing —
+  the canary that arrives is the proof — so no re-fetch will ever happen. The
+  field's closure is `ha_make_slavedb.sh`; `csb` reports the need and does not yet
+  perform it.

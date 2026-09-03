@@ -155,6 +155,7 @@ mode ([`../DESIGN.md`](../DESIGN.md) §7).
 csb repl status [--node <selector>]      both stages, against the master
 csb repl check  [<selector>] [--wait 30s]  a write that has to arrive
 csb repl watch  [--interval 0.5s] [--for 60s] [--out FILE]
+csb repl diff   [--table t]              what the two databases actually hold
 ```
 
 `repl status` reports the **copy** stage and the **apply** stage separately and

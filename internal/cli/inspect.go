@@ -195,6 +195,80 @@ func cmdReplStatus(c *Ctx) (any, error) {
 	return map[string]any{"nodes": out}, nil
 }
 
+func diffFlags(fs *flag.FlagSet) {
+	fs.String("table", "", "compare only this table (default: every user table)")
+}
+
+// cmdReplDiff asks the two databases what they hold, rather than asking
+// replication how it is doing.
+//
+// It exists because those questions have different answers. A healed split brain
+// left a standby permanently missing a row while `repl status` read apply_lag=0
+// and fail=0 on both sides, `repl check` arrived, and `ha resync` correctly
+// reported that replication was not broken -- because it was not. It was carrying
+// new writes fine; it simply never carried one old one, and the engine keeps no
+// view that remembers it (docs/findings/active-active-window.md).
+//
+// A difference is exit 1 rather than 0: the command did its job and the answer is
+// bad, and a harness has to be able to tell "compared and equal" from "compared
+// and not" without reading prose. Equal row counts are not equal data, and the
+// output says so rather than implying more than it checked.
+func cmdReplDiff(c *Ctx) (any, error) {
+	a, t, err := loadCluster(c)
+	if err != nil {
+		return nil, err
+	}
+	st, serr := inspect.Read(c.Ctx, a.D, t)
+	if serr != nil {
+		return nil, Failed("inspect_failed", "%v", serr)
+	}
+	var master, standby string
+	for _, n := range st.Nodes {
+		switch n.Server {
+		case "registered_and_active":
+			master = n.Name
+		case "registered_and_standby":
+			standby = n.Name
+		}
+	}
+	if master == "" || standby == "" {
+		return nil, Precondition("not_a_pair",
+			"repl diff needs one active and one standby node; found master=%q standby=%q", master, standby)
+	}
+	var only []string
+	if one := c.str("table"); one != "" {
+		only = []string{one}
+	}
+	d, derr := inspect.CompareTables(c.Ctx, a.D, t, master, standby, only)
+	if derr != nil {
+		return nil, Failed("diff_failed", "%v", derr)
+	}
+	if len(d.Tables) == 0 {
+		c.Note("no_user_tables", SevInfo, "this database has no user table to compare")
+	}
+	c.Note("row_counts_only", SevInfo,
+		"this compares row counts, which is the field's own instrument and a weak one: equal counts are not equal data")
+	if !c.JSON && !c.Quiet {
+		for _, td := range d.Tables {
+			verdict := "same"
+			if !td.Same {
+				verdict = "DIFFERENT"
+			}
+			fmt.Fprintf(c.Out, "  %-28s master=%-8d standby=%-8d %s\n", td.Table, td.Master, td.Standby, verdict)
+		}
+		for _, sk := range d.Skipped {
+			fmt.Fprintf(c.Out, "  skipped %s\n", sk)
+		}
+		printNotes(c)
+	}
+	if len(d.Differ) > 0 {
+		return d, Failed("tables_differ",
+			"%d table(s) differ between %s and %s: %s. Replication may be perfectly healthy and still never carry what is missing; the field's closure is a slave rebuild",
+			len(d.Differ), master, standby, strings.Join(d.Differ, ", "))
+	}
+	return d, nil
+}
+
 // ---- fault verbs ---------------------------------------------------------
 
 func selectorArg(c *Ctx) (string, error) {
@@ -831,15 +905,39 @@ func cmdHaResync(c *Ctx) (any, error) {
 	inj := &fault.Injector{D: a.D, T: t}
 	tables, _ := inj.FailRows(c.Ctx, slave)
 
+	// A zero fail counter is not evidence that the two sides agree, and this
+	// command used to treat it as if it were: it answered "resume -- replication
+	// is behind at worst, not broken" on a cluster whose standby was permanently
+	// missing a row. Both halves of that sentence were true and the conclusion
+	// was wrong, because a split brain fails nothing -- each side wrote its own
+	// log and both succeeded -- so the counter never moves and the applier's log
+	// names no table. The comparison has to come from the catalog instead, and it
+	// has to run before "nothing is wrong" is said out loud
+	// (docs/findings/active-active-window.md).
+	path := c.str("path")
+	var diverged []string
+	if fail == 0 && path == "" {
+		if d, derr := inspect.CompareTables(c.Ctx, a.D, t, master, slave, nil); derr == nil {
+			diverged = d.Differ
+		} else {
+			c.Note("not_compared", SevWarn,
+				"the two databases could not be compared, so 'nothing is wrong' rests on fail_counter alone: "+derr.Error())
+		}
+	}
+
 	// How the field chooses: nothing wrong, repair the affected table, or rebuild
 	// the slave. The changeover sits somewhere around a thousand rows -- which is
 	// their number, not one this project measured, and it is named as theirs.
-	path, why := c.str("path"), ""
+	why := ""
 	switch {
 	case path != "":
 		why = "you asked for it"
+	case fail == 0 && len(diverged) > 0:
+		path = "slave"
+		why = fmt.Sprintf("fail_counter is 0 and nothing failed to apply, but %d table(s) hold different row counts (%s): that is what a healed split brain leaves, and replication will not carry it",
+			len(diverged), strings.Join(diverged, ", "))
 	case fail == 0:
-		path, why = "resume", "fail_counter is 0: replication is behind at worst, not broken"
+		path, why = "resume", "fail_counter is 0 and every user table has the same row count on both nodes"
 	case fail >= 1000:
 		path, why = "slave", fmt.Sprintf("fail_counter is %d, past the point the field stops repairing tables and rebuilds", fail)
 	case len(tables) > 0:
@@ -855,7 +953,7 @@ func cmdHaResync(c *Ctx) (any, error) {
 	sort.Strings(names)
 
 	out := map[string]any{"master": master, "slave": slave, "fail_counter": fail,
-		"tables": names, "path": path, "decided_because": why}
+		"tables": names, "path": path, "decided_because": why, "diverged": diverged}
 
 	if c.fs.Lookup("dry-run").Value.String() == "true" {
 		if !c.JSON && !c.Quiet {
@@ -871,6 +969,13 @@ func cmdHaResync(c *Ctx) (any, error) {
 	case "resume":
 		// Nothing to do, and saying so is the answer.
 	case "table":
+		if len(names) == 0 {
+			// Asked for explicitly on a cluster where nothing failed: compare
+			// everything, because "no table failed" is why we are here.
+			if ut, uerr := inspect.UserTables(c.Ctx, a.D, t, master); uerr == nil {
+				names = ut
+			}
+		}
 		diffs := map[string][2]int{}
 		for _, n := range names {
 			m, sl, cerr := inj.CompareTable(c.Ctx, master, slave, n)
@@ -903,8 +1008,13 @@ func cmdHaResync(c *Ctx) (any, error) {
 				"%d table(s) differ and rebuilding one is not built here yet; the field's path is a table rebuild from the master, or ha_make_slavedb.sh for the whole slave", len(diffs))
 		}
 	case "slave":
+		// The refusal is the honest answer and it now carries the finding behind
+		// it. Nothing in the engine will close this gap on its own: the standby's
+		// recorded position has already moved past the missing write -- a canary
+		// written afterwards arrives -- so nothing will ever re-fetch it. Only a
+		// rebuild resets that bookkeeping.
 		return nil, Failed("not_implemented",
-			"rebuilding a slave in place is the online rebuild the field does with ha_make_slavedb.sh, and it is not built here yet; cluster destroy and cluster create rebuild the pair")
+			"rebuilding a slave in place is the online rebuild the field does with ha_make_slavedb.sh, and it is not built here yet; cluster destroy and cluster create rebuild the pair. Replication will not catch this up on its own: the standby's position is already past what it is missing")
 	default:
 		return nil, Usage("unknown --path %q (want resume, table or slave)", path)
 	}

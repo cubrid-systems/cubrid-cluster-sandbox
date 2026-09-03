@@ -178,6 +178,50 @@ which is a different fact from the tool being unable to do its job. The table is
 created once and reused, because creating it per check would put a DDL through
 replication every time and measure something else.
 
+## 4a. `repl diff` — what the two databases actually hold
+
+```
+csb repl diff [--table t]
+```
+
+Everything above this line, the canary included, asks **replication** how it is
+doing. This asks the **two databases** what they contain, and the two questions
+have different answers.
+
+A healed split brain left a standby permanently missing a row while `repl status`
+read `apply_lag=0` and `fail=0` on both sides, `repl check` arrived, and
+`ha resync` reported that replication was not broken
+([`../findings/active-active-window.md`](../findings/active-active-window.md)).
+Every one of those was true. Replication was carrying new writes fine; it simply
+never carried one old one, and the engine keeps no view that remembers that.
+Measured on one cluster, thirty seconds after the heal:
+
+```
+repl status  n2  apply_lag=0  fail=0
+repl diff    w   master=3  standby=2  DIFFERENT
+```
+
+**The table list comes from the catalog, not from the applier's error log.** That
+distinction is the whole verb. `ha resync` takes its list from failures, which is
+the right source when something failed to apply — and a split brain fails
+nothing, so the list is empty exactly when the divergence is largest.
+
+**Row counts are a weak instrument and the verb says so.** Equal counts are not
+equal data; they are what two databases can be asked cheaply without a
+schema-aware comparison, and they are the field's own instrument for this. A
+table missing on the standby counts as zero and differs, because that is the
+largest difference there is rather than a table that could not be read.
+
+A difference is **exit 1**, not 0: the command did its job and the answer is bad,
+and a harness has to tell "compared and equal" from "compared and not" without
+reading prose.
+
+**Nothing will catch this up on its own.** The standby's recorded position has
+already moved past the write it is missing — a canary written afterwards arrives
+— so nothing will ever re-fetch it. Only a rebuild resets that bookkeeping, which
+is why the field's closure is `ha_make_slavedb.sh` and why `ha resync` now
+answers `slave` here instead of `resume`.
+
 ## 5. `repl watch` — retention, and why
 
 ```
