@@ -187,7 +187,7 @@ engine for the engine's CPU quota. `--tools DIR` mounts a host directory
 read-only at `/tools` on those nodes
 ([`docs/design/06-load.md`](docs/design/06-load.md)).
 
-## The surface
+## The interface
 
 | Noun | Verbs |
 |---|---|
