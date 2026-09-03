@@ -45,7 +45,7 @@ test.
 **The surface no longer promises anything it does not do.** Six verbs were
 specified and unbuilt through phases 1 and 2 — `node logs`, `node shell`,
 `fault ping-unavailable`, `repl watch`, `ha promote`, `ha failback` — and M3.3
-built all six. Thirty verbs across seven nouns, and the helper that answered
+built all six. **Thirty-six verbs across seven nouns**, and the helper that answered
 `not_implemented` is gone because nothing calls it.
 
 Two things are outstanding and neither is blocked work. **M3.1** needs a consumer
@@ -120,14 +120,20 @@ every other threshold value is **one cluster** —
 | # | Item | Acceptance |
 |---|---|---|
 | M3.1 | **The surface `cubrid-testkit` provisions through** (was M2.4) | testkit calls it to set up and tear down without screen-scraping |
-
+| M3.2 | **Replication canary** — `repl check`, a write that has to arrive | **done 2026-09-02** — measured on one cluster minutes apart: healthy, the row arrives in **0.63 s**; with the applier suspended the gauge reads `apply_lag=0` and `fail=0` while the row does not arrive in 15 s, exit 4. Every number says fine and nothing is moving. It is what the field actually trusts: they verify a rebuilt slave with `applyinfo -r … -a` and a `repl_test` table they create and insert into, rather than by reading a threshold off a gauge ([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §4) |
 | M3.3 | **The six verbs the surface named and had not built** | **done 2026-09-03** — measured on one cluster in a single unattended run. `ha promote` moved the role in **1.8 s** and reported that `cubrid heartbeat stop` had not returned yet, which is the phase-0 finding turned into a note: the roles are the evidence, not the exit status. `ha failback` returned service in **2.5 s** and verified it with a write that arrived on the rejoined node in **0.09 s** — roles alone say the group agrees, not that replication carries anything. `repl watch` under an apply stall recorded `copy 0→16, rose at +1.3s` while `apply` sat flat at 0, which is §3's lie with a timestamp on it. `node logs` names the process and finds the file; `fault ping-unavailable --mechanism binary` produced `rc=126` from a running node and `clear` put the binary back at its original mode |
-
+| M3.4 | **The surface verifies itself against a real engine** (`e2e/`, `make e2e`) | **done 2026-09-03** — thirteen checks in one unattended run of about three minutes: create, both provenances, the canary, `repl diff`, a stalled stage seen through `repl watch`, both ping mechanisms, a clean stop and start, a dropped-packet partition that diverges the pair and the rebuild that closes it, promote, failback, the record's ordering and the exit codes. It asserts on the JSON envelope rather than on printed text, because the envelope is the contract and prose is free to change. Not part of `make check` — it needs Docker, an engine tree and several minutes — and not optional either |
+| M3.5 | **The third split-brain flavour, measured** (`harness/calc-score-window.sh`) | **done 2026-09-03** — six runs, three per arm. The window is the interval: both nodes accepted writes for 11/12/12 s at `ha_calc_score_interval_in_msecs=15000` against 2/1/0 s at the default, and the roles settled at 13/13/13 s against 4/2/1. The reported both-ways sync did not happen — rows crossed one way only, the wrong way relative to the settled roles, and the standby is left permanently missing a row while `repl status`, `repl check` and `ha resync` all report a healthy cluster. `to-be-master` was not observed in any run and is recorded as unreproduced rather than dismissed ([`findings/active-active-window.md`](findings/active-active-window.md)) |
+| M3.6 | **`repl diff`, and a resync decision that compares before it reassures** | **done 2026-09-03** — the divergence M3.5 measured was invisible to every verb this tool had. `repl diff` asks the two databases what they hold, taking its table list from the catalog rather than from the applier's error log, because a split brain fails nothing and that log is empty exactly when the divergence is largest. Verified on one cluster: healthy, `w master=1 standby=1 same`, exit 0; after a healed split brain, `w master=3 standby=2 DIFFERENT`, exit 1, while `repl status` read `apply_lag=0 fail=0` on both sides. `ha resync` used to answer `resume — fail_counter is 0` there; it now compares first and answers `slave`, naming the table |
 | M3.7 | **`ha resync --path slave` rebuilds from a backup** | **done 2026-09-03** — the engine's own procedure, taken from `share/scripts/ha/ha_make_slavedb.sh` in the build in use, with the ssh and scp removed because both nodes' directories are on one host: online `backupdb -C` on the master, the old database removed, the backup and then `<db>_bkvinf` copied in that order, `cubrid restoreslave -s master -m <host>`, rejoin. `restoreslave` rather than `restoredb` is the piece that matters — it writes the replication bookkeeping a healed split brain leaves wrong. Three runs on diverged pairs: 19 s, 21 s, 23 s, each ending `registered_and_standby` with every table matching and a canary at 0.08–0.61 s against 25.97 s before. It compares again afterwards and fails `still_diverged` rather than reporting a repair it did not make |
 | M3.8 | **A node that will not rejoin, diagnosed and repaired** | **done 2026-09-03** — found by the e2e suite, and it turned out not to be the rebuild's doing at all. A node whose heartbeat was stopped mid-stream (which is what `ha promote` does) can come back with `db_ha_apply_info` recording a position its replication log does not reach; the applier asks for that page, calls it corrupted, and exits, while `cubrid heartbeat start` reports "HA processes start: fail" without naming a process. `node start` now reads the applier's own log, recopies the master's active log, and starts the node again |
-| M3.6 | **`repl diff`, and a resync decision that compares before it reassures** | **done 2026-09-03** — the divergence M3.5 measured was invisible to every verb this tool had. `repl diff` asks the two databases what they hold, taking its table list from the catalog rather than from the applier's error log, because a split brain fails nothing and that log is empty exactly when the divergence is largest. Verified on one cluster: healthy, `w master=1 standby=1 same`, exit 0; after a healed split brain, `w master=3 standby=2 DIFFERENT`, exit 1, while `repl status` read `apply_lag=0 fail=0` on both sides. `ha resync` used to answer `resume — fail_counter is 0` there; it now compares first and answers `slave`, naming the table |
-| M3.5 | **The third split-brain flavour, measured** (`harness/calc-score-window.sh`) | **done 2026-09-03** — six runs, three per arm. The window is the interval: both nodes accepted writes for 11/12/12 s at `ha_calc_score_interval_in_msecs=15000` against 2/1/0 s at the default, and the roles settled at 13/13/13 s against 4/2/1. The reported both-ways sync did not happen — rows crossed one way only, the wrong way relative to the settled roles, and the standby is left permanently missing a row while `repl status`, `repl check` and `ha resync` all report a healthy cluster. `to-be-master` was not observed in any run and is recorded as unreproduced rather than dismissed ([`findings/active-active-window.md`](findings/active-active-window.md)) |
-| M3.4 | **The surface verifies itself against a real engine** (`e2e/`, `make e2e`) | **done 2026-09-03** — twelve checks in one unattended run of about two minutes: create, both provenances, the canary, a stalled stage seen through `repl watch`, both ping mechanisms, a dropped-packet partition, `down`/`up`, promote, failback, the record's ordering and the exit codes. It asserts on the JSON envelope rather than on printed text, because the envelope is the contract and prose is free to change. Not part of `make check` — it needs Docker, an engine tree and several minutes — and not optional either |
+
+**Two defects M3.3 found in already-built code.** `partition --mechanism drop` and
+`ping-unavailable --mechanism icmp` are both packet-level, and **iptables was not
+in the base image** — the drop mechanism had never run since it was written.
+`record show` read the file in append order while `record export` sorted, so the
+two views of one run disagreed about when things happened; the sort moved into
+`record.Read`, where no caller can forget it.
 
 **Three defects on its first run, and one of them had been costing 57 seconds.**
 
@@ -153,13 +159,6 @@ promotion. The `to_be_active` stall was never explained
 ([`design/03-assembly.md`](design/03-assembly.md) §3); an unexplained
 observation deserves a check that runs every time, not a paragraph.
 
-**Two defects M3.3 found in already-built code.** `partition --mechanism drop` and
-`ping-unavailable --mechanism icmp` are both packet-level, and **iptables was not
-in the base image** — the drop mechanism had never run since it was written.
-`record show` read the file in append order while `record export` sorted, so the
-two views of one run disagreed about when things happened; the sort moved into
-`record.Read`, where no caller can forget it.
-
 **Why M3.1 moved.** Its acceptance is a sentence about a consumer, and that
 consumer does not exist yet — `cubrid-testkit` is docs and an empty `impl/`. The
 surface it would call is built and machine-readable, so nothing here is blocked;
@@ -177,8 +176,6 @@ have to be decided *with* testkit rather than guessed at ahead of it:
   carries what a harness needs is a question its first real call answers.
 
 Building against an imagined consumer is how a surface ends up fitting nobody.
-
-| M3.2 | **Replication canary** — `repl check`, a write that has to arrive — **done 2026-09-02**. Measured on one cluster minutes apart: healthy, the row arrives in **0.63 s**; with the applier suspended the gauge reads `apply_lag=0` and `fail=0` while the row does not arrive in 15 s, exit 4. Every number says fine and nothing is moving | the field verifies a rebuilt slave with `applyinfo -r … -a` and a `repl_test` table it creates and inserts into, rather than by reading a threshold off a gauge ([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §4). It is cheap, it is what an operator actually trusts, and it tests the path end to end rather than the view §3 of `design/05-inspect.md` says cannot be trusted alone |
 
 ### Also phase 3 — skeletal
 

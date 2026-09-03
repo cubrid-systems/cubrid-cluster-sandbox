@@ -43,7 +43,7 @@ func TestExitCodesAreDistinct(t *testing.T) {
 		{"a verb that needs a cluster and was given none", []string{"record", "show"}, ExitUsage},
 		{"a cluster that does not exist", []string{"record", "show", "--cluster", "nope"}, ExitPrecondition},
 		// There is no longer a "specified but not built" case to put here: the
-		// surface names 30 verbs and all 30 are built. This line was pointed at
+		// surface names 36 verbs and all 36 are built. This line was pointed at
 		// repl watch and failed loudly the day it landed, which is the test
 		// doing its job.
 		{"a verb whose flags do not parse", []string{"repl", "watch", "--cluster", "nope", "--nonsense"}, ExitUsage},

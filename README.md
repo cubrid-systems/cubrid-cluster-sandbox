@@ -79,7 +79,7 @@ $ csb cluster describe --json | jq .data.engine
 $ csb cluster destroy --cluster hadb        # keeps the run record; --purge drops it
 ```
 
-**What works today, honestly.** All of it. The surface names 30 verbs across
+**What works today, honestly.** All of it. The surface names 36 verbs across
 seven nouns and every one is built and has been run against a real cluster.
 `cluster up` after a `down` brings the group back — an earlier version of this
 paragraph said it did not, on a stall that turned out to be this tool's own bug
