@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 300" width="880" height="300" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Animated: the same route-level cut, twice. With the ping host still reachable the master cancels its failback and stays, the slave cancels nothing and promotes, and the cluster reaches two masters in 9 seconds. With the ping host cut too, the master demotes itself and the failover is clean — but the roles never return.">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .h{font-size:11px;font-weight:700;fill:#1f2937}
+  .nn{font-size:10.5px;font-weight:700;fill:#1f2937}
+  .d{font-size:9.5px;fill:#6b7280}
+  .dd{font-size:8.5px;fill:#9ca3af}
+  .m{font-size:9px;fill:#34495e;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .lg{font-size:8px;fill:#6b7280;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .box{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .pan{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .wire{stroke:#9ca3af;stroke-width:1.5;fill:none}
+  .ping{stroke:#9ca3af;stroke-width:1;fill:none;stroke-dasharray:3 3}
+  .cut{stroke:#c0392b;stroke-width:2.2;stroke-linecap:round}
+  .role{font-size:9.5px;font-weight:700}
+</style>
+<rect x="0" y="0" width="880" height="300" fill="#ffffff"/>
+
+<text class="ttl" x="10" y="20">Split brain needs no misconfiguration — csb fault splitbrain --flavour ping-survives</text>
+<text class="sub" x="10" y="36">The two panels differ in exactly one thing: whether the cut leaves the ping host reachable. Measured 2026-08-27, CUBRID 11.5.0, three arms.</text>
+
+<!-- ================= ARM A ================= -->
+<rect class="pan" x="10" y="50" width="425" height="204" rx="5"/>
+<text class="h" x="24" y="68">A — ha_ping_hosts set, ping host survives the cut</text>
+<text class="m" x="421" y="68" text-anchor="end" fill="#9ca3af">--keep ping-host</text>
+<rect class="box" x="162" y="80" width="120" height="26" rx="4"/>
+<text class="d" x="222" y="97" text-anchor="middle" fill="#1f2937">ping host</text>
+<path class="ping" d="M 109 126 L 172 106"/>
+<path class="ping" d="M 336 126 L 272 106"/>
+<circle r="3" fill="#1a7f37"><animate attributeName="cx" values="109;172;109" dur="1.8s" repeatCount="indefinite"/><animate attributeName="cy" values="126;106;126" dur="1.8s" repeatCount="indefinite"/></circle>
+<circle r="3" fill="#1a7f37"><animate attributeName="cx" values="336;272;336" dur="1.8s" begin="0.5s" repeatCount="indefinite"/><animate attributeName="cy" values="126;106;126" dur="1.8s" begin="0.5s" repeatCount="indefinite"/></circle>
+<text class="d" x="136" y="119" fill="#1a7f37" font-weight="700">✓</text>
+<text class="d" x="303" y="119" fill="#1a7f37" font-weight="700">✓</text>
+
+<line class="wire" x1="184" y1="151" x2="261" y2="151"/>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.06;0.55;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <line class="cut" x1="215" y1="144" x2="230" y2="159"/><line class="cut" x1="230" y1="144" x2="215" y2="159"/>
+</g>
+<rect class="box" x="34" y="126" width="150" height="50" rx="4"/>
+<text class="nn" x="109" y="147" text-anchor="middle">hadb-n1</text>
+<text class="role" x="109" y="165" text-anchor="middle" fill="#1a7f37">active</text>
+<rect class="box" x="261" y="126" width="150" height="50" rx="4"/>
+<text class="nn" x="336" y="147" text-anchor="middle">hadb-n2</text>
+<text class="role" x="336" y="165" text-anchor="middle" fill="#2563eb">standby<animate attributeName="opacity" values="1;0;1;1" keyTimes="0;0.32;0.85;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="role" x="336" y="165" text-anchor="middle" fill="#1a7f37" opacity="0">active<animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.32;0.85;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.32;0.85;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="lg" x="24" y="194">[Failback] [Cancelled] Ping check succeeded for the hosts registered</text>
+  <text class="lg" xml:space="preserve" x="24" y="206">                       in ha_ping_hosts — not a network partition.</text>
+  <text class="lg" x="24" y="218" fill="#c0392b">hadb-n2  [Failover] [Success] — promoted. Nothing cancelled it.</text>
+  <rect x="24" y="226" width="200" height="18" rx="4" fill="#fdecea" stroke="#c0392b"/>
+  <text x="34" y="239" font-size="9" font-weight="700" fill="#c0392b">two masters — 9 s</text>
+</g>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1" keyTimes="0;0.85;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="lg" x="24" y="194">[Failback] [Diagnosis] Multiple master nodes (n2, n1) are detected.</text>
+  <text class="lg" x="24" y="206">hadb-n2  [Failback] [Success] — demoted to slave.</text>
+  <rect x="24" y="226" width="230" height="18" rx="4" fill="#f0fdf4" stroke="#1a7f37"/>
+  <text x="34" y="239" font-size="9" font-weight="700" fill="#1a7f37">original roles restored, within 45 s</text>
+</g>
+
+<!-- ================= ARM C ================= -->
+<rect class="pan" x="445" y="50" width="425" height="204" rx="5"/>
+<text class="h" x="459" y="68">C — the ping host is cut from the master too</text>
+<text class="m" x="856" y="68" text-anchor="end" fill="#9ca3af">no --keep</text>
+<rect class="box" x="597" y="80" width="120" height="26" rx="4"/>
+<text class="d" x="657" y="97" text-anchor="middle" fill="#1f2937">ping host</text>
+<path class="ping" d="M 544 126 L 607 106"/>
+<path class="ping" d="M 771 126 L 707 106"/>
+<circle r="3" fill="#9ca3af"><animate attributeName="cx" values="544;607;544" dur="1.8s" repeatCount="indefinite"/><animate attributeName="cy" values="126;106;126" dur="1.8s" repeatCount="indefinite"/></circle>
+<circle r="3" fill="#1a7f37"><animate attributeName="cx" values="771;707;771" dur="1.8s" begin="0.5s" repeatCount="indefinite"/><animate attributeName="cy" values="126;106;126" dur="1.8s" begin="0.5s" repeatCount="indefinite"/></circle>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.06;0.55;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <line class="cut" x1="568" y1="109" x2="581" y2="122"/><line class="cut" x1="581" y1="109" x2="568" y2="122"/>
+</g>
+<text class="d" x="533" y="119" fill="#c0392b" font-weight="700" opacity="0">✗<animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.06;0.55;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="d" x="738" y="119" fill="#1a7f37" font-weight="700">✓</text>
+
+<line class="wire" x1="619" y1="151" x2="696" y2="151"/>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.06;0.55;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <line class="cut" x1="650" y1="144" x2="665" y2="159"/><line class="cut" x1="665" y1="144" x2="650" y2="159"/>
+</g>
+<rect class="box" x="469" y="126" width="150" height="50" rx="4"/>
+<text class="nn" x="544" y="147" text-anchor="middle">hadb-n1</text>
+<text class="role" x="544" y="165" text-anchor="middle" fill="#1a7f37">active<animate attributeName="opacity" values="1;0;0" keyTimes="0;0.32;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="role" x="544" y="165" text-anchor="middle" fill="#2563eb" opacity="0">standby<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.32;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<rect class="box" x="696" y="126" width="150" height="50" rx="4"/>
+<text class="nn" x="771" y="147" text-anchor="middle">hadb-n2</text>
+<text class="role" x="771" y="165" text-anchor="middle" fill="#2563eb">standby<animate attributeName="opacity" values="1;0;0" keyTimes="0;0.32;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="role" x="771" y="165" text-anchor="middle" fill="#1a7f37" opacity="0">active<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.32;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.32;0.85;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="lg" x="459" y="194">[Failback] [Success]   Current node has been successfully demoted.</text>
+  <text class="lg" x="459" y="206">[Failover] [Cancelled] Ping check has been failed to all hosts,</text>
+  <text class="lg" xml:space="preserve" x="459" y="218">                       indicating a network partition.</text>
+  <rect x="459" y="226" width="200" height="18" rx="4" fill="#f0fdf4" stroke="#1a7f37"/>
+  <text x="469" y="239" font-size="9" font-weight="700" fill="#1a7f37">clean failover — 9 s</text>
+</g>
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1" keyTimes="0;0.85;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="lg" x="459" y="194">Only one master, so nothing triggers. Forty-five seconds after the</text>
+  <text class="lg" x="459" y="206">heal the roles are still swapped — and they stay that way.</text>
+  <rect x="459" y="226" width="250" height="18" rx="4" fill="#fffbeb" stroke="#9a6700"/>
+  <text x="469" y="239" font-size="9" font-weight="700" fill="#9a6700">no engine path returns the original master</text>
+</g>
+
+<!-- the asymmetry -->
+<text class="h" x="10" y="272">hb_cluster_job_check_ping · master_heartbeat.c:1042-1054</text>
+<text x="870" y="272" text-anchor="end" font-size="9.5" font-weight="700" fill="#c0392b">A single ping host is a quorum of one, and it votes for whoever asks it.</text>
+<text class="m" x="10" y="290" font-size="8.5">master cancels its failback when  ping_try_count == 0 || ping_success</text>
+<text class="m" x="460" y="290" font-size="8.5">slave cancels its failover only when  ping_try_count &gt; 0 &amp;&amp; ! ping_success</text>
+</svg>

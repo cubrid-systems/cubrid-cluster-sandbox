@@ -61,6 +61,24 @@ type Status struct {
 	Running   bool           `json:"running"`
 	Cost      map[string]any `json:"driver_cost,omitempty"`
 	Node      string         `json:"node,omitempty"`
+
+	// Latency is per STATEMENT, not per row: with --batch one statement carries
+	// many rows and the two are different questions. It is absent below twenty
+	// samples, because a percentile from three measurements is not a percentile
+	// and reporting one would be the same class of lie as a lag figure with no
+	// source. LatencyComplete says whether every statement is in it or the cap
+	// was reached and the distribution became a sample.
+	Latency         *Latency `json:"latency,omitempty"`
+	LatencyComplete bool     `json:"latency_complete,omitempty"`
+}
+
+type Latency struct {
+	Count int     `json:"count"`
+	P50   float64 `json:"p50_ms"`
+	P90   float64 `json:"p90_ms"`
+	P99   float64 `json:"p99_ms"`
+	Min   float64 `json:"min_ms"`
+	Max   float64 `json:"max_ms"`
 }
 
 // Profiles the driver implements. bulkload is deliberately absent: the field has

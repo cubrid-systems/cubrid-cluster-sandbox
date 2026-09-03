@@ -5,6 +5,7 @@ The contract this exists for: state a rate, hold it, and report honestly when it
 could not. A driver that silently falls behind does not merely under-load the
 cluster -- it makes every figure measured beside it a figure about the driver.
 """
+import array
 import json, os, random, subprocess, sys, threading, time
 
 spec = json.load(open(sys.argv[1]))
@@ -19,7 +20,13 @@ db = spec["db"]
 seed = int(spec.get("seed") or 42)
 batch = max(1, int(spec.get("batch") or 1))
 
-state = {"sent": 0, "errors": 0, "started": time.time(), "last_error": ""}
+state = {"sent": 0, "errors": 0, "started": time.time(), "last_error": "", "lat_dropped": 0}
+
+# Statement latencies in milliseconds. array('f') is four bytes a sample, so the
+# cap is about four megabytes -- past it the samples stop being complete and the
+# report says so rather than quietly becoming an estimate.
+lat = array.array("f")
+LAT_CAP = 1000000
 lock = threading.Lock()
 stop = threading.Event()
 
@@ -82,10 +89,21 @@ def db_worker(wid, base):
     nxt = time.time()
     while not stop.is_set():
         n += workers
+        t0 = time.time()
         rc, out = csql(db_statement(rnd, n))
+        ms = (time.time() - t0) * 1000.0
         with lock:
             if rc == 0:
                 state["sent"] += 1
+                # Every latency is kept, not sampled, so the percentiles are the
+                # real ones rather than an estimate -- up to a cap, past which
+                # the report says the distribution is a sample and stops
+                # pretending otherwise. Four bytes each: a million statements is
+                # four megabytes.
+                if len(lat) < LAT_CAP:
+                    lat.append(ms)
+                else:
+                    state["lat_dropped"] += 1
             else:
                 state["errors"] += 1
                 state["last_error"] = out.strip().splitlines()[-1][:200] if out.strip() else "rc=%d" % rc
@@ -126,6 +144,28 @@ def host_io_worker(wid):
         pass
 
 
+def percentiles(samples):
+    """The distribution, or nothing at all.
+
+    A percentile from three samples is not a percentile, and reporting one would
+    be the same class of lie as a lag figure with no source. Below a floor the
+    fields are absent rather than misleading.
+    """
+    n = len(samples)
+    if n < 20:
+        return None
+    xs = sorted(samples)
+
+    def at(q):
+        # Nearest-rank, which is exact for the sample and does not invent a value
+        # between two measurements.
+        k = int(round(q * (n - 1)))
+        return round(xs[k], 2)
+
+    return {"count": n, "p50_ms": at(0.50), "p90_ms": at(0.90), "p99_ms": at(0.99),
+            "min_ms": round(xs[0], 2), "max_ms": round(xs[-1], 2)}
+
+
 def report():
     while True:
         now = time.time()
@@ -133,6 +173,10 @@ def report():
             sent, errors, err = state["sent"], state["errors"], state["last_error"]
         elapsed = max(now - state["started"], 1e-6)
         achieved = sent / elapsed
+        with lock:
+            snapshot = list(lat)
+            dropped = state["lat_dropped"]
+        dist = percentiles(snapshot)
         held = True if not rate else achieved >= rate * 0.95
         doc = {
             "profile": profile, "kind": "host" if profile.startswith("host-") else "db",
@@ -144,6 +188,13 @@ def report():
             "elapsed_s": round(elapsed, 1), "concurrency": workers, "seed": seed,
             "running": not stop.is_set(),
             "driver_cost": driver_cost(),
+            # Per STATEMENT, not per row: with --batch the statement carries many
+            # rows and the two are different questions. It is also the latency of
+            # a csql invocation, which includes starting the client -- that cost
+            # is real for this driver and is reported separately as driver_cost
+            # rather than subtracted from a number somebody might quote.
+            "latency": dist,
+            "latency_complete": dropped == 0,
         }
         tmp = status_path + ".tmp"
         with open(tmp, "w") as f:

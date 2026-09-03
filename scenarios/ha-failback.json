@@ -1,0 +1,14 @@
+{
+  "name": "service returns to the node that was master, and replication proves it",
+  "cluster": { "preset": "ha", "with_broker": true },
+  "steps": [
+    { "await": { "masters": 1, "standbys": 1 }, "within": "60s" },
+    { "note": "take the master away", "run": ["ha", "promote", "slave"],
+      "await": { "masters": 1 }, "within": "300s" },
+    { "note": "put the old master back", "run": ["node", "start", "master"],
+      "await": { "masters": 1, "standbys": 1 }, "within": "300s" },
+    { "note": "return service to it", "run": ["ha", "failback", "--yes"],
+      "await": { "masters": 1, "standbys": 1 }, "within": "300s" },
+    { "note": "the two databases agree", "run": ["repl", "diff"] }
+  ]
+}

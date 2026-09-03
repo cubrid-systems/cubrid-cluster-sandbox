@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 302" width="880" height="302" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Animated: csb cluster create walks absent, defined, seeded, forming, serving. It waits for an explicit completion sentinel rather than the databases.txt entry, copies hadb* while excluding the lock file, starts the heartbeat on both nodes concurrently, and waits for registered_and_active before reporting serving.">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .h{font-size:11.5px;font-weight:700;fill:#1f2937}
+  .d{font-size:9.5px;fill:#6b7280}
+  .dd{font-size:8.5px;fill:#9ca3af}
+  .m{font-size:9px;fill:#34495e;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .pk{font-size:8px;fill:#2563eb;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .box{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .arw{stroke:#9ca3af;stroke-width:1.4;fill:none;marker-end:url(#a)}
+  .track{stroke:#e5e7eb;stroke-width:2.5;fill:none}
+  .prog{stroke:#2563eb;stroke-width:2.5;fill:none;stroke-linecap:round}
+  .p{font-size:8.5px}
+</style>
+<defs>
+  <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9ca3af"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="302" fill="#ffffff"/>
+
+<text class="ttl" x="10" y="20">csb cluster create — assembly is an order, and the tool owns it</text>
+<text class="sub" x="10" y="36">About 50 s from nothing, most of it the engine. Five of the seven traps fail loudly; T6 is the one that leaves a corrupt slave instead.</text>
+<text class="dd" x="345" y="58" text-anchor="middle">createdb — most of those 50 s are the engine</text>
+
+<line class="track" x1="60" y1="72" x2="820" y2="72"/>
+<line class="prog" x1="60" y1="72" x2="60" y2="72">
+  <animate attributeName="x2" values="60;250;250;440;600;820;820" keyTimes="0;0.03;0.06;0.58;0.62;0.86;1" dur="12s" repeatCount="indefinite"/>
+</line>
+<circle cx="60"  cy="72" r="5" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<circle cx="250" cy="72" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#2563eb" keyTimes="0;0.03" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<circle cx="440" cy="72" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#2563eb" keyTimes="0;0.58" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<circle cx="600" cy="72" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#2563eb" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<circle cx="820" cy="72" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#1a7f37" keyTimes="0;0.86" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<text class="m" x="60"  y="90" text-anchor="middle" fill="#1f2937">absent</text>
+<text class="m" x="250" y="90" text-anchor="middle" fill="#9ca3af">defined<animate attributeName="fill" values="#9ca3af;#1f2937" keyTimes="0;0.03" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="440" y="90" text-anchor="middle" fill="#9ca3af">seeded<animate attributeName="fill" values="#9ca3af;#1f2937" keyTimes="0;0.58" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="600" y="90" text-anchor="middle" fill="#9ca3af">forming<animate attributeName="fill" values="#9ca3af;#1f2937" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="820" y="90" text-anchor="middle" fill="#9ca3af">serving<animate attributeName="fill" values="#9ca3af;#1a7f37" keyTimes="0;0.86" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+
+<!-- node 1 -->
+<rect class="box" x="30" y="106" width="340" height="112" rx="5"/>
+<text class="h" x="44" y="128">hadb-n1</text>
+<text class="m" x="356" y="128" text-anchor="end" fill="#9ca3af">—<animate attributeName="opacity" values="1;0;0" keyTimes="0;0.62;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="356" y="128" text-anchor="end" opacity="0">registering…<animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.62;0.72;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="356" y="128" text-anchor="end" fill="#9a6700" opacity="0">registered_and_to_be_active<animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.72;0.86;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="356" y="128" text-anchor="end" fill="#1a7f37" opacity="0">registered_and_active<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.86;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="dd" x="44" y="150">createdb → /db/hadb*</text>
+<rect x="44" y="156" width="150" height="9" rx="4.5" fill="#f3f4f6"/>
+<rect x="44" y="156" width="0" height="9" rx="4.5" fill="#2563eb">
+  <animate attributeName="width" values="0;0;150;150" keyTimes="0;0.06;0.36;1" dur="12s" repeatCount="indefinite"/>
+</rect>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.20;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="dd" x="212" y="150">databases.txt ✓<animate attributeName="fill" values="#9ca3af;#c0392b" keyTimes="0;0.36" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <line x1="212" y1="146.5" x2="290" y2="146.5" stroke="#c0392b" stroke-width="1.1" opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.36;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></line>
+</g>
+<text class="dd" x="212" y="166" fill="#1a7f37" opacity="0">completion sentinel ✓<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.36;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<g>
+  <rect x="44"  y="176" width="98" height="18" rx="9" fill="#f3f4f6" stroke="#e5e7eb"><animate attributeName="fill" values="#f3f4f6;#f0fdf4" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#1a7f37" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text class="p" x="93" y="188.5" text-anchor="middle" fill="#9ca3af">cub_server<animate attributeName="fill" values="#9ca3af;#1a7f37" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <rect x="151" y="176" width="98" height="18" rx="9" fill="#f3f4f6" stroke="#e5e7eb"><animate attributeName="fill" values="#f3f4f6;#f0fdf4" keyTimes="0;0.64" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#1a7f37" keyTimes="0;0.64" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text class="p" x="200" y="188.5" text-anchor="middle" fill="#9ca3af">copylogdb<animate attributeName="fill" values="#9ca3af;#1a7f37" keyTimes="0;0.64" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <rect x="258" y="176" width="98" height="18" rx="9" fill="#f3f4f6" stroke="#e5e7eb"><animate attributeName="fill" values="#f3f4f6;#f0fdf4" keyTimes="0;0.66" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#1a7f37" keyTimes="0;0.66" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text class="p" x="307" y="188.5" text-anchor="middle" fill="#9ca3af">applylogdb<animate attributeName="fill" values="#9ca3af;#1a7f37" keyTimes="0;0.66" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+</g>
+<text x="44" y="209" font-size="8" fill="#c0392b" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" opacity="0">Attempted to update the database when updates are disabled<animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.73;0.80;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+
+<!-- node 2 -->
+<rect class="box" x="510" y="106" width="340" height="112" rx="5"/>
+<text class="h" x="524" y="128">hadb-n2</text>
+<text class="m" x="836" y="128" text-anchor="end" fill="#9ca3af">—<animate attributeName="opacity" values="1;0;0" keyTimes="0;0.64;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="836" y="128" text-anchor="end" opacity="0">registering…<animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.64;0.80;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="m" x="836" y="128" text-anchor="end" fill="#2563eb" opacity="0">registered_and_standby<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.80;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="dd" x="524" y="150">seeded from hadb-n1</text>
+<rect x="524" y="156" width="150" height="9" rx="4.5" fill="#f3f4f6"/>
+<rect x="524" y="156" width="0" height="9" rx="4.5" fill="#2563eb">
+  <animate attributeName="width" values="0;0;150;150" keyTimes="0;0.38;0.58;1" dur="12s" repeatCount="indefinite"/>
+</rect>
+<text class="dd" x="692" y="150" opacity="0">7 / 7 files<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.58;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="dd" x="692" y="166" opacity="0">*__lock excluded<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.515;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="fill" values="#c0392b;#9ca3af" keyTimes="0;0.60" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<g>
+  <rect x="524" y="176" width="98" height="18" rx="9" fill="#f3f4f6" stroke="#e5e7eb"><animate attributeName="fill" values="#f3f4f6;#eff6ff" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#2563eb" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text class="p" x="573" y="188.5" text-anchor="middle" fill="#9ca3af">cub_server<animate attributeName="fill" values="#9ca3af;#2563eb" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <rect x="631" y="176" width="98" height="18" rx="9" fill="#f3f4f6" stroke="#e5e7eb"><animate attributeName="fill" values="#f3f4f6;#eff6ff" keyTimes="0;0.64" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#2563eb" keyTimes="0;0.64" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text class="p" x="680" y="188.5" text-anchor="middle" fill="#9ca3af">copylogdb<animate attributeName="fill" values="#9ca3af;#2563eb" keyTimes="0;0.64" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <rect x="738" y="176" width="98" height="18" rx="9" fill="#f3f4f6" stroke="#e5e7eb"><animate attributeName="fill" values="#f3f4f6;#eff6ff" keyTimes="0;0.66" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#2563eb" keyTimes="0;0.66" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text class="p" x="787" y="188.5" text-anchor="middle" fill="#9ca3af">applylogdb<animate attributeName="fill" values="#9ca3af;#2563eb" keyTimes="0;0.66" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+</g>
+
+<!-- seed lane -->
+<text class="dd" x="440" y="130" text-anchor="middle">copy hadb*</text>
+<line class="arw" x1="374" y1="144" x2="506" y2="144"/>
+<g opacity="0" transform="translate(374,144)">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.38;0.425;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <animateTransform attributeName="transform" type="translate" values="374 144;374 144;506 144;506 144" keyTimes="0;0.38;0.425;1" dur="12s" repeatCount="indefinite"/>
+  <rect x="-44" y="-7" width="88" height="14" rx="3" fill="#eff6ff" stroke="#2563eb"/><text class="pk" x="0" y="3.5" text-anchor="middle">hadb</text>
+</g>
+<g opacity="0" transform="translate(374,144)">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.425;0.47;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <animateTransform attributeName="transform" type="translate" values="374 144;374 144;506 144;506 144" keyTimes="0;0.425;0.47;1" dur="12s" repeatCount="indefinite"/>
+  <rect x="-44" y="-7" width="88" height="14" rx="3" fill="#eff6ff" stroke="#2563eb"/><text class="pk" x="0" y="3.5" text-anchor="middle">hadb_lgat</text>
+</g>
+<g opacity="0" transform="translate(374,144)">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.47;0.515;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <animateTransform attributeName="transform" type="translate" values="374 144;374 144;506 144;506 144" keyTimes="0;0.47;0.515;1" dur="12s" repeatCount="indefinite"/>
+  <rect x="-44" y="-7" width="88" height="14" rx="3" fill="#eff6ff" stroke="#2563eb"/><text class="pk" x="0" y="3.5" text-anchor="middle">hadb_lginf</text>
+</g>
+<g opacity="0" transform="translate(374,144)">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.515;0.56;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <animateTransform attributeName="transform" type="translate" values="374 144;374 144;432 144;374 144;374 144" keyTimes="0;0.515;0.535;0.56;1" dur="12s" repeatCount="indefinite"/>
+  <rect x="-52" y="-7" width="104" height="14" rx="3" fill="#fdecea" stroke="#c0392b"/><text class="pk" x="0" y="3.5" text-anchor="middle" fill="#c0392b">hadb_lgat__lock</text>
+</g>
+<g opacity="0" transform="translate(374,144)">
+  <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.545;0.58;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <animateTransform attributeName="transform" type="translate" values="374 144;374 144;506 144;506 144" keyTimes="0;0.545;0.58;1" dur="12s" repeatCount="indefinite"/>
+  <rect x="-44" y="-7" width="88" height="14" rx="3" fill="#eff6ff" stroke="#2563eb"/><text class="pk" x="0" y="3.5" text-anchor="middle">hadb_vinf</text>
+</g>
+
+<!-- replication lane -->
+<g opacity="0">
+  <animate attributeName="opacity" values="0;1;1" keyTimes="0;0.86;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="dd" x="440" y="186" text-anchor="middle">replication — copy → apply</text>
+  <line class="arw" x1="374" y1="200" x2="506" y2="200"/>
+  <circle cy="200" r="3.5" fill="#1a7f37"><animate attributeName="cx" values="378;502" dur="1.6s" repeatCount="indefinite"/></circle>
+  <circle cy="200" r="3.5" fill="#1a7f37"><animate attributeName="cx" values="378;502" dur="1.6s" begin="0.8s" repeatCount="indefinite"/></circle>
+</g>
+
+<!-- traps -->
+<g>
+  <rect x="30" y="234" width="200" height="48" rx="4" fill="#ffffff" stroke="#e5e7eb"><animate attributeName="fill" values="#ffffff;#fffbeb" keyTimes="0;0.36" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#9a6700" keyTimes="0;0.36" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text x="40" y="250" font-size="9.5" font-weight="700" fill="#d1d5db">T6<animate attributeName="fill" values="#d1d5db;#9a6700" keyTimes="0;0.36" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <text class="dd" x="40" y="264">databases.txt is not a completion</text>
+  <text class="dd" x="40" y="276">signal — wait for the sentinel</text>
+</g>
+<g>
+  <rect x="243" y="234" width="200" height="48" rx="4" fill="#ffffff" stroke="#e5e7eb"><animate attributeName="fill" values="#ffffff;#fffbeb" keyTimes="0;0.515" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#9a6700" keyTimes="0;0.515" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text x="253" y="250" font-size="9.5" font-weight="700" fill="#d1d5db">T3<animate attributeName="fill" values="#d1d5db;#9a6700" keyTimes="0;0.515" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <text class="dd" x="253" y="264">volumes are files — copy hadb*,</text>
+  <text class="dd" x="253" y="276">and exclude *__lock</text>
+</g>
+<g>
+  <rect x="456" y="234" width="200" height="48" rx="4" fill="#ffffff" stroke="#e5e7eb"><animate attributeName="fill" values="#ffffff;#fffbeb" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#9a6700" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text x="466" y="250" font-size="9.5" font-weight="700" fill="#d1d5db">T4<animate attributeName="fill" values="#d1d5db;#9a6700" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <text class="dd" x="466" y="264">heartbeat start blocks — run it</text>
+  <text class="dd" x="466" y="276">on both nodes concurrently</text>
+</g>
+<g>
+  <rect x="669" y="234" width="200" height="48" rx="4" fill="#ffffff" stroke="#e5e7eb"><animate attributeName="fill" values="#ffffff;#fffbeb" keyTimes="0;0.73" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="stroke" values="#e5e7eb;#9a6700" keyTimes="0;0.73" dur="12s" calcMode="discrete" repeatCount="indefinite"/></rect>
+  <text x="679" y="250" font-size="9.5" font-weight="700" fill="#d1d5db">T5<animate attributeName="fill" values="#d1d5db;#9a6700" keyTimes="0;0.73" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+  <text class="dd" x="679" y="264">not writable the moment it is up</text>
+  <text class="dd" x="679" y="276">— wait for registered_and_active</text>
+</g>
+
+<text class="dd" x="10" y="296">Every transition is bounded and decides on observed state, not on the exit code of the command that was supposed to cause it.  docs/design/03-assembly.md §1–2</text>
+</svg>

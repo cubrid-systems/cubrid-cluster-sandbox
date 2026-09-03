@@ -149,6 +149,45 @@ reverse** — its damage is data — so it exits 3 there and points at `ha resyn
 outlives its scenario silently poisons the next one, and that is a named failure
 mode ([`../DESIGN.md`](../DESIGN.md) §7).
 
+### `scenario`
+
+```
+csb scenario run <file> --build <tree> [--keep]
+```
+
+A scenario is a sequence of this tool's own verbs and the state they are expected
+to reach, so that *does my change still behave* is one command against a build
+rather than knowledge somebody already has. Until now that knowledge lived in
+`harness/*.sh` — eight scripts, each encoding a sequence and its expectations,
+written for this project's own findings rather than to be pointed at somebody
+else's engine.
+
+**A step is an argv this tool already accepts**, run through the same dispatch
+with the same envelope and the same exit code, which is what keeps a scenario
+from becoming a second way of asking. Most judgements therefore need no new
+vocabulary at all: `repl check` already exits 4 when the row does not arrive and
+`repl diff` exits 1 when the two sides differ. Three expectations were added on
+top, and each because a real scenario needed it — `contains`/`absent` for what a
+step printed (a bug reproduction is almost always *these rows*, and the
+split-brain flavours are told apart by one line of the engine's log),
+`role_change_within` against the record's measured interval, and `await` for a
+state to arrive.
+
+**The build is not in the file.** `--build` is an argument to the run, because a
+scenario is a statement about behaviour and the engine under test is the variable
+(§2 G2). The same file runs against the build you just made and the one you are
+comparing it with.
+
+**`matrix` and `repeats` turn one scenario into many runs**, because half of what
+people write is a sweep rather than a reproduction: vary one thing, hold the
+rest, repeat, read a table. `${name}` is substituted into the cluster's
+parameters and every step's arguments, and `measure` names what to collect —
+from a closed list, every entry a field this tool already emits, so a table
+cannot report something nobody can go and look at.
+
+JSON rather than YAML because this tool has no dependencies and is not acquiring
+one for a config format.
+
 ### `repl`
 
 ```

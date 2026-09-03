@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 496" width="880" height="496" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="What csb cluster create stands up: one user-defined network, one container per node with cub_master, cub_server, copylogdb and applylogdb, an engine tree bind-mounted read-only from the host, a ping host, and the describe artifact and run record kept outside the containers">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .band{font-size:9px;font-weight:700;fill:#9ca3af;letter-spacing:1.1px}
+  .h{font-size:11.5px;font-weight:700;fill:#1f2937}
+  .d{font-size:9.5px;fill:#6b7280}
+  .dd{font-size:8.5px;fill:#9ca3af}
+  .m{font-size:9px;fill:#34495e;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .mk{font-size:9px;fill:#2563eb;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .box{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .net{fill:#f9fafb;stroke:#9ca3af;stroke-width:1.2;stroke-dasharray:5 4}
+  .soft{fill:#f9fafb;stroke:#e5e7eb;stroke-width:1}
+  .pill{fill:#f3f4f6;stroke:#e5e7eb;stroke-width:1}
+  .p{font-size:8.5px;fill:#34495e}
+  .arw{stroke:#9ca3af;stroke-width:1.4;fill:none;marker-end:url(#a)}
+  .arw2{stroke:#9ca3af;stroke-width:1.4;fill:none;marker-start:url(#a2);marker-end:url(#a)}
+  .ping{stroke:#9ca3af;stroke-width:1;fill:none;stroke-dasharray:3 3}
+  .mount{stroke:#2563eb;stroke-width:1.4;fill:none;marker-end:url(#ab);stroke-dasharray:6 3}
+</style>
+<defs>
+  <marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9ca3af"/></marker>
+  <marker id="a2" viewBox="0 0 8 8" refX="1" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M8,0 L0,4 L8,8 z" fill="#9ca3af"/></marker>
+  <marker id="ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="496" fill="#ffffff"/>
+
+<text class="ttl" x="10" y="22">What one command stands up</text>
+<text class="sub" x="10" y="40">csb cluster create --preset ha --nodes 2 --build ~/cubrid/install.out</text>
+<text class="sub" x="10" y="55">One user-defined network, one container per node, and an engine tree that is bind-mounted read-only rather than baked into an image.</text>
+
+<!-- network -->
+<text class="band" x="866" y="88" text-anchor="end">CONTAINERS</text>
+<rect class="net" x="14" y="72" width="852" height="238" rx="6"/>
+<text class="d" x="28" y="90" fill="#9ca3af">docker network — hadb-net · hostname resolution between peers, and the only place a partition can be cut</text>
+
+<rect class="box" x="378" y="100" width="124" height="30" rx="4"/>
+<text class="h" x="440" y="119" text-anchor="middle" font-size="10.5">ping host</text>
+<text class="dd" x="440" y="146" text-anchor="middle">ha_ping_hosts — a quorum of one</text>
+<path class="ping" d="M 197 158 L 392 132"/>
+<path class="ping" d="M 683 158 L 488 132"/>
+
+<!-- node 1 -->
+<rect class="box" x="32" y="158" width="330" height="140" rx="5"/>
+<text class="h" x="46" y="180">hadb-n1</text>
+<rect x="266" y="167" width="82" height="17" rx="8.5" fill="#f0fdf4" stroke="#1a7f37"/>
+<text class="p" x="307" y="179" text-anchor="middle" fill="#1a7f37">master</text>
+<text class="m" x="46" y="197">registered_and_active</text>
+<rect class="pill" x="46"  y="205" width="71" height="18" rx="9"/><text class="p" x="81.5"  y="217.5" text-anchor="middle">cub_master</text>
+<rect class="pill" x="123" y="205" width="71" height="18" rx="9"/><text class="p" x="158.5" y="217.5" text-anchor="middle">cub_server</text>
+<rect class="pill" x="200" y="205" width="71" height="18" rx="9"/><text class="p" x="235.5" y="217.5" text-anchor="middle">copylogdb</text>
+<rect class="pill" x="277" y="205" width="71" height="18" rx="9"/><text class="p" x="312.5" y="217.5" text-anchor="middle">applylogdb</text>
+<text class="mk" x="46" y="243">/opt/cubrid-ro</text><text class="dd" x="152" y="243">the build under test, read-only</text>
+<text class="mk" x="46" y="259">/db</text><text class="dd" x="152" y="259">hadb, hadb_lgat, hadb_lginf, hadb_vinf …</text>
+<text class="mk" x="46" y="275">…/cubrid/conf</text><text class="dd" x="152" y="275">cubrid.conf, cubrid_ha.conf</text>
+<text class="dd" x="46" y="291">--cap-add=NET_ADMIN · --init · --shm-size · runs as you</text>
+
+<!-- node 2 -->
+<rect class="box" x="518" y="158" width="330" height="140" rx="5"/>
+<text class="h" x="532" y="180">hadb-n2</text>
+<rect x="752" y="167" width="82" height="17" rx="8.5" fill="#eff6ff" stroke="#2563eb"/>
+<text class="p" x="793" y="179" text-anchor="middle" fill="#2563eb">slave</text>
+<text class="m" x="532" y="197">registered_and_standby</text>
+<rect class="pill" x="532" y="205" width="71" height="18" rx="9"/><text class="p" x="567.5" y="217.5" text-anchor="middle">cub_master</text>
+<rect class="pill" x="609" y="205" width="71" height="18" rx="9"/><text class="p" x="644.5" y="217.5" text-anchor="middle">cub_server</text>
+<rect class="pill" x="686" y="205" width="71" height="18" rx="9"/><text class="p" x="721.5" y="217.5" text-anchor="middle">copylogdb</text>
+<rect class="pill" x="763" y="205" width="71" height="18" rx="9"/><text class="p" x="798.5" y="217.5" text-anchor="middle">applylogdb</text>
+<text class="mk" x="532" y="243">/opt/cubrid-ro</text><text class="dd" x="638" y="243">the same tree, read-only</text>
+<text class="mk" x="532" y="259">/db</text><text class="dd" x="638" y="259">seeded from n1: hadb* minus *__lock</text>
+<text class="mk" x="532" y="275">…/cubrid/conf</text><text class="dd" x="638" y="275">same ha_node_list, its own ha_mode</text>
+<text class="dd" x="532" y="291">every node&#39;s database directory at the same path — /db</text>
+
+<!-- links -->
+<text class="d" x="440" y="200" text-anchor="middle">heartbeat</text>
+<path class="arw2" d="M 368 208 L 512 208"/>
+<text class="dd" x="440" y="222" text-anchor="middle">ha_node_list — same on both</text>
+<text class="d" x="440" y="252" text-anchor="middle">replication</text>
+<path class="arw" d="M 368 260 L 512 260"/>
+<text class="dd" x="440" y="274" text-anchor="middle">copy, then apply</text>
+
+<!-- host -->
+<text class="band" x="866" y="342" text-anchor="end">HOST</text>
+<rect class="box" x="14" y="326" width="852" height="62" rx="6"/>
+<path class="mount" d="M 120 326 L 120 300"/>
+<path class="mount" d="M 606 326 L 606 300"/>
+<text class="m" x="28" y="348">~/cubrid/install.out</text>
+<text class="dd" x="28" y="364">your build — mounted read-only into every node; rebuilding the engine rebuilds nothing here</text>
+<text class="dd" x="28" y="379" fill="#2563eb">csb reads the highest GLIBC_ symbol the tree needs straight out of the ELF and refuses with that sentence rather than failing as a linker error later.</text>
+<text class="m" x="866" y="348" text-anchor="end">$CSB_HOME/hadb/</text>
+<text class="dd" x="866" y="364" text-anchor="end">describe artifact + run record — survive cluster destroy; --purge drops them</text>
+
+<!-- base image -->
+<rect class="soft" x="14" y="400" width="852" height="46" rx="6"/>
+<text class="h" x="28" y="420" font-size="11">base image — ubuntu:24.04 plus python3, iproute2, iptables, iputils-ping, procps</text>
+<text class="dd" x="28" y="436">Built once from a recipe the tool carries, tagged with that recipe&#39;s hash. There is a base image, and there is never an engine image — that distinction is what makes the tool usable while you are changing the engine.</text>
+
+<text class="dd" x="14" y="470">Each container requirement is load-bearing: NET_ADMIN because both fault mechanisms are route operations · --init because cubrid heartbeat stop never returns without a reaping PID 1</text>
+<text class="dd" x="14" y="484">· iputils-ping because hb_check_ping shells out, and a missing binary reads as HB_PING_FAILURE — which makes every master demote itself on any heartbeat loss.  docs/design/03-assembly.md §4</text>
+</svg>

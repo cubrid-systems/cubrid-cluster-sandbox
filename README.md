@@ -69,6 +69,15 @@ not have to know any of it. That is the point of the tool; the traps are listed
 in [`docs/design/03-assembly.md`](docs/design/03-assembly.md) if you want to see
 what it did on your behalf.
 
+![The assembly, animated: absent becomes defined when the configuration is written, seeded once the slave has a copy of the master's volumes, forming when the heartbeat starts on both nodes at once, and serving only when the master reaches registered_and_active. Along the way the tool waits for an explicit completion signal rather than the databases.txt entry, copies hadb* while excluding the lock file, and refuses to call the cluster ready while a write would still be rejected](docs/assets/anim-create.svg)
+
+Every transition is bounded, and every one decides on **observed state** rather
+than on the exit code of the command that was supposed to cause it. That rule is
+not defensive programming: `databases.txt` gains its entry *before* `createdb`
+finishes, and seeding on that signal copies a database with a live transaction in
+it — which is the one trap of the seven that leaves a corrupt slave instead of a
+failed start.
+
 Then use it. `node exec` runs a command on a node with the engine's environment
 already set:
 
@@ -150,6 +159,20 @@ because of exactly that assumption, so the load driver is a component with a rat
 contract rather than a loop in each scenario's shell script
 ([`docs/design/06-load.md`](docs/design/06-load.md)).
 
+What those components actually stand up is one user-defined network, one
+container per node, and an engine tree that crosses the host boundary as a
+read-only bind mount:
+
+![What one command stands up: a docker network holding two node containers, each running cub_master, cub_server, copylogdb and applylogdb, with the host's build tree mounted read-only at /opt/cubrid-ro, the database directory at /db on both, a ping host on the same network, and the describe artifact and run record kept on the host outside the containers](docs/assets/topology.svg)
+
+**There is a base image, and there is never an engine image.** The base image is
+`ubuntu:24.04` plus five packages, built once from a recipe the tool carries. The
+engine is bind-mounted from your tree: rebuilding it rebuilds nothing here,
+because the container is looking at the same files. That distinction is what
+makes the tool usable *while* you are changing the engine, and it is the opposite
+of what a production deployment should do
+([ADR-002](docs/design/ADR-002-backend-contract.md)).
+
 ## Status
 
 **Phase 0 complete.** The manual assembly is written down and runs
@@ -161,6 +184,24 @@ answered by measurement rather than by reading:
 | Does split brain need a broken configuration? | **No** — a correctly configured cluster reaches two masters in 9 s when the ping host survives the partition | [`docs/findings/split-brain.md`](docs/findings/split-brain.md) |
 | How is replication lag injected, and does the heartbeat allow it? | Suspend a replication stage; the heartbeat watches process *existence*, not progress, and does not interfere | [`docs/findings/replication-lag.md`](docs/findings/replication-lag.md) |
 | Is the return to the original master mechanically possible? | Yes — restored in 2 s with no row loss. What is *not* settled is the policy around it | [`docs/findings/failback.md`](docs/findings/failback.md) |
+
+The first two are worth watching rather than reading. Both animations run on
+measured values; neither rounds a figure to make a point.
+
+![The same route-level cut, twice, animated. On the left ha_ping_hosts is set and the ping host survives: the master pings successfully, concludes it is not partitioned and stays master, while the slave pings successfully, finds nothing to cancel its failover and promotes — two masters in 9 s, from a correct configuration. On the right the ping host is cut from the master too: it demotes itself, the failover is clean, and forty-five seconds after the heal the roles are still swapped because only one master exists and nothing triggers](docs/assets/anim-splitbrain.svg)
+
+A single ping host is a quorum of one, and it votes for whoever asks it — the
+master cancels its failback when the ping *succeeds*, the slave cancels its
+failover only when the ping *fails*, so one surviving host satisfies both
+cancel-nots at once. That is why `partition` cuts routes rather than interfaces:
+an interface-level cut cannot express `--keep`.
+
+![The replication pipeline and its gauge, animated. Suspending the apply stage freezes every column of db_ha_apply_info for thirty seconds, eof_lsa included, because applylogdb is what writes the row — the reported lag holds at 27,786 and the truth, 54,855, arrives in a single sample on release. Suspending the copy stage instead freezes eof_lsa while the applier keeps draining, so the reported lag falls from 49,544 to 38,576 while replication is entirely stopped. Only applyinfo -r, read against the master, sees either](docs/assets/anim-lag.svg)
+
+So there is no field called `delay`. `repl status` reports the copy stage and the
+apply stage separately, always against a master-side reference, and reports
+`null` with a reason rather than a number its source cannot support
+([`docs/design/05-inspect.md`](docs/design/05-inspect.md) §3).
 
 **Decided since:** the provisioner is written in **Go**, and anything an operator
 reads, edits, or runs on a real host stays shell
@@ -187,7 +228,8 @@ docs/
   requirements/      what the field asks for, from CUBRID's internal tracker
   survey/            PostgreSQL, MySQL, MongoDB, TiDB, and the CUBRID gap analysis
   findings/          what running it showed — including where it contradicted the design
-  assets/            the banner and the architecture diagram
+  assets/            banner · architecture · topology, and three animated figures:
+                     assembly, split brain, replication lag
 harness/
   Dockerfile · entrypoint.sh · lib.sh  the Phase-0 spike: one node, and the
                                        four-step assembly that makes two of them

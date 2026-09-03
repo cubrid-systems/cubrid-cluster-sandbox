@@ -164,3 +164,28 @@ for the same reason it carries `faults`: a cluster reproducing a bug under load
 is not the same cluster ([`02-topology.md`](02-topology.md) §4). The achieved
 rate belongs to the run, not to the topology, and lives in the record
 ([`07-record.md`](07-record.md)).
+
+## 7. Latency, and what it is the latency of
+
+`load status` reports `p50`, `p90` and `p99` in milliseconds alongside the rate,
+because a workload that holds its rate can still be unusable and the rate alone
+cannot say so. Measured during a failover under 40 statements/s: `p50 15.7 ms`
+and **`p99 4220 ms`** — four seconds at the tail while the median barely moves,
+which is what a client actually experiences when a role changes and is invisible
+in every other figure this tool reports.
+
+Three things it is careful about.
+
+**It is per statement, not per row.** With `--batch` one statement carries many
+rows, and the two are different questions — the same care the rate contract
+already takes.
+
+**It includes the cost of the client.** Each statement is a `csql` invocation, so
+starting the client is in the number. That cost is real for this driver and is
+reported separately as `driver_cost` rather than subtracted from a figure
+somebody might quote.
+
+**It is absent below twenty samples.** A percentile from three measurements is
+not a percentile, and publishing one would be the same class of lie as a lag
+figure with no source. Every sample is kept rather than reservoir-sampled, up to
+a cap, and `latency_complete` says whether the distribution is all of them.

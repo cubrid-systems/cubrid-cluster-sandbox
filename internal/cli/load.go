@@ -137,6 +137,12 @@ func cmdLoadStatus(c *Ctx) (any, error) {
 		}
 		fmt.Fprintf(c.Out, "%-10s %-6s requested=%-8s achieved=%-10s held=%-5v sent=%-8d errors=%d  (%.0fs, %d workers)%s\n",
 			st.Profile, st.Kind, st.Requested, st.Achieved, st.Held, st.Sent, st.Errors, st.Elapsed, st.Workers, rows)
+		if st.Latency != nil {
+			fmt.Fprintf(c.Out, "%-10s %-6s p50=%.1fms p90=%.1fms p99=%.1fms  (min %.1f, max %.1f, n=%d%s)\n",
+				"", "latency", st.Latency.P50, st.Latency.P90, st.Latency.P99,
+				st.Latency.Min, st.Latency.Max, st.Latency.Count,
+				map[bool]string{true: "", false: ", sampled"}[st.LatencyComplete])
+		}
 		if len(st.Cost) > 0 {
 			keys := make([]string, 0, len(st.Cost))
 			for k := range st.Cost {

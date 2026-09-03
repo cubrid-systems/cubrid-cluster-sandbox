@@ -17,71 +17,83 @@ import (
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
 
-var registry = []Command{
-	// ---- cluster ---------------------------------------------------------
-	{Noun: "cluster", Verb: "create", Summary: "build a topology", Mutates: true,
-		Flags: createFlags, Run: cmdClusterCreate},
-	{Noun: "cluster", Verb: "up", Summary: "start an existing cluster, in the order that works", Mutates: true,
-		Run: cmdClusterUp},
-	{Noun: "cluster", Verb: "down", Summary: "graceful stop, servers flushed", Mutates: true,
-		Run: cmdClusterDown},
-	{Noun: "cluster", Verb: "destroy", Summary: "containers, network, volumes", Mutates: true,
-		Flags: destroyFlags, Run: cmdClusterDestroy},
-	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state", Run: cmdClusterStatus},
-	{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe,
-		Flags: func(fs *flag.FlagSet) {
-			fs.String("out", "", "write the artifact to a file")
-			fs.String("format", "", "json (default) or ctp — a CTP ha_repl.conf fragment")
-			fs.String("instance", "", "CTP instance name for --format ctp (default: the cluster name)")
-		}},
-	{Noun: "cluster", Verb: "quiesce", Summary: "block writes", Mutates: true, Flags: quiesceFlags, Run: cmdClusterQuiesce},
-	{Noun: "cluster", Verb: "resume", Summary: "release writes", Mutates: true, Run: cmdClusterResume},
-	{Noun: "cluster", Verb: "ls", Summary: "clusters on this machine", Run: cmdClusterLs},
+// registry is filled in init() rather than at declaration, because a scenario
+// step dispatches through lookup() and Go reads that as an initialisation cycle:
+// registry -> cmdScenarioRun -> dispatchArgs -> lookup -> registry. The cycle is
+// only in the initialiser, not at runtime.
+var registry []Command
 
-	// ---- node ------------------------------------------------------------
-	{Noun: "node", Verb: "start", Args: "<selector>", Summary: "start a node", Mutates: true, Run: cmdNodeStart},
-	{Noun: "node", Verb: "stop", Args: "<selector>", Summary: "graceful: the server flushes", Mutates: true, Run: cmdNodeStop},
-	{Noun: "node", Verb: "kill", Args: "<selector>", Summary: "crash: it does not", Mutates: true, Run: cmdNodeKill},
-	{Noun: "node", Verb: "status", Args: "<selector>", Summary: "one node's state", Run: cmdNodeStatus},
-	{Noun: "node", Verb: "logs", Args: "<selector>", Summary: "the log a failure is actually in", Flags: logsFlags, Run: cmdNodeLogs},
-	{Noun: "node", Verb: "shell", Args: "<selector>", Summary: "a shell on the node", Run: cmdNodeShell},
-	{Noun: "node", Verb: "exec", Args: "<selector> -- <cmd>", Summary: "run a command on the node", Run: cmdNodeExec},
+func init() {
+	registry = []Command{
+		// ---- cluster ---------------------------------------------------------
+		{Noun: "cluster", Verb: "create", Summary: "build a topology", Mutates: true,
+			Flags: createFlags, Run: cmdClusterCreate},
+		{Noun: "cluster", Verb: "up", Summary: "start an existing cluster, in the order that works", Mutates: true,
+			Run: cmdClusterUp},
+		{Noun: "cluster", Verb: "down", Summary: "graceful stop, servers flushed", Mutates: true,
+			Run: cmdClusterDown},
+		{Noun: "cluster", Verb: "destroy", Summary: "containers, network, volumes", Mutates: true,
+			Flags: destroyFlags, Run: cmdClusterDestroy},
+		{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state", Run: cmdClusterStatus},
+		{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe,
+			Flags: func(fs *flag.FlagSet) {
+				fs.String("out", "", "write the artifact to a file")
+				fs.String("format", "", "json (default) or ctp — a CTP ha_repl.conf fragment")
+				fs.String("instance", "", "CTP instance name for --format ctp (default: the cluster name)")
+			}},
+		{Noun: "cluster", Verb: "quiesce", Summary: "block writes", Mutates: true, Flags: quiesceFlags, Run: cmdClusterQuiesce},
+		{Noun: "cluster", Verb: "resume", Summary: "release writes", Mutates: true, Run: cmdClusterResume},
+		{Noun: "cluster", Verb: "ls", Summary: "clusters on this machine", Run: cmdClusterLs},
 
-	// ---- fault -----------------------------------------------------------
-	{Noun: "fault", Verb: "partition", Args: "<selector>", Summary: "cut routes, not interfaces", Mutates: true, Flags: partitionFlags, Run: cmdFaultPartition},
-	{Noun: "fault", Verb: "lag", Args: "<selector>", Summary: "stage-targeted replication lag", Mutates: true, Flags: lagFlags, Run: cmdFaultLag},
-	{Noun: "fault", Verb: "splitbrain", Summary: "two masters, on request", Mutates: true, Flags: splitbrainFlags, Run: cmdFaultSplitbrain},
-	{Noun: "fault", Verb: "failcount", Summary: "move fail_counter deliberately", Mutates: true, Flags: failcountFlags, Run: cmdFaultFailcount},
-	{Noun: "fault", Verb: "ping-unavailable", Args: "<selector>", Summary: "the engine cannot ask", Mutates: true, Flags: pingFlags, Run: cmdFaultPingUnavailable},
-	{Noun: "fault", Verb: "clear", Args: "[<selector>]", Summary: "reverse a condition", Mutates: true, Run: cmdFaultClear},
-	{Noun: "fault", Verb: "ls", Summary: "what is currently in force", Run: cmdFaultLs},
+		// ---- node ------------------------------------------------------------
+		{Noun: "node", Verb: "start", Args: "<selector>", Summary: "start a node", Mutates: true, Run: cmdNodeStart},
+		{Noun: "node", Verb: "stop", Args: "<selector>", Summary: "graceful: the server flushes", Mutates: true, Run: cmdNodeStop},
+		{Noun: "node", Verb: "kill", Args: "<selector>", Summary: "crash: it does not", Mutates: true, Run: cmdNodeKill},
+		{Noun: "node", Verb: "status", Args: "<selector>", Summary: "one node's state", Run: cmdNodeStatus},
+		{Noun: "node", Verb: "logs", Args: "<selector>", Summary: "the log a failure is actually in", Flags: logsFlags, Run: cmdNodeLogs},
+		{Noun: "node", Verb: "shell", Args: "<selector>", Summary: "a shell on the node", Run: cmdNodeShell},
+		{Noun: "node", Verb: "exec", Args: "<selector> -- <cmd>", Summary: "run a command on the node", Run: cmdNodeExec},
 
-	// ---- repl ------------------------------------------------------------
-	{Noun: "repl", Verb: "status", Summary: "both stages, against the master", Run: cmdReplStatus},
-	{Noun: "repl", Verb: "check", Args: "[<selector>]", Summary: "a write that has to arrive", Mutates: true,
-		Flags: checkFlags, Run: cmdReplCheck},
-	{Noun: "repl", Verb: "watch", Summary: "sample and retain", Flags: watchFlags, Run: cmdReplWatch},
-	{Noun: "repl", Verb: "diff", Summary: "what the two databases actually hold", Flags: diffFlags, Run: cmdReplDiff},
+		// ---- fault -----------------------------------------------------------
+		{Noun: "fault", Verb: "partition", Args: "<selector>", Summary: "cut routes, not interfaces", Mutates: true, Flags: partitionFlags, Run: cmdFaultPartition},
+		{Noun: "fault", Verb: "lag", Args: "<selector>", Summary: "stage-targeted replication lag", Mutates: true, Flags: lagFlags, Run: cmdFaultLag},
+		{Noun: "fault", Verb: "splitbrain", Summary: "two masters, on request", Mutates: true, Flags: splitbrainFlags, Run: cmdFaultSplitbrain},
+		{Noun: "fault", Verb: "failcount", Summary: "move fail_counter deliberately", Mutates: true, Flags: failcountFlags, Run: cmdFaultFailcount},
+		{Noun: "fault", Verb: "ping-unavailable", Args: "<selector>", Summary: "the engine cannot ask", Mutates: true, Flags: pingFlags, Run: cmdFaultPingUnavailable},
+		{Noun: "fault", Verb: "clear", Args: "[<selector>]", Summary: "reverse a condition", Mutates: true, Run: cmdFaultClear},
+		{Noun: "fault", Verb: "ls", Summary: "what is currently in force", Run: cmdFaultLs},
 
-	// ---- ha --------------------------------------------------------------
-	{Noun: "ha", Verb: "status", Summary: "roles and the group", Run: cmdHaStatus},
-	{Noun: "ha", Verb: "promote", Args: "<selector>", Summary: "promote a node", Mutates: true, Flags: promoteFlags, Run: cmdHaPromote},
-	{Noun: "ha", Verb: "failback", Summary: "return to the original master; interactive", Mutates: true, Flags: failbackFlags, Run: cmdHaFailback},
-	{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Flags: resyncFlags, Run: cmdHaResync},
+		// ---- repl ------------------------------------------------------------
+		{Noun: "repl", Verb: "status", Summary: "both stages, against the master", Run: cmdReplStatus},
+		{Noun: "repl", Verb: "check", Args: "[<selector>]", Summary: "a write that has to arrive", Mutates: true,
+			Flags: checkFlags, Run: cmdReplCheck},
+		{Noun: "repl", Verb: "watch", Summary: "sample and retain", Flags: watchFlags, Run: cmdReplWatch},
+		{Noun: "repl", Verb: "diff", Summary: "what the two databases actually hold", Flags: diffFlags, Run: cmdReplDiff},
 
-	// ---- load ------------------------------------------------------------
-	{Noun: "load", Verb: "start", Summary: "a rate it has to hold", Mutates: true, Flags: loadStartFlags, Run: cmdLoadStart},
-	{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStop},
-	{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStatus},
+		// ---- ha --------------------------------------------------------------
+		{Noun: "ha", Verb: "status", Summary: "roles and the group", Run: cmdHaStatus},
+		{Noun: "ha", Verb: "promote", Args: "<selector>", Summary: "promote a node", Mutates: true, Flags: promoteFlags, Run: cmdHaPromote},
+		{Noun: "ha", Verb: "failback", Summary: "return to the original master; interactive", Mutates: true, Flags: failbackFlags, Run: cmdHaFailback},
+		{Noun: "ha", Verb: "resync", Args: "[<selector>]", Summary: "repair a diverged slave", Mutates: true, Flags: resyncFlags, Run: cmdHaResync},
 
-	// ---- record ----------------------------------------------------------
-	{Noun: "record", Verb: "show", Summary: "the timeline", Run: cmdRecordShow,
-		Flags: func(fs *flag.FlagSet) { fs.Duration("since", 0, "only entries newer than this") }},
-	{Noun: "record", Verb: "export", Summary: "timeline plus the describe that opened it", Run: cmdRecordExport,
-		Flags: func(fs *flag.FlagSet) {
-			fs.String("out", "", "file to write")
-			fs.String("format", "", "json or html (default: from the file name)")
-		}},
+		// ---- load ------------------------------------------------------------
+		{Noun: "load", Verb: "start", Summary: "a rate it has to hold", Mutates: true, Flags: loadStartFlags, Run: cmdLoadStart},
+		{Noun: "load", Verb: "stop", Summary: "stop the driver", Mutates: true, Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStop},
+		{Noun: "load", Verb: "status", Summary: "requested, achieved, and whether it held", Flags: func(fs *flag.FlagSet) { fs.String("node", "master", "which node") }, Run: cmdLoadStatus},
+
+		// ---- scenario --------------------------------------------------------
+		{Noun: "scenario", Verb: "run", Args: "<file>", Summary: "a sequence and what it should reach", Mutates: true,
+			Flags: scenarioFlags, Run: cmdScenarioRun},
+
+		// ---- record ----------------------------------------------------------
+		{Noun: "record", Verb: "show", Summary: "the timeline", Run: cmdRecordShow,
+			Flags: func(fs *flag.FlagSet) { fs.Duration("since", 0, "only entries newer than this") }},
+		{Noun: "record", Verb: "export", Summary: "timeline plus the describe that opened it", Run: cmdRecordExport,
+			Flags: func(fs *flag.FlagSet) {
+				fs.String("out", "", "file to write")
+				fs.String("format", "", "json or html (default: from the file name)")
+			}},
+	}
 }
 
 // ---- implemented commands -----------------------------------------------

@@ -1,0 +1,14 @@
+{
+  "name": "a partition makes two masters, and healing it makes one again",
+  "cluster": { "preset": "ha" },
+  "steps": [
+    { "note": "the pair is serving", "await": { "masters": 1, "standbys": 1 }, "within": "60s" },
+    { "note": "a write arrives", "run": ["repl", "check"] },
+    { "note": "cut the peer, keeping the witness",
+      "run": ["fault", "partition", "slave", "--mechanism", "drop"],
+      "await": { "masters": 2 }, "within": "120s" },
+    { "note": "heal it", "run": ["fault", "clear"],
+      "await": { "masters": 1, "standbys": 1 }, "within": "180s" },
+    { "note": "and replication still carries a write", "run": ["repl", "check"] }
+  ]
+}
