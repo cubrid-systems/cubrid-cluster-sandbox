@@ -40,6 +40,50 @@ func createFlags(fs *flag.FlagSet) {
 	fs.Var(&repeatable{}, "set", "key=value, validated (repeatable)")
 	fs.Var(&repeatable{}, "set-hidden", "key=value, written unvalidated (repeatable)")
 	fs.String("from", "", "a describe artifact to rebuild from")
+	fs.String("from-ctp", "", "a CTP ha_repl.conf to take engine parameters from")
+}
+
+// ctpSets reads a CTP ha_repl.conf and returns the --set arguments it implies.
+//
+// It takes the ENGINE PARAMETERS and nothing else. The node addresses in that
+// file describe machines CTP would have reached over ssh; a csb cluster's nodes
+// are containers this command is about to create, so their addresses are an
+// output of the create rather than an input to it -- which is what
+// `describe --format ctp` writes back.
+//
+// Unknown keys are refused rather than carried, and named. That is the same rule
+// --set follows, and the reason is the same: the engine accepts a file with a key
+// it ignores, so a typo that travelled from a CTP conf would take effect nowhere
+// and be reported by nothing (docs/design/02-topology.md §5).
+func ctpSets(c *Ctx, path string) (sets, hidden []string, err error) {
+	f, oerr := os.Open(path)
+	if oerr != nil {
+		return nil, nil, Precondition("no_ctp_conf", "%v", oerr)
+	}
+	defer f.Close()
+	keys, other, perr := topology.ParseCTPConf(f)
+	if perr != nil {
+		return nil, nil, Failed("ctp_conf_unreadable", "%v", perr)
+	}
+	sets, hidden, refused := topology.CTPSets(keys)
+	if len(refused) > 0 {
+		return nil, nil, Usage("this CTP conf carries %d key(s) csb does not know: %s. Fix the conf or pass them with --set-hidden",
+			len(refused), strings.Join(refused, ", "))
+	}
+	if len(hidden) > 0 {
+		c.Note("hidden_from_ctp", SevWarn,
+			fmt.Sprintf("%d parameter(s) from this conf are ones the engine does not advertise and are written unvalidated: %s",
+				len(hidden), strings.Join(hidden, ", ")))
+	}
+	if url, ok := other["cubrid_download_url"]; ok && url != "" {
+		c.Note("download_url_ignored", SevWarn,
+			"cubrid_download_url is ignored: csb bind-mounts a build from the host and never puts an engine in an image, so --build decides what runs")
+	}
+	if len(sets)+len(hidden) > 0 {
+		c.Note("from_ctp", SevInfo,
+			fmt.Sprintf("%d engine parameter(s) taken from %s", len(sets)+len(hidden), filepath.Base(path)))
+	}
+	return sets, hidden, nil
 }
 
 func repeated(c *Ctx, name string) []string {
@@ -159,11 +203,23 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 
 	cpus, _ := strconv.ParseFloat(c.str("cpus"), 64)
 	nodes, _ := strconv.Atoi(c.str("nodes"))
+	set, setHidden := repeated(c, "set"), repeated(c, "set-hidden")
+	if conf := c.str("from-ctp"); conf != "" {
+		fromConf, fromHidden, cerr := ctpSets(c, conf)
+		if cerr != nil {
+			return nil, cerr
+		}
+		// The conf comes first so an explicit --set on the command line wins:
+		// later keys overwrite earlier ones, and a person typing an override
+		// means it more than a file does.
+		set = append(fromConf, set...)
+		setHidden = append(fromHidden, setHidden...)
+	}
 	t, err := topology.Resolve(topology.Options{
 		Name: name, Preset: c.str("preset"), Nodes: nodes, DB: c.str("db"),
 		Image: c.str("image"), PingMode: c.str("ping-mode"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
-		CPUs:       cpus, Set: repeated(c, "set"), SetHidden: repeated(c, "set-hidden"),
+		CPUs:       cpus, Set: set, SetHidden: setHidden,
 		Engine: id,
 	})
 	if err != nil {

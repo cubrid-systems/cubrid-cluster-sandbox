@@ -14,6 +14,7 @@ import (
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/selector"
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
 
 var registry = []Command{
@@ -28,7 +29,11 @@ var registry = []Command{
 		Flags: destroyFlags, Run: cmdClusterDestroy},
 	{Noun: "cluster", Verb: "status", Summary: "per-node liveness, HA role, process state", Run: cmdClusterStatus},
 	{Noun: "cluster", Verb: "describe", Summary: "the reproducible artifact", Run: cmdClusterDescribe,
-		Flags: func(fs *flag.FlagSet) { fs.String("out", "", "write the artifact to a file") }},
+		Flags: func(fs *flag.FlagSet) {
+			fs.String("out", "", "write the artifact to a file")
+			fs.String("format", "", "json (default) or ctp — a CTP ha_repl.conf fragment")
+			fs.String("instance", "", "CTP instance name for --format ctp (default: the cluster name)")
+		}},
 	{Noun: "cluster", Verb: "quiesce", Summary: "block writes", Mutates: true, Flags: quiesceFlags, Run: cmdClusterQuiesce},
 	{Noun: "cluster", Verb: "resume", Summary: "release writes", Mutates: true, Run: cmdClusterResume},
 	{Noun: "cluster", Verb: "ls", Summary: "clusters on this machine", Run: cmdClusterLs},
@@ -184,6 +189,38 @@ func cmdClusterDescribe(c *Ctx) (any, error) {
 	}
 	doc = describeWithFaults(c, doc)
 	doc = describeWithLoad(c, doc)
+
+	// The CTP fragment is a second RENDERING of this artifact, never a second
+	// source: it is written from the same describe, so a cluster cannot describe
+	// itself one way to a reader and another to a harness
+	// (docs/design/02-topology.md §7).
+	if c.str("format") == "ctp" {
+		var t topology.Topology
+		if err := json.Unmarshal(b, &t); err != nil {
+			return nil, Failed("describe_malformed", "%v", err)
+		}
+		var buf bytes.Buffer
+		user := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+		if err := t.WriteCTPConf(&buf, c.str("instance"), user); err != nil {
+			return nil, Precondition("not_an_ha_pair", "%v", err)
+		}
+		c.Note("transport_is_not_ssh", SevWarn,
+			"the ssh.host values are container names: these nodes run no sshd and publish no port, so the frozen key names are filled for a docker-exec Channel (cubrid-testkit ADR-014)")
+		if out := c.str("out"); out != "" {
+			if err := os.WriteFile(out, buf.Bytes(), 0o644); err != nil {
+				return nil, Failed("describe_unwritable", "cannot write %s: %v", out, err)
+			}
+			if !c.JSON && !c.Quiet {
+				fmt.Fprintf(c.Out, "wrote %s (%d bytes)\n", out, buf.Len())
+				printNotes(c)
+			}
+		} else if !c.JSON && !c.Quiet {
+			c.Out.Write(buf.Bytes())
+			printNotes(c)
+		}
+		return map[string]any{"format": "ctp", "conf": buf.String()}, nil
+	}
+
 	b, _ = json.MarshalIndent(doc, "", "  ")
 	if out := c.str("out"); out != "" {
 		if err := os.WriteFile(out, append(b, '\n'), 0o644); err != nil {

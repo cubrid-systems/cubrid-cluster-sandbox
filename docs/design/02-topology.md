@@ -316,3 +316,46 @@ user:
   loop, while the node sat in `to_be_active` instead of finishing its promotion.
   The end-to-end suite found it on its first run
   ([`../ROADMAP.md`](../ROADMAP.md) M3.4).
+
+## 7. CTP compatibility, both directions
+
+`cubrid-testkit` inherits CTP's `ha_repl` task, and CTP's external surface is
+frozen while the old system keeps running. The conf file is therefore not ours to
+change:
+
+```
+bin/ctp.sh ha_repl -c conf/ha_repl.conf
+  env.<instance>.{master,slave}.ssh.host / .user
+  env.<instance>.{cubrid,ha,broker1,broker2}.<key>
+  cubrid_download_url= / scenario= / ha_sync_detect_timeout_in_secs=
+```
+
+**In:** `cluster create --from-ctp conf/ha_repl.conf` takes the engine parameters
+and nothing else. The addresses in that file describe machines CTP would have
+reached over ssh; a csb cluster's nodes are containers the command is about to
+create, so their addresses are an *output* of the create rather than an input to
+it. Validation is kept: an unknown key is refused and named, exactly as `--set`
+refuses one, because the engine accepts a file with a key it ignores and the
+divergence is then silent. A parameter the engine has and does not advertise —
+`ha_max_heartbeat_gap` and the other two this project measured — is not a typo,
+so it routes to `--set-hidden` and says so rather than being refused as unknown.
+`cubrid_download_url` is answered out loud: csb bind-mounts a build from the host
+and never puts an engine in an image, so `--build` decides what runs.
+
+**Out:** `cluster describe --format ctp` writes the fragment back. It is a second
+*rendering* of the describe artifact, never a second source — written from the
+same JSON, so a cluster cannot describe itself one way to a reader and another to
+a harness.
+
+**The key names survive; the transport does not.** csb runs no sshd and publishes
+no port, so `ssh.host` is filled with a container name and the fragment says so
+in a comment instead of pretending to be a host. That is not a workaround around
+testkit: their own ADR-014 already demotes `exec.SSH` to one implementation of a
+`Channel`, and states the position this milestone depends on — *"the system under
+test has a topology; the runner does not have a fleet."* Whatever stands the pair
+up is somebody else, and the fragment is what it hands over.
+
+Verified end to end on the real `CTP/conf/ha_repl.conf`: a cluster created from
+it carried `max_clients=200` validated and `ha_max_heartbeat_gap=10` unvalidated
+with both notes, and `describe --format ctp` wrote the pair back with the
+database name and both parameters.
