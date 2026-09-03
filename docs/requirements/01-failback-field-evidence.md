@@ -315,4 +315,54 @@ CUBRID support guiding by phone. So it is a planned change rather than a reflex.
 Who signs it off, and against what evidence, is not written anywhere found.
 
 **One question of the original four is left**, and it is the one the script
-exists to ask. §9 OQ8 stays open on that alone.
+exists to ask.
+
+## 9. Answered by the technical team, 2026-09-03
+
+M0.7 closed, and two of the four answers contradict what the tracker implied.
+That is what the script was for: the tracker records what people wrote down, and
+this records what they do.
+
+| Question | The tracker implied | The answer |
+|---|---|---|
+| Is write traffic quiesced? | the broker's `ACCESS_MODE`, RO or SO | **No. It is not quiesced at all.** |
+| Who authorises the return? | scheduling is visible, sign-off is not | **A DBA or team lead confirms it first.** |
+| What proves "caught up enough"? | a method — `applyinfo -r … -a` plus a canary | **The canary. A write, and whether it arrives.** |
+| Is the original master preferred? | yes, and returning is routine | **Only when the hardware is asymmetric.** |
+
+**Nobody holds the writes still.** The broker `ACCESS_MODE` reading came from a
+fail-count utility proposal and one 2017 incident plan; it is not what happens.
+`cubrid heartbeat stop` takes the server down with it, clients on that node are
+disconnected, and there is a window with no master — and that is accepted rather
+than mitigated. The consequence for this tool is not a missing feature, it is a
+duty: **anything committed on the old master after the last evidence was taken is
+at risk, and the tool has to say what that exposure is instead of implying a
+barrier that nobody uses.** `cluster quiesce` stays, because it is a real
+mechanism this project measured; it is not the failback procedure.
+
+**The canary is the judgement, not a supporting reading.** This settles what §4
+left as a method: there is no page threshold, and there is no number behind the
+gauge. A write is made and it either arrives or it does not. That is the same
+instrument `repl check` implements and the same one the field uses to verify a
+rebuilt slave — and it is the right one for exactly the moment a failback is
+decided, because `db_ha_apply_info` is **empty across a role change**, which is
+this project's own measurement (`findings/failback.md`).
+
+**Authorisation is a person, so the plan is a document.** A DBA or team lead
+confirms before the switch. `ha failback --dry-run` is therefore not a debugging
+convenience: it is the artifact that goes to that person, and it has to carry the
+evidence the decision rests on. `--yes` means somebody already said yes.
+
+**The return trip is conditional, and the condition is the hardware.** Not
+routine. It is done when the nodes are not equivalent — different specification,
+placement, or monitoring — so that being on the original master is worth an
+outage window. The tracker's ninety-five `failback 작업` tickets are consistent
+with this rather than against it: they say the operation happens often across
+many sites, not that any one site returns as a reflex. What follows for the tool:
+a topology has to be able to express that the nodes are **not** interchangeable,
+and `ha failback` is an exception path rather than the end of every failover.
+
+§9 OQ8 is closed on these four. What is not settled is the shape of the exposure
+in the first answer — how much unreplicated work a site tolerates losing when it
+does not quiesce — and that is a measurement this project can now make rather
+than a question to ask.

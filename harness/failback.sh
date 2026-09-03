@@ -11,10 +11,13 @@
 #  that does the thing and pauses where a person genuinely has to choose.
 #
 #  Every DECIDE block prints what is known, what was measured, and what the
-#  default is; --auto takes them all. One of them -- STEP 3 -- is the one
-#  nothing found so far answers, and it is marked. If your site does it
-#  differently, that disagreement is the most useful thing you can send back,
-#  and the repository is where it goes.
+#  default is; --auto takes them all. As of 2026-09-03 all four of the original
+#  questions have been answered by the technical team (requirements/01 §9), and
+#  two of the answers contradicted what the tracker implied: writes are NOT
+#  quiesced, and the return trip is done when the hardware is asymmetric rather
+#  than as a matter of course. If your site does it differently, that
+#  disagreement is still the most useful thing you can send back, and the
+#  repository is where it goes.
 #  -- CUBRID Systems Research, N65 cluster-sandbox, 2026-08-27 (revised 2026-09-02)
 # ============================================================================
 #
@@ -152,14 +155,15 @@ DECIDE "Is the target caught up enough to take over?" y \
 STEP "Decide what happens to the application during the switch"
 NOTE "Stopping the heartbeat on $CUR takes its SERVER down with it -- clients on"
 NOTE "$CUR are disconnected, and there is a window with no master at all."
-DECIDE "Has write traffic been quiesced / drained?" y \
-  "CUBRID has no read-only mode to hold a master still while replication catches up." \
-  "Anything committed on $CUR after the lag reading above is at risk." \
-  "The tracker says your answer is the BROKER: ACCESS_MODE moved to RO or SO before" \
-  "anyone touches replicated data. Is that what you do here too?" \
-  "If so: before or after STEP 2's reading, and who puts it back afterwards?" \
-  "If you do not quiesce at all, say so -- that is an answer, and we will design" \
-  "for it rather than around it." || exit 3
+DECIDE "Proceed with writes still open on $CUR ?" y \
+  "ANSWERED 2026-09-03: nothing is quiesced. The broker ACCESS_MODE reading came" \
+  "from a utility proposal and one 2017 incident plan; it is not what is done." \
+  "So this is not a barrier you forgot -- it is the accepted procedure, and what" \
+  "follows from it is an exposure rather than a step:" \
+  "  anything committed on $CUR after STEP 2's evidence is at risk," \
+  "  and clients on $CUR are disconnected when its server goes down." \
+  "--quiesce on csb ha failback closes the broker door if your site wants one." \
+  "If your site DOES hold writes, say so -- that disagreement is the useful part." || exit 3
 
 STEP "Stop the heartbeat on the current master ($CUR)"
 NOTE "This is the switch. With $CUR out of the group, $TGT is the only node left"

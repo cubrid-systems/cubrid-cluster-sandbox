@@ -66,7 +66,7 @@ reading more code.
 | M0.4 | Split-brain reproduction, three arms (`findings/split-brain.md`) | done 2026-08-27 |
 | M0.5 | Lag injection, both mechanisms, seven phases (`findings/replication-lag.md`) | done 2026-08-27 |
 | M0.6 | Failback script written and validated end to end (`findings/failback.md`) | done 2026-08-27 |
-| M0.7 | Failback script reviewed by the technical team | **open** — see below |
+| M0.7 | Failback script reviewed by the technical team | **done 2026-09-03** — all four questions answered, and two of the answers contradicted the tracker: writes are not quiesced at all, and the return trip is conditional on the hardware being asymmetric rather than routine ([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §9) |
 
 ## Phase 1 — the tool exists
 
@@ -215,8 +215,18 @@ machine-readable metrics contract.
 
 ## Open
 
-**What does the technical team require of failback?** ([`DESIGN.md`](DESIGN.md)
-§9 OQ8.) Narrower than it was.
+**What does the technical team require of failback? — answered 2026-09-03**
+([`DESIGN.md`](DESIGN.md) §9 OQ8, closed;
+[`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §9).
+Writes are **not** quiesced — the exposure is accepted, so the tool names it
+instead of implying a barrier. The evidence is the **canary**, not a threshold,
+which is also the only instrument that works across a role change. A **DBA or
+team lead** confirms first, which makes `--dry-run` the document that goes to
+them. And the return trip is done **when the nodes are not equivalent**, not as a
+matter of course — so `ha failback` is an exception path and a topology has to be
+able to say that its nodes are not interchangeable.
+
+What the record said before it was asked:
 [`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md)
 collected what the internal tracker already says, and it answers the mechanical
 half: the rejoin path is `ha_make_slavedb.sh`, the alarm is `fail_counter`, and

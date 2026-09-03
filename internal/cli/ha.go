@@ -242,30 +242,33 @@ func cmdHaFailback(c *Ctx) (any, error) {
 		return map[string]any{"to": to, "changed": false, "steps": []fbStep{}}, nil
 	}
 
-	// STEP 2's evidence, and the reason it is not one query.
+	// STEP 2's evidence is the canary, and that is the technical team's answer
+	// rather than this project's choice (requirements/01 §9). There is no page
+	// threshold and no number behind the gauge: a write is made and it either
+	// arrives or it does not.
 	//
-	// db_ha_apply_info is empty on a node that has just changed role -- the
-	// measured run printed <none> at exactly the moment the operator needed it,
-	// and the row appeared minutes later reading caught up. A check that treats
-	// "no row" as "no lag" approves a failback onto a node it knows nothing
-	// about (docs/findings/failback.md). So when the view is silent the canary
-	// answers instead: a write that has to arrive.
-	ev := "unknown"
-	caught := false
+	// It is also the only instrument that works at this moment. db_ha_apply_info
+	// is EMPTY on a node that has just changed role -- the measured run printed
+	// <none> at exactly the point the operator needed it, and the row appeared
+	// minutes later reading caught up -- so a check that treats "no row" as "no
+	// lag" approves a failback onto a node it knows nothing about
+	// (docs/findings/failback.md). The view is still read and reported, as
+	// supporting information rather than as the decision.
+	can, cerr := inspect.Check(c.Ctx, a.D, t, from, to, "", 30*time.Second)
+	caught := cerr == nil && can.Arrived
+	ev := ""
+	switch {
+	case cerr != nil:
+		ev = "the canary could not run: " + cerr.Error()
+	case can.Arrived:
+		ev = fmt.Sprintf("a write made on %s arrived on %s in %.2fs", from, to, can.Seconds)
+	default:
+		ev = fmt.Sprintf("a write made on %s did NOT arrive on %s", from, to)
+	}
 	if n := nodeByName(st, to); n != nil && n.Repl != nil && n.Repl.ApplyLag != nil {
-		caught = *n.Repl.ApplyLag == 0 && (n.Repl.Fail == nil || *n.Repl.Fail == 0)
-		ev = fmt.Sprintf("db_ha_apply_info on %s: apply_lag=%s fail=%s", to, dash(n.Repl.ApplyLag), dash(n.Repl.Fail))
+		ev += fmt.Sprintf(" (db_ha_apply_info also reads apply_lag=%s fail=%s)", dash(n.Repl.ApplyLag), dash(n.Repl.Fail))
 	} else {
-		can, cerr := inspect.Check(c.Ctx, a.D, t, from, to, "", 15*time.Second)
-		switch {
-		case cerr != nil:
-			ev = "db_ha_apply_info has no row for " + to + " and the canary could not run: " + cerr.Error()
-		case can.Arrived:
-			caught = true
-			ev = fmt.Sprintf("db_ha_apply_info has no row for %s (it is empty across a role change); a canary written on %s arrived in %.2fs", to, from, can.Seconds)
-		default:
-			ev = "db_ha_apply_info has no row for " + to + " and a canary written on " + from + " did not arrive"
-		}
+		ev += " (db_ha_apply_info has no row for " + to + ", which is normal across a role change and is why the canary decides)"
 	}
 
 	steps := []fbStep{
@@ -293,7 +296,16 @@ func cmdHaFailback(c *Ctx) (any, error) {
 	}
 	if !caught {
 		c.Note("not_caught_up", SevWarn,
-			"step 2 is not satisfied: "+ev+". How much outstanding work is acceptable is not this tool's number to pick (DESIGN.md §9 OQ8)")
+			"step 2 is not satisfied: "+ev+". The canary is the field's own test for this and it did not pass")
+	}
+	// The exposure, named rather than mitigated. The technical team does not
+	// quiesce writes for a failback (requirements/01 §9): stopping the heartbeat
+	// takes the server down with it, clients on that node are disconnected, and
+	// anything committed there after the evidence above was taken is at risk.
+	// Saying so is the tool's duty; offering a barrier nobody uses would not be.
+	if c.str("quiesce") != "true" {
+		c.Note("writes_not_held", SevWarn,
+			"nothing is holding writes on "+from+". Whatever commits there between this evidence and the switch is at risk, and that is the accepted procedure rather than an oversight — --quiesce closes the broker door if this site wants one")
 	}
 	if dry {
 		c.Note("dry_run", SevInfo, "nothing was changed")

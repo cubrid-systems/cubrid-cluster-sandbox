@@ -593,9 +593,23 @@ against 1.68 M on the slave at the end), so the injected figures are not
 calibrated lag measurements. The mechanism questions are settled; "what does
 200 ms cost" is not. *Artifacts*: `findings/replication-lag.md`.
 
-**OQ8 — What does the technical team actually require of failback?** *Owner*:
-this project, blocked on a party outside it. *Verification*: the marked-up
-script comes back.
+**OQ8 — What does the technical team actually require of failback?**
+**Closed 2026-09-03.** All four answered, and two of them contradicted what the
+tracker implied
+([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md) §9):
+
+- **Writes are not quiesced.** Not with the broker, not at all. The exposure is
+  accepted, so the tool names what is at risk rather than offering a barrier
+  nobody uses.
+- **The canary is the evidence** — a write, and whether it arrives. No page
+  threshold, no number behind the gauge, and it is the only instrument that
+  works at the moment a failback is decided, because `db_ha_apply_info` is empty
+  across a role change.
+- **A DBA or team lead confirms it**, which makes `--dry-run` the document that
+  goes to that person rather than a debugging convenience.
+- **The original master is preferred only when the hardware is asymmetric.** Not
+  routine. `ha failback` is therefore an exception path, and a topology has to
+  be able to express that its nodes are not interchangeable.
 
 **Narrowed 2026-08-28 by searching the internal tracker**
 ([`requirements/01-failback-field-evidence.md`](requirements/01-failback-field-evidence.md)).
@@ -851,9 +865,12 @@ the English word in the development projects. Operations tickets say
 meanings inside the same organization, which is worse than either being wrong:
 a question asked with the bare word is answered about whichever the reader has
 in mind. `failback.sh` now names the two and says which it means. Reading the
-same incidents also answered two of §9 OQ8's four unknowns — the return trip is
-routine and scheduled, and writes are held off with the broker's `ACCESS_MODE` —
-leaving one: who authorises it, and on what evidence.
+same incidents appeared to answer two of §9 OQ8's four unknowns — that the
+return trip is routine and scheduled, and that writes are held off with the
+broker's `ACCESS_MODE`. **Both readings turned out to be wrong when the question
+was finally put to the team** (2026-09-03): nothing is quiesced, and the return
+is conditional on the hardware rather than routine. Records of what people wrote
+down are not records of what they do, which is the argument for having asked.
 
 **2026-08-28 — the word was wrong.** `failback` means *demotion* to the engine
 and to the technical team: their own HA study notes say so, and so does every
