@@ -34,10 +34,13 @@ make dist                      # a static binary at bin/csb
 sudo install bin/csb /usr/local/bin/     # optional
 ```
 
-- `make check` — gofmt, `go vet`, unit tests. No Docker, no engine.
+- `make check` — gofmt, `go vet`, unit tests. No Docker, no engine. This is what
+  CI runs on every push and pull request, and it is all CI can run.
 - `make e2e CSB_E2E_BUILD=~/cubrid/install.out` — the whole surface against a
   real build, about two minutes. Run it against an engine build before trusting
-  the tool with one.
+  the tool with one. **CI cannot run this**: the engine is never in an image, so
+  a hosted runner has nothing to point `CSB_E2E_BUILD` at, and a job that ran it
+  would report a skip as a pass. A green tick does not mean the suite has run.
 
 State lives under `$CSB_HOME` (default `~/.local/share/csb`), one directory per
 cluster holding its `describe` artifact and its run record.
