@@ -91,6 +91,80 @@ func (d *Docker) docker(ctx context.Context, args ...string) (*run.Result, error
 	return res, nil
 }
 
+// Preflight asks docker whether it can be used at all, and says which of the
+// three ways it cannot.
+//
+// Without it the first failure a new user sees is whichever docker command the
+// assembly happened to reach first, reported as an internal one:
+//
+//	csb: docker build -q -t csb-base:c2441fad0156 /tmp/csb-base-3108629510 exited 1:
+//	Cannot connect to the Docker daemon at unix:///var/run/docker.sock
+//
+// That is a precondition wearing a build step's clothes, and the commonest case
+// -- a user who is not in the docker group -- looks exactly the same as a daemon
+// that is not running while needing a different remedy.
+func (d *Docker) Preflight(ctx context.Context) error {
+	res, err := d.R.Run(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+	if err != nil {
+		return fmt.Errorf("docker is not on this machine's PATH, and a node is a container: %w", err)
+	}
+	if res.ExitCode == 0 {
+		return nil
+	}
+	stderr := strings.TrimSpace(res.Stderr)
+	if i := strings.IndexByte(stderr, '\n'); i > 0 {
+		stderr = stderr[:i]
+	}
+	if strings.Contains(stderr, "permission denied") {
+		return fmt.Errorf("docker is installed and this user cannot reach its socket: %s"+
+			". Add yourself to the docker group (and log in again), or run as a user that is in it", stderr)
+	}
+	return fmt.Errorf("docker is installed and its daemon could not be reached: %s", stderr)
+}
+
+// CorePattern reads the kernel's core_pattern, which decides where a crashing
+// process's core goes. It is a machine-wide setting rather than a per-container
+// one, so this reports rather than changes it.
+func CorePattern() (string, error) {
+	b, err := os.ReadFile("/proc/sys/kernel/core_pattern")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// CoreDest is where a core written by a node lands on this machine, given a
+// core_pattern that is a plain path. `/db` is already bind-mounted per node, so
+// a pattern under it needs no new mount and no new bookkeeping.
+const CoreDest = "/db/core.%e.%p"
+
+// CorePatternNote says whether a node's crash will leave a core anyone can open,
+// and what to do when it will not.
+//
+// Three layers have to agree and only two are ours: the container's core ulimit,
+// which NodePlan now raises; the destination, which is already a host-mounted
+// directory; and core_pattern, which is neither. A pattern beginning with `|`
+// hands the core to a host-side crash handler -- apport on Ubuntu -- which does
+// not attribute a container process to a host package and drops it. The result
+// is no core anywhere, with nothing said, which is how an engine that segfaults
+// under load gets diagnosed from the kernel ring buffer instead of a backtrace.
+//
+// It returns "" when the pattern will produce a file.
+func CorePatternNote(pattern, hostDBDir string) string {
+	if pattern == "" || !strings.HasPrefix(pattern, "|") {
+		return ""
+	}
+	handler := strings.Fields(strings.TrimPrefix(pattern, "|"))
+	name := "a host crash handler"
+	if len(handler) > 0 {
+		name = handler[0]
+	}
+	return "kernel.core_pattern pipes cores to " + name +
+		", which does not keep one written by a process inside a container: a node that crashes will leave no core." +
+		" To collect them: sudo sysctl -w kernel.core_pattern='" + CoreDest + "'" +
+		" -- they then appear under " + hostDBDir + ". It is a machine-wide setting, so csb reports it rather than changing it"
+}
+
 // EnsureImage builds the base image if this machine does not have it. Returns
 // true when it had to build, which the caller reports because the first run of
 // the tool is otherwise a mysterious minute.
@@ -161,6 +235,13 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir, resultsDir stri
 		"--cap-add=NET_ADMIN", // the fault mechanisms are route and qdisc operations
 		"--shm-size", t.Resources.ShmSize,
 		"--user", strconv.Itoa(uid) + ":" + strconv.Itoa(gid), // files stay editable on the host
+		// A crashing engine must be allowed to write a core. Nothing was set
+		// here, so a node inherited whatever soft limit dockerd happened to
+		// have -- commonly 0, which silently discards the one artifact that
+		// says why cub_server died. Raising it is necessary and not sufficient:
+		// the kernel's core_pattern decides where the core goes and is global
+		// rather than per-container, which is why CorePatternNote exists.
+		"--ulimit", "core=-1:-1",
 		"--label", "csb.cluster=" + t.Cluster,
 		"--label", "csb.node=" + node.Name,
 		"--label", "csb.role=" + node.Role,

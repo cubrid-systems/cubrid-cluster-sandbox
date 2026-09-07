@@ -253,6 +253,12 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	}
 
 	d := &backend.Docker{R: r}
+	// Ask docker whether it can be used before spending anything on the
+	// assumption that it can. It is a precondition, and it exits 3 like every
+	// other one rather than 1 through whichever command reached it first.
+	if err := d.Preflight(c.Ctx); err != nil {
+		return nil, Precondition("docker_unusable", "%v", err)
+	}
 	built, err := d.EnsureImage(c.Ctx, t)
 	if err != nil {
 		return nil, Failed("image_unavailable", "%v", err)
@@ -283,6 +289,15 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	workdir := filepath.Join(c.Store.ClusterDir(name), "work")
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		return nil, Failed("store_unwritable", "%v", err)
+	}
+	// Say now, while a cluster is being built to break, whether a crash on it
+	// will leave anything to open. The alternative is finding out afterwards,
+	// which is how a segfaulting engine came to be diagnosed here from the
+	// kernel ring buffer with no backtrace at all.
+	if pattern, perr := backend.CorePattern(); perr == nil {
+		if msg := backend.CorePatternNote(pattern, filepath.Join(workdir, "<node>", "db")); msg != "" {
+			c.Note("cores_not_collected", SevWarn, msg)
+		}
 	}
 	// The network comes before the artifact, because the ping host is resolved
 	// from it and the artifact has to carry what the cluster was actually built

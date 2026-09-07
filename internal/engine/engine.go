@@ -43,6 +43,14 @@ func Resolve(ctx context.Context, path string, r *run.Runner) (*Identity, error)
 	}
 	server := filepath.Join(abs, "bin", "cub_server")
 	if _, err := os.Stat(server); err != nil {
+		// The likeliest way to get here is a CUBRID developer typing the path
+		// they live in. `~/cubrid` is the source tree and `~/cubrid/install.out`
+		// is what the build puts in it -- one directory apart, and the tool knows
+		// which one it is looking at.
+		if _, serr := os.Stat(filepath.Join(abs, "install.out", "bin", "cub_server")); serr == nil {
+			return nil, fmt.Errorf("%s is the source tree; the build is in it: pass --build %s",
+				abs, filepath.Join(abs, "install.out"))
+		}
 		return nil, fmt.Errorf("%s does not look like a CUBRID install tree: no bin/cub_server", abs)
 	}
 

@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -71,5 +72,22 @@ func TestTerminalVerbsRefuseJSON(t *testing.T) {
 		if code, out, _ := invoke(t, home, args...); code != ExitUsage {
 			t.Errorf("%v exited %d, want %d\n%s", args, code, ExitUsage, out)
 		}
+	}
+}
+
+// The logs are on this machine and this verb reads them from here, which is why
+// it works on a node whose container is stopped. The path was nonetheless
+// hidden: `json:"-"` on the field, and the directory named in exactly one
+// place -- the note that says there are no logs. So the address was available
+// when there was nothing to read and absent when there was something.
+func TestLogsCarryTheirHostPath(t *testing.T) {
+	var f logFile
+	typ := reflect.TypeOf(f)
+	fld, ok := typ.FieldByName("Path")
+	if !ok {
+		t.Fatal("logFile has no Path")
+	}
+	if tag := fld.Tag.Get("json"); tag == "-" || tag == "" {
+		t.Errorf("the host path is not in the envelope (json:%q), so a consumer cannot go and look", tag)
 	}
 }

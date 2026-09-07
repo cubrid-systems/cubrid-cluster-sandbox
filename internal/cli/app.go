@@ -71,6 +71,12 @@ type Command struct {
 	Mutates    bool
 	Flags      func(*flag.FlagSet)
 	Run        func(*Ctx) (any, error)
+
+	// Help is printed after the flags by `<noun> <verb> --help`, for the
+	// commands whose real interface is not their flags. `scenario run` has four
+	// flags and a file format, and the file is the part you have to author:
+	// its help documented the four and not one word of the schema.
+	Help string
 }
 
 func (c Command) key() string { return c.Noun + " " + c.Verb }
@@ -87,14 +93,18 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "csb %s\n", Version)
 		return ExitOK
 	}
-	for _, a := range args {
-		if a == "--help" || a == "-h" || a == "help" {
-			usage(stdout)
-			return ExitOK
-		}
+	if answered := helpFor(args, stdout); answered {
+		return ExitOK
 	}
 	if len(args) < 2 {
-		usage(stderr)
+		// A noun on its own is an incomplete command rather than a question, so
+		// it still exits 2 -- but what it prints is that noun's verbs, which is
+		// what the caller was reaching for, and not the whole surface.
+		if len(args) == 1 && knownNoun(args[0]) {
+			nounUsage(stderr, args[0])
+		} else {
+			usage(stderr)
+		}
 		return ExitUsage
 	}
 
@@ -120,22 +130,17 @@ func dispatch(cmd Command, rest []string, stdout, stderr io.Writer) (int, error)
 	fs := flag.NewFlagSet(cmd.key(), flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
-	var (
-		cluster  = fs.String("cluster", "", "which cluster")
-		asJSON   = fs.Bool("json", false, "structured output")
-		verbose  = fs.Bool("verbose", false, "show the engine commands being run")
-		verboseS = fs.Bool("v", false, "shorthand for --verbose")
-		quiet    = fs.Bool("quiet", false, "suppress progress, keep errors")
-		quietS   = fs.Bool("q", false, "shorthand for --quiet")
-		timeout  = fs.Duration("timeout", 180*time.Second, "bound on any engine wait")
-	)
+	g := globalFlags(fs)
+	cluster, asJSON := g.cluster, g.asJSON
+	verbose, verboseS := g.verbose, g.verboseS
+	quiet, quietS, timeout := g.quiet, g.quietS, g.timeout
 	if cmd.Flags != nil {
 		cmd.Flags(fs)
 	}
 
 	positional, err := parseInterspersed(fs, rest)
 	if err != nil {
-		return early(stdout, stderr, rest, cmd.key(), "usage", err.Error()), nil
+		return early(stdout, stderr, rest, cmd.key(), "usage", flagError(cmd, err)), nil
 	}
 
 	st, err := store.Open()
@@ -253,24 +258,194 @@ func verbsOf(noun string) []string {
 	return v
 }
 
+// globals holds the flags every command takes, declared in one place so that
+// --help lists what dispatch actually accepts rather than a second copy of it.
+type globals struct {
+	cluster                   *string
+	asJSON, verbose, verboseS *bool
+	quiet, quietS             *bool
+	timeout                   *time.Duration
+}
+
+func globalFlags(fs *flag.FlagSet) *globals {
+	return &globals{
+		cluster:  fs.String("cluster", "", "which cluster"),
+		asJSON:   fs.Bool("json", false, "structured output"),
+		verbose:  fs.Bool("verbose", false, "show the engine commands being run"),
+		verboseS: fs.Bool("v", false, "shorthand for --verbose"),
+		quiet:    fs.Bool("quiet", false, "suppress progress, keep errors"),
+		quietS:   fs.Bool("q", false, "shorthand for --quiet"),
+		timeout:  fs.Duration("timeout", 180*time.Second, "bound on any engine wait"),
+	}
+}
+
+// globalLine is the one-line summary of the above. A test walks globalFlags and
+// fails if a name is missing from it, because a global flag nothing documents is
+// a flag nobody finds.
+const globalLine = "global flags: --cluster NAME  --json  --timeout DURATION  --quiet/-q  --verbose/-v"
+
+// selectorLine says what a <selector> is. It was in the README and nowhere the
+// binary could reach, which left `[selector]` in the usage line meaning nothing
+// to a first-time caller (docs/design/01-cli.md §2).
+const selectorLine = "selectors:    master  slave  slave[n]  replica[n]  client  client[n]  <node>  all\n" +
+	"              a query resolved when the command runs, not a label: after a\n" +
+	"              failover `master` names the other machine"
+
+const exitLine = "exit codes:   0 ok · 1 failed · 2 usage · 3 precondition · 4 timeout · 5 unmodelled"
+
+const envLine = "environment:  CSB_HOME (state root)  CSB_CLUSTER (default --cluster)"
+
+// isHelp reports whether one token asks for help.
+func isHelp(a string) bool { return a == "--help" || a == "-h" || a == "-help" || a == "help" }
+
+// asksHelp scans for a help token and stops at a bare `--`, because everything
+// after that belongs to another program: `node exec master -- csql --help` is a
+// question for csql, and answering it here printed our own usage instead of
+// running the command. Same rule wantsJSON follows, for the same reason.
+func asksHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if isHelp(a) {
+			return true
+		}
+	}
+	return false
+}
+
+// helpFor answers a help request against the surface rather than by scanning for
+// a token anywhere in argv. `--help` after a noun and a verb asks about THAT
+// command, which is where its own flags are: forty-five of them were declared
+// with a written description each and reachable only from the README.
+func helpFor(args []string, w io.Writer) bool {
+	if len(args) == 0 {
+		return false
+	}
+	if isHelp(args[0]) {
+		if len(args) > 1 && knownNoun(args[1]) {
+			nounUsage(w, args[1])
+		} else {
+			usage(w)
+		}
+		return true
+	}
+	if knownNoun(args[0]) && len(args) > 1 && isHelp(args[1]) {
+		nounUsage(w, args[0])
+		return true
+	}
+	if len(args) >= 2 {
+		if cmd, ok := lookup(args[0], args[1]); ok {
+			if asksHelp(args[2:]) {
+				commandUsage(w, cmd)
+				return true
+			}
+			return false
+		}
+	}
+	// A help token anywhere else -- an unknown noun, a verb that does not exist
+	// -- still answers with the whole surface, because that is what the caller
+	// needs to see next.
+	if asksHelp(args) {
+		usage(w)
+		return true
+	}
+	return false
+}
+
 func usage(w io.Writer) {
 	fmt.Fprintf(w, "csb %s — provision a CUBRID topology for development\n\n", Version)
 	fmt.Fprintf(w, "usage: csb <noun> <verb> [selector] [flags]\n\n")
 	for _, n := range nouns {
 		fmt.Fprintf(w, "  %s\n", n)
-		for _, c := range registry {
-			if c.Noun != n {
-				continue
-			}
-			line := c.Verb
-			if c.Args != "" {
-				line += " " + c.Args
-			}
-			fmt.Fprintf(w, "    %-28s %s\n", line, c.Summary)
-		}
+		writeVerbs(w, n)
 	}
-	fmt.Fprintf(w, "\nglobal flags: --cluster NAME  --json  --timeout DURATION  --quiet/-q  --verbose/-v\n")
-	fmt.Fprintf(w, "environment:  CSB_HOME (state root)  CSB_CLUSTER (default --cluster)\n")
+	fmt.Fprintf(w, "\n%s\n%s\n%s\n%s\n", globalLine, selectorLine, exitLine, envLine)
+	fmt.Fprintf(w, "\n`csb <noun> <verb> --help` lists that command's own flags.\n")
+}
+
+func nounUsage(w io.Writer, noun string) {
+	fmt.Fprintf(w, "usage: csb %s <verb> [selector] [flags]\n\n", noun)
+	writeVerbs(w, noun)
+	fmt.Fprintf(w, "\n%s\n", globalLine)
+	fmt.Fprintf(w, "\n`csb %s <verb> --help` lists that command's own flags.\n", noun)
+}
+
+func writeVerbs(w io.Writer, noun string) {
+	for _, c := range registry {
+		if c.Noun != noun {
+			continue
+		}
+		line := c.Verb
+		if c.Args != "" {
+			line += " " + c.Args
+		}
+		fmt.Fprintf(w, "    %-28s %s\n", line, c.Summary)
+	}
+}
+
+// commandUsage prints one command: what it is, and the flags it declares. The
+// descriptions are the ones already written beside each flag -- this only makes
+// them reachable from the binary.
+func commandUsage(w io.Writer, cmd Command) {
+	line := "csb " + cmd.Noun + " " + cmd.Verb
+	if cmd.Args != "" {
+		line += " " + cmd.Args
+	}
+	fmt.Fprintf(w, "%s — %s\n", line, cmd.Summary)
+	if cmd.Flags != nil {
+		fs := flag.NewFlagSet(cmd.key(), flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		cmd.Flags(fs)
+		fmt.Fprintln(w)
+		writeFlags(w, fs)
+	}
+	fmt.Fprintf(w, "\n%s\n", globalLine)
+	if strings.Contains(cmd.Args, "selector") {
+		fmt.Fprintf(w, "%s\n", selectorLine)
+	}
+	if cmd.Help != "" {
+		fmt.Fprintf(w, "\n%s\n", strings.TrimRight(cmd.Help, "\n"))
+	}
+}
+
+// flagError says a flag did not parse in this tool's vocabulary rather than the
+// flag package's. "flag provided but not defined: -stage" puts one dash where
+// every line of documentation uses two, and leaves the caller with no way to
+// find out what IS defined -- which until now was true, and is why the sentence
+// ends where it does.
+func flagError(cmd Command, err error) string {
+	msg := err.Error()
+	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok {
+		msg = "unknown flag --" + strings.TrimPrefix(name, "-")
+	}
+	return fmt.Sprintf("%s (csb %s --help lists this command's flags)", msg, cmd.key())
+}
+
+// writeFlags renders a flag set with the double dash people actually type. The
+// flag package prints one, and every line of documentation this project has
+// written uses two.
+func writeFlags(w io.Writer, fs *flag.FlagSet) {
+	type row struct{ left, right string }
+	var rows []row
+	width := 0
+	fs.VisitAll(func(f *flag.Flag) {
+		kind, help := flag.UnquoteUsage(f)
+		left := "--" + f.Name
+		if kind != "" {
+			left += " " + kind
+		}
+		if def := f.DefValue; def != "" && def != "false" && def != "0" && def != "0s" {
+			help += fmt.Sprintf(" (default %s)", def)
+		}
+		if len(left) > width {
+			width = len(left)
+		}
+		rows = append(rows, row{left, help})
+	})
+	for _, r := range rows {
+		fmt.Fprintf(w, "  %-*s  %s\n", width, r.left, r.right)
+	}
 }
 
 // wantsJSON scans the raw arguments. A failure that happens before a flag set is

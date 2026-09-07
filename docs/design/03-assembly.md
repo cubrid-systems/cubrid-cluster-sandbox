@@ -226,6 +226,19 @@ that needed a forced promotion is not the same evidence as one that did not.
 
 ## 4. Container requirements
 
+**Docker is asked whether it can be used before anything is spent assuming it
+can.** `cluster create` — both paths, since the check sits in the half they share
+— runs one `docker version` and maps the three ways it can fail onto the three
+different remedies: not on `PATH` (install it), a daemon that cannot be reached
+(start it), and a socket this user is not permitted (join the `docker` group, and
+log in again). All three are precondition failures, exit **3**.
+
+They used to arrive as one message, and it was whichever docker command the
+assembly happened to reach first, reported as an internal one: `csb: docker build
+-q -t csb-base:c2441fad0156 /tmp/csb-base-3108629510 exited 1: Cannot connect to
+the Docker daemon`. That is a precondition wearing a build step's clothes, and
+the commonest case of the three is indistinguishable in it from the second.
+
 Not preferences; each one is load-bearing.
 
 | Requirement | Why |
@@ -237,6 +250,28 @@ Not preferences; each one is load-bearing.
 | run as the invoking user | files written to the mounted work directory stay editable on the host; the CBRD-26983 assembly lost time to a root-owned `backupdb` output |
 | one user-defined network | hostname resolution between peers, and a place to cut |
 | `--shm-size` raised | CUBRID's shared memory does not fit the 64 MB default |
+| `--ulimit core=-1` | a crashing engine must be allowed to write the one artifact that says why. Nothing was set, so a node inherited dockerd's limit — commonly 0 |
+
+**Raising the limit is necessary and not sufficient, and the rest is not ours.**
+Three layers decide whether a node's crash leaves a core anyone can open: the
+container's limit, which is the row above; the destination, which needs nothing
+new because `/db` is already bind-mounted per node; and `kernel.core_pattern`,
+which is machine-wide rather than per-container. When that pattern begins with
+`|` the kernel hands the core to a host-side crash handler — apport on Ubuntu —
+which does not attribute a container process to a host package and drops it. The
+result is no core anywhere and nothing said.
+
+`cluster create` therefore reads the pattern and, when it will swallow them,
+emits `cores_not_collected` naming the one command that changes it
+(`sudo sysctl -w kernel.core_pattern='/db/core.%e.%p'`) and the host directory
+the cores then appear in. It reports rather than changes: a sysctl is the whole
+machine's behaviour and not this cluster's, which is the same line `--build`
+draws around the engine tree.
+
+The cost of not having had this is measured. A `cub_server` that segfaulted
+under connection churn was found here through the kernel ring buffer — the
+faulting instruction pointer and nothing else — because no core was written and
+none of the three layers said why.
 
 The base image needs nothing else. `ubuntu:24.04` with `python3`, `iproute2`,
 `iptables`, `iputils-ping` and `procps` is the whole of it. `python3` earns its

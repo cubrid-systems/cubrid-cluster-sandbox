@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,5 +209,105 @@ func TestRegistryCoversEveryNoun(t *testing.T) {
 		if !listed[n] {
 			t.Errorf("noun %q is in the registry and not in `nouns`, so --help does not list it", n)
 		}
+	}
+}
+
+// Every flag a command declares must be reachable from the binary. Forty-five
+// of them were declared with a written description each and printed nowhere:
+// `--help` anywhere in argv produced the global usage, so the only way to learn
+// that `fault lag` takes `--stage` was to read the README. This test fails the
+// moment a flag goes back to being invisible.
+func TestPerCommandHelpListsEveryFlagItDeclares(t *testing.T) {
+	home := t.TempDir()
+	for _, cmd := range registry {
+		if cmd.Flags == nil {
+			continue
+		}
+		code, out, _ := invoke(t, home, cmd.Noun, cmd.Verb, "--help")
+		if code != ExitOK {
+			t.Errorf("csb %s --help exited %d", cmd.key(), code)
+		}
+		if !strings.HasPrefix(out, "csb "+cmd.key()) {
+			t.Errorf("csb %s --help does not name the command:\n%s", cmd.key(), out)
+		}
+		fs := flag.NewFlagSet(cmd.key(), flag.ContinueOnError)
+		cmd.Flags(fs)
+		fs.VisitAll(func(f *flag.Flag) {
+			if !strings.Contains(out, "--"+f.Name) {
+				t.Errorf("csb %s --help does not list --%s", cmd.key(), f.Name)
+			}
+			if f.Usage == "" {
+				t.Errorf("%s --%s has no description, so its help line says nothing", cmd.key(), f.Name)
+			}
+			// A backquote in a usage string is not decoration: flag.UnquoteUsage
+			// reads the quoted words as the flag's TYPE NAME, so
+			// "broker, or `csb load`" renders as `--mechanism csb load`. Caught
+			// the first time a description was edited after help became visible.
+			if strings.Contains(f.Usage, "`") {
+				t.Errorf("%s --%s has a backquote in its description, which renders as the flag's type: %q",
+					cmd.key(), f.Name, f.Usage)
+			}
+		})
+	}
+}
+
+// The global flags are declared once and summarised once. A global flag missing
+// from the summary is a flag nobody finds, which is the same defect the test
+// above covers for the per-command ones.
+func TestEveryGlobalFlagIsInTheSummaryLine(t *testing.T) {
+	fs := flag.NewFlagSet("globals", flag.ContinueOnError)
+	globalFlags(fs)
+	fs.VisitAll(func(f *flag.Flag) {
+		if !strings.Contains(globalLine, "--"+f.Name) && !strings.Contains(globalLine, "-"+f.Name) {
+			t.Errorf("global flag --%s is not in %q", f.Name, globalLine)
+		}
+	})
+}
+
+// Everything after a bare -- belongs to the program being run on the node, help
+// tokens included: `node exec master -- csql --help` is a question for csql. It
+// used to print our own usage and exit 0, so the command never ran.
+func TestHelpStopsAtTheDoubleDash(t *testing.T) {
+	home := t.TempDir()
+	code, out, _ := invoke(t, home, "node", "exec", "master", "--cluster", "nope", "--", "csql", "--help")
+	if code != ExitPrecondition {
+		t.Errorf("exit %d, want %d (the command must run, not answer with usage)", code, ExitPrecondition)
+	}
+	if strings.Contains(out, "usage: csb") {
+		t.Errorf("csb answered a question meant for csql:\n%s", out)
+	}
+}
+
+// A noun on its own is still an incomplete command, but what it prints is that
+// noun's verbs rather than all thirty-five.
+func TestANounAloneListsItsOwnVerbs(t *testing.T) {
+	home := t.TempDir()
+	code, _, errOut := invoke(t, home, "cluster")
+	if code != ExitUsage {
+		t.Errorf("csb cluster exited %d, want %d", code, ExitUsage)
+	}
+	if !strings.Contains(errOut, "quiesce") {
+		t.Errorf("csb cluster does not list its verbs:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "splitbrain") {
+		t.Errorf("csb cluster lists another noun's verbs:\n%s", errOut)
+	}
+	if code, out, _ := invoke(t, home, "cluster", "--help"); code != ExitOK || !strings.Contains(out, "quiesce") {
+		t.Errorf("csb cluster --help = (%d, %q)", code, out)
+	}
+}
+
+// A flag that does not parse now names the remedy, because the remedy exists.
+func TestAnUnknownFlagPointsAtTheCommandsHelp(t *testing.T) {
+	home := t.TempDir()
+	code, _, errOut := invoke(t, home, "fault", "lag", "master", "--cluster", "nope", "--stag", "apply")
+	if code != ExitUsage {
+		t.Fatalf("exit %d, want %d", code, ExitUsage)
+	}
+	if !strings.Contains(errOut, "unknown flag --stag") {
+		t.Errorf("the message still speaks the flag package's vocabulary: %q", errOut)
+	}
+	if !strings.Contains(errOut, "csb fault lag --help") {
+		t.Errorf("the message does not name the remedy: %q", errOut)
 	}
 }

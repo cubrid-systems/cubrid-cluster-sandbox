@@ -699,10 +699,27 @@ func (a *Assembler) Resolve(ctx context.Context, sel string) ([]string, error) {
 		}
 		return []string{clients[n-1].Name}, nil
 	}
+	// A node's full name is "<cluster>-<suffix>", and both documents that
+	// specify this surface use the SUFFIX in their examples -- README's "n1 also
+	// selects" and 01-cli.md §2's "n1  a node by name". Only the full name
+	// resolved, so `node exec n1 -- ...` failed with "no node" and a caller who
+	// read either document was told, correctly, that a node they can see does
+	// not exist. Worse when the caller does not check: two INSERTs addressed at
+	// n1 land nowhere and the cluster is believed diverged when it is identical.
+	//
+	// The suffix cannot be ambiguous -- it is unique within a cluster by
+	// construction -- so it is accepted, after the full name so an exact match
+	// always wins.
 	for _, n := range a.T.Nodes {
 		if n.Name == sel {
 			return []string{n.Name}, nil
 		}
 	}
-	return nil, fmt.Errorf("no node %q in cluster %s", sel, a.T.Cluster)
+	for _, n := range a.T.Nodes {
+		if n.Name == a.T.Cluster+"-"+sel {
+			return []string{n.Name}, nil
+		}
+	}
+	return nil, fmt.Errorf("no node %q in cluster %s (its nodes are %s)",
+		sel, a.T.Cluster, strings.Join(a.T.NodeNames(), ", "))
 }

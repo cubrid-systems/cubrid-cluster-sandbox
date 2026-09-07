@@ -407,15 +407,20 @@ that is the missing step 0 of a return-to-original-master (§7) — one of the f
 things the tracker could not answer, and the one it turned out to answer
 ([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §4).
 
-Two mechanisms, because a sandbox has two doors:
+One mechanism, because the sandbox has one door this tool owns:
 
 | Mechanism | What it closes | Requires |
 |---|---|---|
 | `broker` | the door applications come through — the field's mechanism | a broker in the topology (`--with-broker`, [`02-topology.md`](02-topology.md) §1) |
-| `load` | this tool's own driver, the only writer in a default sandbox | a load running ([`06-traffic.md`](06-traffic.md)) |
 
-**And the honest limit belongs in the output, not in a footnote.** Neither
-mechanism closes a door the tool does not own: a user's own `csql` session on the
+There were two. The second was `load`, this tool's own driver and the only writer
+in a default sandbox, and it went with the driver
+([`06-traffic.md`](06-traffic.md)): the workload is the caller's program now, and
+a door this tool does not own is not one it can close. `--mechanism` keeps its
+place for the next one rather than being retired with it.
+
+**And the honest limit belongs in the output, not in a footnote.** The mechanism
+does not close a door the tool does not own: a user's own `csql` session on the
 node writes regardless. `cluster quiesce` with no broker **refuses** rather than
 reporting success it cannot deliver (exit 3), and `cluster status` shows which
 mechanism is in force so a reader knows which writers were actually stopped.

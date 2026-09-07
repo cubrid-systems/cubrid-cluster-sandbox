@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -142,10 +143,236 @@ type stepResult struct {
 	Why     string  `json:"why,omitempty"`
 }
 
+// scenarioSchemaHelp is what `scenario run --help` was missing. The four flags
+// were documented and the file format was not, and the file is the part a caller
+// has to write: the schema was recoverable only by reading a Go type name out of
+// an unmarshal error, or by opening a scenario in this repository.
+const scenarioSchemaHelp = `the file (JSON; unknown keys are refused and named):
+
+  name     string                 what this reproduces
+  cluster  { preset, clients, tools, network, with_broker, set[], set_hidden[] }
+  matrix   { key: [values] }      one run per combination
+  repeats  int                    times to repeat each combination
+  measure  [ role_change.measured | role_change.predicted
+             canary.seconds | diff.differs ]
+  steps    [ step, ... ]
+
+  a step is a verb, a wait, or both -- and needs at least one:
+    note                string    what this step is for
+    run                 [argv]    a command line this tool already accepts
+    expect_exit         int       default 0; see the exit codes above
+    contains / absent   [string]  what the step must / must not have printed
+    role_change_within  "10s"     against the record's measured interval
+    await               { masters, standbys, master_is }
+    within              "60s"     bound on await; default 60s
+
+  ${name} substitutes into cluster.set/set_hidden and every step's argv, from
+  a matrix key or from the two the runner supplies: ${cluster} (this run's
+  cluster) and ${repeat}.
+
+  Each run keeps its record; the run prints which cluster to ask for it.
+  --purge drops them instead.
+
+example:
+  { "name": "a partition makes two masters",
+    "cluster": { "preset": "ha" },
+    "steps": [
+      { "await": { "masters": 1, "standbys": 1 }, "within": "60s" },
+      { "run": ["repl", "check"], "contains": ["arrived"] },
+      { "run": ["fault", "partition", "slave"], "await": { "masters": 2 }, "within": "120s" }
+    ] }
+`
+
 func scenarioFlags(fs *flag.FlagSet) {
 	fs.String("build", "", "the engine under test; the scenario does not name one")
 	fs.String("name", "", "cluster name (default: derived from the scenario)")
 	fs.Bool("keep", false, "leave the cluster standing when a step fails")
+	fs.Bool("purge", false, "drop each run's record too; by default they are kept, as cluster destroy keeps them")
+}
+
+// measurable is the closed list Measure's own comment claims. It was closed in
+// prose only: an unknown name produced a column of nulls rather than a refusal,
+// which is a table reporting something nobody can go and look at.
+var measurable = []string{
+	"role_change.measured", "role_change.predicted", "canary.seconds", "diff.differs",
+}
+
+// createdRoles are the values `master_is` can name. They are roles at CREATE
+// time, which is the point of the field.
+var createdRoles = []string{"master", "slave", "standalone"}
+
+var bindingRef = regexp.MustCompile(`\$\{([^}]*)\}`)
+
+// validate refuses a scenario for what it says, before a cluster is stood up for
+// it. Every check here used to be paid for at runtime and most of them after
+// `cluster create` had already spent its fifty seconds: a verb misspelt in step
+// nine is a two-minute round trip to learn, and a `${score}` that no matrix key
+// fills is not learned at all -- string substitution leaves the literal text in
+// the argv, so a sweep runs every point against the same value and reports a
+// table.
+func (s *Scenario) validate() error {
+	// The two bindings the runner supplies itself, beside the matrix: the repeat
+	// counter, and the generated cluster name a step needs to tell somebody's
+	// program which database to talk to.
+	bound := map[string]bool{"repeat": true, "cluster": true}
+	for k := range s.Matrix {
+		bound[k] = true
+	}
+
+	for _, m := range s.Measure {
+		if !oneOf(m, measurable) {
+			return Usage("measure %q is not something this tool emits (want: %s)",
+				m, strings.Join(measurable, ", "))
+		}
+	}
+	if err := allBound("cluster.set", s.Cluster.Set, bound); err != nil {
+		return err
+	}
+	if err := allBound("cluster.set_hidden", s.Cluster.SetHidden, bound); err != nil {
+		return err
+	}
+
+	for i, st := range s.Steps {
+		n := i + 1
+		if len(st.Run) == 0 && st.Await == nil {
+			return Usage("step %d has neither run nor await, so there is nothing for it to do or to assert", n)
+		}
+		if err := allBound(fmt.Sprintf("step %d", n), st.Run, bound); err != nil {
+			return err
+		}
+		if err := knownVerb(n, st.Run); err != nil {
+			return err
+		}
+		if err := knownFlags(n, st.Run); err != nil {
+			return err
+		}
+		if st.Within != "" {
+			if _, err := time.ParseDuration(st.Within); err != nil {
+				return Usage("step %d: within %q is not a duration (60s, 2m, 1h30m)", n, st.Within)
+			}
+		}
+		if st.RoleChange != "" {
+			if _, err := time.ParseDuration(st.RoleChange); err != nil {
+				return Usage("step %d: role_change_within %q is not a duration (60s, 2m)", n, st.RoleChange)
+			}
+		}
+		if st.Await != nil && st.Await.MasterIs != "" && !oneOf(st.Await.MasterIs, createdRoles) {
+			return Usage("step %d: master_is %q is not a created role (want: %s)",
+				n, st.Await.MasterIs, strings.Join(createdRoles, ", "))
+		}
+	}
+	return nil
+}
+
+// knownVerb checks a step's argv against the same registry the command line
+// dispatches through, which is what makes "a step is an argv this tool already
+// accepts" checkable rather than only stated.
+func knownVerb(n int, argv []string) error {
+	if len(argv) == 0 {
+		return nil
+	}
+	if len(argv) == 1 {
+		return Usage("step %d: run needs a noun and a verb, and has only %q", n, argv[0])
+	}
+	noun, verb := argv[0], argv[1]
+	if strings.Contains(noun, "${") || strings.Contains(verb, "${") {
+		return nil // resolved per matrix point; nothing to check here
+	}
+	if _, ok := lookup(noun, verb); ok {
+		return nil
+	}
+	if !knownNoun(noun) {
+		return Usage("step %d: unknown noun %q (want: %s)", n, noun, strings.Join(nouns, ", "))
+	}
+	return Usage("step %d: %s has no verb %q (want: %s)", n, noun, verb, strings.Join(verbsOf(noun), ", "))
+}
+
+// knownFlags checks a step's flags against the ones its command declares.
+//
+// knownVerb above made "a step is an argv this tool already accepts" true of the
+// verb and left it false of everything after it, so `["repl","check","--waitt"]`
+// was accepted, a cluster was built for it, and the run died thirty seconds later
+// on a typo that was visible before anything started.
+//
+// Only the NAMES are checked, not the values: a value can be `${interval}`,
+// which is filled per matrix point and cannot parse as a duration here. A name
+// cannot come from a binding, so there is nothing to wait for.
+func knownFlags(n int, argv []string) error {
+	if len(argv) < 2 {
+		return nil
+	}
+	cmd, ok := lookup(argv[0], argv[1])
+	if !ok {
+		return nil // knownVerb already said so
+	}
+	fs := flag.NewFlagSet(cmd.key(), flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	globalFlags(fs)
+	if cmd.Flags != nil {
+		cmd.Flags(fs)
+	}
+
+	wantsValue := false
+	for _, a := range argv[2:] {
+		if a == "--" {
+			return nil // the rest belongs to another program
+		}
+		if wantsValue {
+			wantsValue = false
+			continue
+		}
+		if len(a) < 2 || a[0] != '-' {
+			continue // a positional: a selector, a file
+		}
+		name := strings.TrimLeft(a, "-")
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i] // --stage=apply carries its own value
+			if fs.Lookup(name) == nil {
+				return Usage("step %d: %s has no flag --%s", n, cmd.key(), name)
+			}
+			continue
+		}
+		f := fs.Lookup(name)
+		if f == nil {
+			return Usage("step %d: %s has no flag --%s", n, cmd.key(), name)
+		}
+		// A bool takes no value, so the next token is the next flag or a
+		// positional. Everything else consumes what follows, which is why a
+		// value like -1 is not read as a flag of its own.
+		if b, isBool := f.Value.(interface{ IsBoolFlag() bool }); !isBool || !b.IsBoolFlag() {
+			wantsValue = true
+		}
+	}
+	return nil
+}
+
+// allBound reports a ${name} that nothing will fill.
+func allBound(where string, in []string, bound map[string]bool) error {
+	for _, v := range in {
+		for _, m := range bindingRef.FindAllStringSubmatch(v, -1) {
+			if bound[m[1]] {
+				continue
+			}
+			have := make([]string, 0, len(bound))
+			for k := range bound {
+				have = append(have, k)
+			}
+			sort.Strings(have)
+			return Usage("%s refers to ${%s}, which nothing fills (have: %s). An unfilled"+
+				" reference travels into the argv as literal text",
+				where, m[1], strings.Join(have, ", "))
+		}
+	}
+	return nil
+}
+
+func oneOf(s string, in []string) bool {
+	for _, x := range in {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // cmdScenarioRun stands a cluster up, walks the steps, and says pass or fail.
@@ -158,11 +385,25 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		return nil, Precondition("no_scenario", "%v", err)
 	}
 	var s Scenario
-	if err := json.Unmarshal(b, &s); err != nil {
+	// DisallowUnknownFields, because a key this tool does not act on is a key
+	// that silently does nothing -- and half of them are assertions, so the step
+	// runs, checks nothing and prints ok. `contain` for `contains` is the whole
+	// distance between a scenario that verifies something and one that verifies
+	// nothing while passing.
+	//
+	// This is the rule the tool already applies to a CTP conf it did not write
+	// ("unknown keys are refused rather than carried, and named", cluster.go
+	// §ctpSets). Its own format had the weaker rule.
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
 		return nil, Usage("%s is not a scenario: %v", c.Args[0], err)
 	}
 	if len(s.Steps) == 0 {
 		return nil, Usage("%s has no steps", c.Args[0])
+	}
+	if err := s.validate(); err != nil {
+		return nil, err
 	}
 	build := c.str("build")
 	if build == "" {
@@ -255,9 +496,24 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		rr.Passed = !failed
 		anyFailed = anyFailed || failed
 
+		// The record is evidence, and a scenario run is the case that needs it
+		// most: it stands its own cluster up and tears it down, so if this does
+		// not keep the record then nobody can go back and look. It used to
+		// destroy with --purge either way, which deleted the run exactly when it
+		// had failed and somebody had gone looking for why.
+		//
+		// Harvest before destroying. The engine's own HA lines are read out of
+		// the work directory that destroy is about to remove, so a record closed
+		// afterwards has this tool's events and none of the engine's.
+		_, _ = dispatchArgs([]string{"record", "show", "--json"}, name, c.Timeout, &bytes.Buffer{})
+
 		keep := failed && c.str("keep") == "true"
 		if !keep {
-			_, _ = dispatchArgs([]string{"cluster", "destroy", "--purge"}, name, c.Timeout, nil)
+			destroy := []string{"cluster", "destroy"}
+			if c.str("purge") == "true" {
+				destroy = append(destroy, "--purge")
+			}
+			_, _ = dispatchArgs(destroy, name, c.Timeout, nil)
 		} else if !c.JSON && !c.Quiet {
 			fmt.Fprintf(c.Out, "  kept %s; csb cluster destroy --cluster %s --purge\n", name, name)
 		}
@@ -269,6 +525,14 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 	}
 
 	out := map[string]any{"scenario": s.Name, "build": build, "runs": all, "passed": !anyFailed}
+
+	// Say where the evidence is. The cluster names are generated, so a reader who
+	// is not told them cannot ask for the record of the run that just failed --
+	// which is the one moment somebody always wants it.
+	if !c.JSON && !c.Quiet && c.str("purge") != "true" {
+		printRecordsKept(c, all)
+	}
+
 	if anyFailed {
 		return out, Failed("scenario_failed", "%s did not behave as %s says it should", build, c.Args[0])
 	}
@@ -276,6 +540,33 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		fmt.Fprintf(c.Out, "\nPASS — %d run(s)\n", len(all))
 	}
 	return out, nil
+}
+
+// printRecordsKept names the run records this scenario left behind, failures
+// first, because the failed run is the one somebody goes looking for.
+func printRecordsKept(c *Ctx, all []runResult) {
+	var failed, passed []string
+	for _, r := range all {
+		if r.Passed {
+			passed = append(passed, r.Cluster)
+		} else {
+			failed = append(failed, r.Cluster)
+		}
+	}
+	if len(failed)+len(passed) == 0 {
+		return
+	}
+	fmt.Fprintf(c.Out, "\nrun record(s) kept")
+	if len(failed) > 0 {
+		fmt.Fprintf(c.Out, ", failed run(s) first")
+	}
+	fmt.Fprintln(c.Out, ":")
+	for _, n := range append(failed, passed...) {
+		fmt.Fprintf(c.Out, "  csb record show   --cluster %s\n", n)
+	}
+	first := append(failed, passed...)[0]
+	fmt.Fprintf(c.Out, "  csb record export --cluster %s --out run.html\n", first)
+	fmt.Fprintf(c.Out, "  csb cluster destroy --cluster %s --purge   # when you are done with it\n", first)
 }
 
 // points expands the matrix into one binding per combination, in a stable order,
