@@ -17,15 +17,21 @@
 name: e2e
 
 on:
-  schedule:
-    # The nightly lands late evening UTC; give it room, then run.
-    - cron: '0 6 * * *'
+  # No schedule yet, and that is a measurement rather than an oversight: a
+  # GitHub-hosted runner fetches the drop at about 27 KB/s and does not finish,
+  # so a nightly cron here would burn half an hour and fail every night. The
+  # cron comes back the day this runs on a runner that can reach the mirror --
+  # `- cron: '0 6 * * *'`, after the nightly lands.
   workflow_dispatch:
     inputs:
       build:
         description: 'daily_build id (e.g. 11.5.0.2533-cd593bc), or "latest"'
         required: false
         default: latest
+      runner:
+        description: 'runner label. ubuntu-latest cannot fetch the drop at a usable speed -- see the note above'
+        required: false
+        default: ubuntu-latest
 
 permissions:
   contents: read
@@ -35,7 +41,7 @@ env:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -53,10 +59,15 @@ jobs:
           set -euo pipefail
           want='${{ inputs.build || 'latest' }}'
           if [ "$want" = latest ] || [ -z "$want" ]; then
-            id=$(curl -sSf --retry 3 --retry-delay 5 "$FTP/" \
+            # sort -V, not a numeric sort on one field. daily_build carries
+            # SIX release lines (10.2 through 11.5, 554 directories), so
+            # `sort -t. -k4,4n` compares 10.2.18.9024 against 11.5.0.2533 on the
+            # fourth field alone and picks the 10.2 branch. It did exactly that
+            # on the first run.
+            id=$(curl -fsS --retry 3 --retry-delay 5 --max-time 120 "$FTP/" \
                  | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]+/"' \
                  | sed 's/href="//; s|/"$||' \
-                 | sort -t. -k4,4n | tail -1)
+                 | sort -V | tail -1)
           else
             id="$want"
           fi
@@ -78,8 +89,24 @@ jobs:
           set -euo pipefail
           id='${{ steps.resolve.outputs.id }}'
           tgz="CUBRID-$id-Linux.x86_64.tar.gz"
-          curl -sSf --retry 3 --retry-delay 5 -o "$tgz"      "$FTP/$id/drop/$tgz"
-          curl -sSf --retry 3 --retry-delay 5 -o hash.md5    "$FTP/$id/drop/hash.md5"
+          # Fail fast rather than crawl. Measured from a GitHub-hosted runner:
+          # 27 KB/s, and 31 minutes to not finish an 86 MB file -- against
+          # 2.6 MB/s from a machine near the mirror. And plain --retry does not
+          # resume a partial transfer, which is how that run spent half an hour
+          # and ended with "transfer closed with 37077723 bytes remaining".
+          #
+          # So: resume what is on disk, retry every error, give up on a stall
+          # under 100 KB/s for two minutes, and never exceed thirty.
+          get() {
+            curl -fL -o "$2" "$1" \
+              --continue-at - \
+              --retry 5 --retry-all-errors --retry-delay 10 \
+              --connect-timeout 20 --max-time 1800 \
+              --speed-limit 102400 --speed-time 120 \
+              || { echo "::error::could not fetch $1 -- the drop is slow from this runner (27 KB/s measured on a hosted one). A runner near the mirror is what this job needs."; return 1; }
+          }
+          get "$FTP/$id/drop/$tgz"   "$tgz"
+          get "$FTP/$id/drop/hash.md5" hash.md5
           grep -F "$tgz" hash.md5 | tr -d '*' | md5sum -c -
           mkdir -p engine
           tar -xzf "$tgz" -C engine
