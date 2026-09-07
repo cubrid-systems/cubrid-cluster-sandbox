@@ -1,0 +1,58 @@
+# What CI can honestly run here, and nothing else.
+#
+# `make check` is gofmt, go vet and the unit tests: no Docker, no engine, no
+# network. That is the whole of what a hosted runner can verify about this
+# project, and it is deliberately the whole of this workflow.
+#
+# `make e2e` is NOT here and its absence is a decision rather than an oversight.
+# It needs a CUBRID install tree bind-mounted from the host, and this project's
+# first rule is that an engine is never put in an image
+# (docs/design/02-topology.md §3, DESIGN.md §2 G2) -- so there is nothing for a
+# hosted runner to point CSB_E2E_BUILD at. A job that ran it would report a skip
+# as a pass, which is the class of lie the tool itself refuses to tell.
+#
+# It stays not optional, and it runs where an engine is:
+#
+#   make e2e CSB_E2E_BUILD=~/cubrid/install.out
+#
+# Two fault mechanisms in this tool were once merged, documented and never
+# executed. That is what the suite exists for, and no green tick here means it
+# has been run.
+
+name: check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The version comes from go.mod so the toolchain cannot drift from the
+      # module. ADR-001 chose Go for a distribution story with nothing to
+      # install beyond the compiler; this is that claim, checked.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # fmt reports rather than rewrites, so a dirty tree is caught here and not
+      # in a reviewer's diff.
+      - run: make check
+
+      # The static binary is the distribution story the language was chosen for,
+      # so it is built rather than assumed.
+      - run: make dist
+
+      - name: the binary runs and knows what it is
+        run: |
+          ./bin/csb --version
+          ./bin/csb --help > /dev/null
