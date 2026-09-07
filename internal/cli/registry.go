@@ -80,7 +80,7 @@ func init() {
 
 		// ---- scenario --------------------------------------------------------
 		{Noun: "scenario", Verb: "run", Args: "<file>", Summary: "a sequence and what it should reach", Mutates: true,
-			Flags: scenarioFlags, Run: cmdScenarioRun},
+			Flags: scenarioFlags, Run: cmdScenarioRun, Help: scenarioSchemaHelp},
 
 		// ---- record ----------------------------------------------------------
 		{Noun: "record", Verb: "show", Summary: "the timeline", Run: cmdRecordShow,

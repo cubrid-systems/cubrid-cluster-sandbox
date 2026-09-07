@@ -71,6 +71,12 @@ type Command struct {
 	Mutates    bool
 	Flags      func(*flag.FlagSet)
 	Run        func(*Ctx) (any, error)
+
+	// Help is printed after the flags by `<noun> <verb> --help`, for the
+	// commands whose real interface is not their flags. `scenario run` has four
+	// flags and a file format, and the file is the part you have to author:
+	// its help documented the four and not one word of the schema.
+	Help string
 }
 
 func (c Command) key() string { return c.Noun + " " + c.Verb }
@@ -397,6 +403,9 @@ func commandUsage(w io.Writer, cmd Command) {
 	fmt.Fprintf(w, "\n%s\n", globalLine)
 	if strings.Contains(cmd.Args, "selector") {
 		fmt.Fprintf(w, "%s\n", selectorLine)
+	}
+	if cmd.Help != "" {
+		fmt.Fprintf(w, "\n%s\n", strings.TrimRight(cmd.Help, "\n"))
 	}
 }
 

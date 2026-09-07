@@ -68,7 +68,13 @@ which is the whole point (`../DESIGN.md` §2 G3, and the gap the CBRD-26983
 assembly hit when it had to re-read `changemode` to find out who to act on).
 
 Name-based selection stays available because some scenarios mean "the node that
-*was* master", and no role name can express that.
+*was* master", and no role name can express that. Both the full name and its
+suffix resolve — `hadb-n1` and `n1` — because this document and the README have
+both used the short form in their examples since they were written, and only the
+long one worked. A caller who read either was told a node they can see does not
+exist; a caller who did not check the exit code had the command land nowhere,
+which is how two INSERTs meant to diverge a pair went into no database at all and
+the pair was believed broken when it was identical.
 
 ## 3. Commands
 
@@ -230,7 +236,31 @@ replace, so an unfilled reference travels into the argv as the literal text
 `${score}` and a sweep runs every point against the same value.
 
 A verb misspelt in step nine used to be a two-minute round trip to learn. It is
-now an exit **2** before anything is created.
+now an exit **2** before anything is created — and so is a misspelt *flag*, which
+that first pass missed: `lookup` made "a step is an argv this tool already
+accepts" true of the verb and left it false of everything after it, so
+`repl check --waitt 30s` was accepted, a cluster was built for it, and the run
+died thirty seconds later on something visible from the start. Only flag NAMES
+are checked, because a value can be `${interval}` and is filled per matrix point;
+a name cannot come from a binding, so there is nothing to wait for.
+
+**A run keeps its record.** It used to destroy its cluster with `--purge`,
+whether the run passed or failed — so the one command whose whole purpose is
+"write it down and run it against a build" was the one that left nothing to
+compare, attach or argue with, and the run that had just failed was deleted at
+the moment somebody went looking for why. It now tears the cluster down the way
+`cluster destroy` does, which has always kept the record; the engine's own HA
+lines are harvested first, out of the work directory the teardown removes; and
+the run prints which cluster to ask, failures first, because the names are
+generated and a reader who is not told them cannot ask at all. `--purge` on
+`scenario run` opts back out.
+
+**The file format is in `scenario run --help`.** Four flags were documented and
+the schema was not, and the schema is the part a caller has to author: it was
+recoverable only by reading a Go type name out of an unmarshal error
+(`cannot unmarshal string into ... Scenario.steps.10.contains of type []string`)
+or by opening a scenario in this repository. A test walks the structs and fails
+if a field the format accepts is missing from that text, so the two cannot drift.
 
 ### `repl`
 

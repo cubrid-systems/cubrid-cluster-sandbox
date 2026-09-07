@@ -1,9 +1,11 @@
 package assembly
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/engine"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
 
@@ -51,6 +53,45 @@ func TestHAConfWritesThePingParameter(t *testing.T) {
 			if strings.Contains(got, no) {
 				t.Errorf("%s: found %q in\n%s", c.name, no, got)
 			}
+		}
+	}
+}
+
+// Both documents that specify this surface address a node by the SUFFIX of its
+// name -- README's "n1 also selects", and 01-cli.md §2's "n1  a node by name".
+// Only the full "<cluster>-n1" resolved, so a caller who read either was told a
+// node they can see does not exist, and a caller who did not check the exit code
+// had their command land nowhere at all.
+func TestANodeResolvesByItsSuffixAsWellAsItsFullName(t *testing.T) {
+	top, err := topology.Resolve(topology.Options{
+		Name:   "hadb",
+		Engine: &engine.Identity{Kind: "build", Path: "/builds/install.out"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Assembler{T: top}
+
+	for _, sel := range []string{"hadb-n1", "n1"} {
+		got, rerr := a.Resolve(context.Background(), sel)
+		if rerr != nil {
+			t.Errorf("%q: %v", sel, rerr)
+			continue
+		}
+		if len(got) != 1 || got[0] != "hadb-n1" {
+			t.Errorf("%q resolved to %v, want [hadb-n1]", sel, got)
+		}
+	}
+
+	// A name that is neither says so, and names what there is: "no node" with no
+	// list leaves the caller guessing at the very moment they got it wrong.
+	_, rerr := a.Resolve(context.Background(), "n9")
+	if rerr == nil {
+		t.Fatal("a node that does not exist resolved")
+	}
+	for _, want := range []string{"n9", "hadb-n1", "hadb-n2"} {
+		if !strings.Contains(rerr.Error(), want) {
+			t.Errorf("the error does not carry %q: %v", want, rerr)
 		}
 	}
 }

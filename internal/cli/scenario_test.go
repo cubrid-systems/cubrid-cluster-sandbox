@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -107,6 +108,77 @@ func TestShippedScenariosValidate(t *testing.T) {
 		}
 		if _, verr := decodeScenario(t, string(b)); verr != nil {
 			t.Errorf("%s: %v", filepath.Base(p), verr)
+		}
+	}
+}
+
+// knownVerb made "a step is an argv this tool already accepts" true of the verb
+// and left it false of everything after it, so a misspelt flag was accepted, a
+// cluster was built for it, and the run died thirty seconds later on something
+// visible before anything started.
+func TestAStepsFlagsAreCheckedBeforeAnythingIsBuilt(t *testing.T) {
+	bad := []struct{ src, want string }{
+		{`{"name":"x","steps":[{"run":["repl","check","--waitt","30s"]}]}`,
+			`repl check has no flag --waitt`},
+		{`{"name":"x","steps":[{"run":["fault","lag","slave","--stage=aply","--mechansim","suspend"]}]}`,
+			`fault lag has no flag --mechansim`},
+		{`{"name":"x","steps":[{"run":["cluster","status","--jsonn"]}]}`,
+			`cluster status has no flag --jsonn`},
+	}
+	for _, c := range bad {
+		_, err := decodeScenario(t, c.src)
+		if err == nil {
+			t.Errorf("accepted: %s", c.src)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q does not contain %q", err, c.want)
+		}
+	}
+
+	good := []string{
+		// Real flags, in every shape: separate, =-joined, bool, global.
+		`{"name":"x","steps":[{"run":["repl","check","--wait","30s","--json"]}]}`,
+		`{"name":"x","steps":[{"run":["fault","lag","slave","--stage=apply","--mechanism","suspend"]}]}`,
+		// A value that is filled per matrix point cannot parse here, and must
+		// not be mistaken for a flag.
+		`{"name":"x","matrix":{"w":["30s"]},"steps":[{"run":["repl","check","--wait","${w}"]}]}`,
+		// A negative value is a value, not a flag, because the flag before it
+		// is not a bool.
+		`{"name":"x","steps":[{"run":["fault","failcount","--rows","-1"]}]}`,
+		// Everything after a bare -- belongs to another program.
+		`{"name":"x","steps":[{"run":["node","exec","client","--","sh","/tools/x.sh","--anything","-z"]}]}`,
+	}
+	for _, src := range good {
+		if _, err := decodeScenario(t, src); err != nil {
+			t.Errorf("refused a valid step: %v\n%s", err, src)
+		}
+	}
+}
+
+// The schema in `scenario run --help` is prose beside a struct, which is exactly
+// how documentation drifts. Every field the format accepts has to appear in it.
+func TestTheDocumentedSchemaNamesEveryFieldTheFormatAccepts(t *testing.T) {
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(Scenario{}), reflect.TypeOf(ScenarioCluster{}),
+		reflect.TypeOf(Step{}), reflect.TypeOf(Condition{}),
+	} {
+		for i := 0; i < typ.NumField(); i++ {
+			tag := typ.Field(i).Tag.Get("json")
+			name, _, _ := strings.Cut(tag, ",")
+			if name == "" || name == "-" {
+				continue
+			}
+			if !strings.Contains(scenarioSchemaHelp, name) {
+				t.Errorf("%s.%s is accepted and `scenario run --help` does not mention %q",
+					typ.Name(), typ.Field(i).Name, name)
+			}
+		}
+	}
+	// And the closed lists, which are the ones a caller cannot guess.
+	for _, m := range measurable {
+		if !strings.Contains(scenarioSchemaHelp, m) {
+			t.Errorf("measure %q is accepted and undocumented", m)
 		}
 	}
 }

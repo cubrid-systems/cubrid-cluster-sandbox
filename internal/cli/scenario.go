@@ -143,10 +143,51 @@ type stepResult struct {
 	Why     string  `json:"why,omitempty"`
 }
 
+// scenarioSchemaHelp is what `scenario run --help` was missing. The four flags
+// were documented and the file format was not, and the file is the part a caller
+// has to write: the schema was recoverable only by reading a Go type name out of
+// an unmarshal error, or by opening a scenario in this repository.
+const scenarioSchemaHelp = `the file (JSON; unknown keys are refused and named):
+
+  name     string                 what this reproduces
+  cluster  { preset, clients, tools, network, with_broker, set[], set_hidden[] }
+  matrix   { key: [values] }      one run per combination
+  repeats  int                    times to repeat each combination
+  measure  [ role_change.measured | role_change.predicted
+             canary.seconds | diff.differs ]
+  steps    [ step, ... ]
+
+  a step is a verb, a wait, or both -- and needs at least one:
+    note                string    what this step is for
+    run                 [argv]    a command line this tool already accepts
+    expect_exit         int       default 0; see the exit codes above
+    contains / absent   [string]  what the step must / must not have printed
+    role_change_within  "10s"     against the record's measured interval
+    await               { masters, standbys, master_is }
+    within              "60s"     bound on await; default 60s
+
+  ${name} substitutes into cluster.set/set_hidden and every step's argv, from
+  a matrix key or from the two the runner supplies: ${cluster} (this run's
+  cluster) and ${repeat}.
+
+  Each run keeps its record; the run prints which cluster to ask for it.
+  --purge drops them instead.
+
+example:
+  { "name": "a partition makes two masters",
+    "cluster": { "preset": "ha" },
+    "steps": [
+      { "await": { "masters": 1, "standbys": 1 }, "within": "60s" },
+      { "run": ["repl", "check"], "contains": ["arrived"] },
+      { "run": ["fault", "partition", "slave"], "await": { "masters": 2 }, "within": "120s" }
+    ] }
+`
+
 func scenarioFlags(fs *flag.FlagSet) {
 	fs.String("build", "", "the engine under test; the scenario does not name one")
 	fs.String("name", "", "cluster name (default: derived from the scenario)")
 	fs.Bool("keep", false, "leave the cluster standing when a step fails")
+	fs.Bool("purge", false, "drop each run's record too; by default they are kept, as cluster destroy keeps them")
 }
 
 // measurable is the closed list Measure's own comment claims. It was closed in
@@ -202,6 +243,9 @@ func (s *Scenario) validate() error {
 		if err := knownVerb(n, st.Run); err != nil {
 			return err
 		}
+		if err := knownFlags(n, st.Run); err != nil {
+			return err
+		}
 		if st.Within != "" {
 			if _, err := time.ParseDuration(st.Within); err != nil {
 				return Usage("step %d: within %q is not a duration (60s, 2m, 1h30m)", n, st.Within)
@@ -241,6 +285,65 @@ func knownVerb(n int, argv []string) error {
 		return Usage("step %d: unknown noun %q (want: %s)", n, noun, strings.Join(nouns, ", "))
 	}
 	return Usage("step %d: %s has no verb %q (want: %s)", n, noun, verb, strings.Join(verbsOf(noun), ", "))
+}
+
+// knownFlags checks a step's flags against the ones its command declares.
+//
+// knownVerb above made "a step is an argv this tool already accepts" true of the
+// verb and left it false of everything after it, so `["repl","check","--waitt"]`
+// was accepted, a cluster was built for it, and the run died thirty seconds later
+// on a typo that was visible before anything started.
+//
+// Only the NAMES are checked, not the values: a value can be `${interval}`,
+// which is filled per matrix point and cannot parse as a duration here. A name
+// cannot come from a binding, so there is nothing to wait for.
+func knownFlags(n int, argv []string) error {
+	if len(argv) < 2 {
+		return nil
+	}
+	cmd, ok := lookup(argv[0], argv[1])
+	if !ok {
+		return nil // knownVerb already said so
+	}
+	fs := flag.NewFlagSet(cmd.key(), flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	globalFlags(fs)
+	if cmd.Flags != nil {
+		cmd.Flags(fs)
+	}
+
+	wantsValue := false
+	for _, a := range argv[2:] {
+		if a == "--" {
+			return nil // the rest belongs to another program
+		}
+		if wantsValue {
+			wantsValue = false
+			continue
+		}
+		if len(a) < 2 || a[0] != '-' {
+			continue // a positional: a selector, a file
+		}
+		name := strings.TrimLeft(a, "-")
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i] // --stage=apply carries its own value
+			if fs.Lookup(name) == nil {
+				return Usage("step %d: %s has no flag --%s", n, cmd.key(), name)
+			}
+			continue
+		}
+		f := fs.Lookup(name)
+		if f == nil {
+			return Usage("step %d: %s has no flag --%s", n, cmd.key(), name)
+		}
+		// A bool takes no value, so the next token is the next flag or a
+		// positional. Everything else consumes what follows, which is why a
+		// value like -1 is not read as a flag of its own.
+		if b, isBool := f.Value.(interface{ IsBoolFlag() bool }); !isBool || !b.IsBoolFlag() {
+			wantsValue = true
+		}
+	}
+	return nil
 }
 
 // allBound reports a ${name} that nothing will fill.
@@ -393,9 +496,24 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		rr.Passed = !failed
 		anyFailed = anyFailed || failed
 
+		// The record is evidence, and a scenario run is the case that needs it
+		// most: it stands its own cluster up and tears it down, so if this does
+		// not keep the record then nobody can go back and look. It used to
+		// destroy with --purge either way, which deleted the run exactly when it
+		// had failed and somebody had gone looking for why.
+		//
+		// Harvest before destroying. The engine's own HA lines are read out of
+		// the work directory that destroy is about to remove, so a record closed
+		// afterwards has this tool's events and none of the engine's.
+		_, _ = dispatchArgs([]string{"record", "show", "--json"}, name, c.Timeout, &bytes.Buffer{})
+
 		keep := failed && c.str("keep") == "true"
 		if !keep {
-			_, _ = dispatchArgs([]string{"cluster", "destroy", "--purge"}, name, c.Timeout, nil)
+			destroy := []string{"cluster", "destroy"}
+			if c.str("purge") == "true" {
+				destroy = append(destroy, "--purge")
+			}
+			_, _ = dispatchArgs(destroy, name, c.Timeout, nil)
 		} else if !c.JSON && !c.Quiet {
 			fmt.Fprintf(c.Out, "  kept %s; csb cluster destroy --cluster %s --purge\n", name, name)
 		}
@@ -407,6 +525,14 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 	}
 
 	out := map[string]any{"scenario": s.Name, "build": build, "runs": all, "passed": !anyFailed}
+
+	// Say where the evidence is. The cluster names are generated, so a reader who
+	// is not told them cannot ask for the record of the run that just failed --
+	// which is the one moment somebody always wants it.
+	if !c.JSON && !c.Quiet && c.str("purge") != "true" {
+		printRecordsKept(c, all)
+	}
+
 	if anyFailed {
 		return out, Failed("scenario_failed", "%s did not behave as %s says it should", build, c.Args[0])
 	}
@@ -414,6 +540,33 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		fmt.Fprintf(c.Out, "\nPASS — %d run(s)\n", len(all))
 	}
 	return out, nil
+}
+
+// printRecordsKept names the run records this scenario left behind, failures
+// first, because the failed run is the one somebody goes looking for.
+func printRecordsKept(c *Ctx, all []runResult) {
+	var failed, passed []string
+	for _, r := range all {
+		if r.Passed {
+			passed = append(passed, r.Cluster)
+		} else {
+			failed = append(failed, r.Cluster)
+		}
+	}
+	if len(failed)+len(passed) == 0 {
+		return
+	}
+	fmt.Fprintf(c.Out, "\nrun record(s) kept")
+	if len(failed) > 0 {
+		fmt.Fprintf(c.Out, ", failed run(s) first")
+	}
+	fmt.Fprintln(c.Out, ":")
+	for _, n := range append(failed, passed...) {
+		fmt.Fprintf(c.Out, "  csb record show   --cluster %s\n", n)
+	}
+	first := append(failed, passed...)[0]
+	fmt.Fprintf(c.Out, "  csb record export --cluster %s --out run.html\n", first)
+	fmt.Fprintf(c.Out, "  csb cluster destroy --cluster %s --purge   # when you are done with it\n", first)
 }
 
 // points expands the matrix into one binding per combination, in a stable order,

@@ -65,11 +65,15 @@ here. Then use it — `node exec` runs a command with the engine's environment
 already set:
 
 ```bash
+$ export CSB_CLUSTER=hadb                   # or pass --cluster to every command
 $ csb node exec master -- "csql -u dba -c 'CREATE TABLE t(i INT PRIMARY KEY);' hadb"
 $ csb cluster describe --json | jq .data.engine
 { "kind": "build", "version": "11.5.0", "commit": "dd15f7f", "min_glibc": "2.34" }
 $ csb cluster destroy --cluster hadb        # keeps the run record; --purge drops it
 ```
+
+Every verb needs to know which cluster it is talking about, and there is no
+"the only one" rule: `--cluster NAME` on each, or `CSB_CLUSTER` once.
 
 `master` and `slave` are queries, not labels: after a failover `master` names the
 other machine, so a script written before the failover runs unchanged after it.
@@ -95,7 +99,7 @@ csb fault lag slave --stage apply             # one stage, not "slow"
 csb fault splitbrain --flavour ping-survives
 csb fault failcount slave --rows 200          # move fail_counter deliberately
 csb fault ping-unavailable slave
-csb fault clear --all
+csb fault clear                               # every condition; name one to clear just it
 ```
 
 ![The same route-level cut, twice, animated. On the left ha_ping_hosts is set and the ping host survives: the master pings successfully, concludes it is not partitioned and stays master, while the slave pings successfully, finds nothing to cancel its failover and promotes — two masters in 9 s, from a correct configuration. On the right the ping host is cut from the master too: it demotes itself, the failover is clean, and forty-five seconds after the heal the roles are still swapped because only one master exists and nothing triggers](docs/assets/anim-splitbrain.svg)
@@ -168,6 +172,17 @@ with. `matrix` and `repeats` turn one scenario into many runs, `${name}`
 substitutes into the cluster parameters and every step, and `measure` names what
 to collect from a closed list of fields the tool already emits
 ([`docs/design/01-cli.md`](docs/design/01-cli.md)).
+
+Two bindings come from the runner rather than the matrix: **`${cluster}`** is the
+name of the cluster this run stood up, which is how a step tells your program
+which database to talk to, and **`${repeat}`** is the repeat counter. A run keeps
+its record, and the run says which cluster to ask:
+
+```
+run record(s) kept, failed run(s) first:
+  csb record show   --cluster scn41287
+  csb record export --cluster scn41287 --out run.html
+```
 
 ## Traffic
 
