@@ -273,6 +273,25 @@ side by side in the same tracker. A script that asks what the team requires "of
 failback" can therefore be answered about either one, which is why it names the
 operation it means rather than the word.
 
+**Where does `make e2e` run? — raised 2026-09-07**
+([`DESIGN.md`](DESIGN.md) §9 OQ12). CI exists now: `check.yml` runs gofmt, vet
+and the unit tests on every push. The suite that matters cannot join it, because
+it needs an engine and §2 G2 forbids putting one in an image. `e2e.yml` fetches
+CUBRID's own nightly drop and caches it by build id, and every part of that was
+measured and works — 283 MB with a verifying `hash.md5`, `GLIBC_2.2.5` against
+the base image's 2.39, and 17 pass 0 fail when the tarball is fetched by hand and
+run locally.
+
+**The link is what does not work.** From a GitHub-hosted runner that fetch runs
+at about **27 KB/s** and did not finish an 86 MB file in 31 minutes, against
+2.6 MB/s near the mirror. Three hours for a nightly that changes daily, and
+mirroring pays the same rate. So the workflow has no schedule and takes `runner`
+as an input. **There is no runner yet, and one may be introduced later** — the
+day it is, one dispatch answers both open halves: whether the drop is fast from
+inside, and whether a runner grants `NET_ADMIN` and `iptables` in a container,
+which two fault mechanisms need and which this project has already shipped
+unexecuted once. If no runner appears, deleting `e2e.yml` is the honest end.
+
 **Implementation language — decided 2026-09-02.**
 [`design/ADR-001`](design/ADR-001-implementation-language.md) accepts **Go** for
 the provisioner and shell for the operator-facing scripts. The earlier draft
