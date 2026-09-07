@@ -1,0 +1,117 @@
+# The end-to-end suite against a real engine, which `check.yml` cannot run.
+#
+# It needs a CUBRID install tree, and this project never puts an engine in an
+# image (docs/design/02-topology.md §3) -- so the tree is fetched from CUBRID's
+# own nightly drop and cached by its build id. The id is the directory name
+# upstream publishes and the string `cubrid_rel` reports, so a cache hit means
+# the same engine and a miss means a new one.
+#
+# THIS IS NOT A PULL-REQUEST GATE, deliberately. A red run here means either the
+# tool broke or the engine did, and those are not the same news. Making it block
+# a pull request would make somebody else's commit in another repository able to
+# fail yours, which is how a check gets ignored. Every run names the engine build
+# it ran against, in the summary, because telling those two apart afterwards is
+# the whole difficulty -- this project has already spent a day on exactly that
+# confusion.
+
+name: e2e
+
+on:
+  schedule:
+    # The nightly lands late evening UTC; give it room, then run.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      build:
+        description: 'daily_build id (e.g. 11.5.0.2533-cd593bc), or "latest"'
+        required: false
+        default: latest
+
+permissions:
+  contents: read
+
+env:
+  FTP: https://ftp.cubrid.org/CUBRID_Engine/nightly/daily_build
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # The build id is resolved before anything is fetched, because it is the
+      # cache key AND the one fact a failure has to carry.
+      - id: resolve
+        name: resolve the nightly build id
+        run: |
+          set -euo pipefail
+          want='${{ inputs.build || 'latest' }}'
+          if [ "$want" = latest ] || [ -z "$want" ]; then
+            id=$(curl -sSf --retry 3 --retry-delay 5 "$FTP/" \
+                 | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]+/"' \
+                 | sed 's/href="//; s|/"$||' \
+                 | sort -t. -k4,4n | tail -1)
+          else
+            id="$want"
+          fi
+          [ -n "$id" ] || { echo "could not resolve a build id from $FTP/"; exit 1; }
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "engine build: **$id**" >> "$GITHUB_STEP_SUMMARY"
+
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: engine
+          key: cubrid-${{ steps.resolve.outputs.id }}
+
+      # Only on a miss. The published md5 is checked before anything is
+      # unpacked: this is a binary from outside the repository.
+      - name: fetch and verify the engine
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          id='${{ steps.resolve.outputs.id }}'
+          tgz="CUBRID-$id-Linux.x86_64.tar.gz"
+          curl -sSf --retry 3 --retry-delay 5 -o "$tgz"      "$FTP/$id/drop/$tgz"
+          curl -sSf --retry 3 --retry-delay 5 -o hash.md5    "$FTP/$id/drop/hash.md5"
+          grep -F "$tgz" hash.md5 | tr -d '*' | md5sum -c -
+          mkdir -p engine
+          tar -xzf "$tgz" -C engine
+          rm -f "$tgz" hash.md5
+          test -x engine/CUBRID/bin/cub_server
+
+      - name: what this ran against
+        run: |
+          CUBRID=$PWD/engine/CUBRID engine/CUBRID/bin/cubrid_rel | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The suite keeps a failed cluster's state, and this project's logs live on
+      # the host rather than inside the containers -- so the failure is uploadable.
+      - name: make e2e
+        env:
+          CSB_E2E_BUILD: ${{ github.workspace }}/engine/CUBRID
+          CSB_E2E_HOME: ${{ github.workspace }}/csb-home
+        run: make e2e CSB_E2E_BUILD="$CSB_E2E_BUILD"
+
+      - name: the engine's own words, when it failed
+        if: failure()
+        run: |
+          echo "engine build was ${{ steps.resolve.outputs.id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "a red run here is the tool OR the engine; compare with the last green id" >> "$GITHUB_STEP_SUMMARY"
+        continue-on-error: true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: csb-state-${{ steps.resolve.outputs.id }}
+          path: |
+            csb-home/clusters/*/record.jsonl
+            csb-home/clusters/*/describe.json
+            csb-home/clusters/*/work/*/cubrid/log/**
+          retention-days: 14
+          if-no-files-found: warn
