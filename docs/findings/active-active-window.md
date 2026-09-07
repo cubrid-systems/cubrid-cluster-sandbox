@@ -2,9 +2,9 @@
 title: The Active-Active window after a healed partition, and the divergence it leaves
 category: findings
 project: cluster-sandbox
-summary: Six runs, two arms, three repeats each. The window is real and it is as long as ha_calc_score_interval_in_msecs — about 12 s at 15000, about 1 s at the default. What it leaves behind is not "data syncing both ways" but a one-directional merge: the promoted slave's rows reach the restored master, the master's rows never reach the slave, and every gauge afterwards reports a healthy cluster. A master calling itself to-be-master was not observed in any run.
+summary: Six runs, two arms, three repeats each. The window is real and it is as long as ha_calc_score_interval_in_msecs — about 12 s at 15000, about 1 s at the default. What it leaves behind is not "data syncing both ways" but a one-directional merge: the promoted slave's rows reach the restored master, the master's rows never reach the slave, and every gauge afterwards reports a healthy cluster. A master calling itself to-be-master was not observed in any run. Re-measured on 2026-09-07 against a develop build four months newer: seven runs, the same direction every time, and the one-row-per-side limit lifted.
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-07
 lang: en
 ---
 
@@ -131,9 +131,65 @@ is not the same as saying it does not happen — a different engine build, a
 different node count or a longer interval may produce it. It is recorded as
 unreproduced rather than dismissed.
 
+## Re-measured, because a reader reported the opposite
+
+A CUBRID engineer who had never used this tool was given the README and asked to
+reproduce something. They picked this. They wrote disjoint rows on each master
+during a split, healed it, and reported both databases converging to the
+**union** — the "both ways" this finding says does not happen — and the same
+scenario file passing on one run and failing on the next.
+
+That is the report this project exists to take seriously, so the method above was
+run again on 2026-09-07 against **11.5.0 `5f3a30d`**, a develop build four months
+newer than the one measured here:
+
+| arm | runs | restored master ← promoted slave's rows | standby ← master's rows |
+|---|---|---|---|
+| the method above, one row per side | 3 | **yes 3/3** | **no 3/3** |
+| two rows on the master's side only | 2 | — | **no 2/2** |
+| the reader's shape: 2 rows and 3 rows | 2 | **yes 2/2** | **no 2/2** |
+
+```
+during split:  n1=[1 10 11]             n2=[1 20 21 22]
+after heal:    n1=[1 10 11 20 21 22]    n2=[1 20 21 22]     n1=active n2=standby
+```
+
+Seven runs, one direction, no exceptions. **The finding stands**, and the last
+two rows of that table lift the limit below: the merge is one-directional for
+several rows per side as well as for one, and the standby's loss scales with what
+the master wrote rather than being a single stranded row.
+
+**What the reader actually hit was a defect in this tool, not in the engine.**
+`n1` was documented as a selector by both the README and
+[`../design/01-cli.md`](../design/01-cli.md) §2 and implemented by neither — only
+the full `hadb-n1` resolved. So their divergence INSERTs went into no database at
+all, and the two sides being identical after the heal was replication working
+normally rather than a bidirectional merge. They said so in their own report
+before drawing the conclusion; the failure is that a command which does nothing
+looks so much like one that worked. It is fixed, and the reproduction above was
+run after the fix.
+
+**A measurement is only as good as the addressing underneath it.** This project
+has published a result from a single sample before and had to shrink it
+([`switchover-threshold.md`](switchover-threshold.md)); this is the same lesson
+from the other side — a tool that silently addresses nothing can manufacture a
+contradiction out of a cluster that was never touched.
+
+One thing has changed since this was written, in the right direction. The section
+above says the divergence is reported by nothing, and lists the gauges that call
+it healthy. `repl diff` was built the same day out of exactly that complaint, and
+on the reproduction clusters it says so without being asked:
+
+```
+csb: 1 table(s) differ between aawx1-n1 and aawx1-n2: w. Replication may be
+perfectly healthy and still never carry what is missing; the field's closure is
+a slave rebuild
+```
+
 ## Limits
 
-- One engine build (11.5.0, `dd15f7f`), one machine, two nodes, containers on one
+- Two engine builds (11.5.0 `dd15f7f` for the six runs here, 11.5.0 `5f3a30d`
+  for the seven that re-measured them), one machine, two nodes, containers on one
   docker network.
 - The window is measured by **accepted writes**, one probe per node per second,
   so the baseline figure of about a second is at the resolution floor. The
@@ -142,9 +198,10 @@ unreproduced rather than dismissed.
 - `both_write_s` is the last second at which both nodes accepted a write, not a
   continuous-occupancy measure. It is an upper bound on the window's end, not a
   guarantee that every second inside it was dual-writable.
-- The divergence check is one row per side. It shows that a merge happened in one
-  direction and not the other; it does not bound how much data a longer or busier
-  split would strand.
+- The divergence check was one row per side when this was written. The
+  re-measurement above extends it to two and three rows per side with the same
+  result, so the direction is not an artefact of writing a single row — but it
+  still does not bound how much data a longer or busier split would strand.
 
 ## What follows
 
