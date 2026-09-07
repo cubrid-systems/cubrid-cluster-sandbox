@@ -1,10 +1,14 @@
 package backend
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/engine"
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
 
@@ -59,5 +63,55 @@ func TestBaseImageTagIsDerivedFromTheRecipe(t *testing.T) {
 	}
 	if BaseImage() != tag {
 		t.Error("the tag must be stable for an unchanged recipe")
+	}
+}
+
+// fakeDocker puts a `docker` on PATH that behaves the way the test names, so the
+// three ways docker can be unusable are checkable without making a machine be in
+// any of them.
+func fakeDocker(t *testing.T, script string) {
+	t.Helper()
+	dir := t.TempDir()
+	if script != "" {
+		if err := os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+}
+
+// A docker that cannot be used is a precondition, and which of the three it is
+// decides the remedy: install it, start it, or join the group. They used to
+// arrive as one message -- whichever docker command the assembly reached first,
+// reported as an internal command that exited 1.
+func TestPreflightSaysWhichWayDockerIsUnusable(t *testing.T) {
+	cases := []struct {
+		name, script, want string
+	}{
+		{"not installed", "", "not on this machine's PATH"},
+		{"daemon unreachable",
+			"echo 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock' >&2; exit 1",
+			"daemon could not be reached"},
+		{"socket not permitted",
+			"echo 'permission denied while trying to connect to the Docker daemon socket' >&2; exit 1",
+			"docker group"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fakeDocker(t, c.script)
+			d := &Docker{R: &run.Runner{}}
+			err := d.Preflight(context.Background())
+			if err == nil {
+				t.Fatalf("%s: reported usable", c.name)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("%s: %q does not contain %q", c.name, err, c.want)
+			}
+		})
+	}
+
+	fakeDocker(t, "echo 29.0.1")
+	if err := (&Docker{R: &run.Runner{}}).Preflight(context.Background()); err != nil {
+		t.Errorf("a working docker was refused: %v", err)
 	}
 }

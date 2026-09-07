@@ -108,6 +108,15 @@ itself, so nothing needs to run first — compares it with the image's own
 `ldd --version`, and refuses with that sentence rather than with a linker error
 ([`../DESIGN.md`](../DESIGN.md) §7). It is a precondition failure, exit 3.
 
+**The other failure is the one the audience actually hits first**, and it is not
+a failure of the engine at all. `~/cubrid` is the tree a CUBRID developer lives
+in and `~/cubrid/install.out` is what the build puts in it — one directory apart,
+and `--build ~/cubrid` is what muscle memory types. The tool knows which of the
+two it was handed, because it can look, so it says `is the source tree; the build
+is in it: pass --build ~/cubrid/install.out` rather than the true but unhelpful
+`does not look like a CUBRID install tree`. A directory that is neither still
+gets the plain sentence.
+
 ## 4. The `describe` artifact
 
 The output of `csb cluster describe`, and the input to `csb cluster create

@@ -226,6 +226,19 @@ that needed a forced promotion is not the same evidence as one that did not.
 
 ## 4. Container requirements
 
+**Docker is asked whether it can be used before anything is spent assuming it
+can.** `cluster create` — both paths, since the check sits in the half they share
+— runs one `docker version` and maps the three ways it can fail onto the three
+different remedies: not on `PATH` (install it), a daemon that cannot be reached
+(start it), and a socket this user is not permitted (join the `docker` group, and
+log in again). All three are precondition failures, exit **3**.
+
+They used to arrive as one message, and it was whichever docker command the
+assembly happened to reach first, reported as an internal one: `csb: docker build
+-q -t csb-base:c2441fad0156 /tmp/csb-base-3108629510 exited 1: Cannot connect to
+the Docker daemon`. That is a precondition wearing a build step's clothes, and
+the commonest case of the three is indistinguishable in it from the second.
+
 Not preferences; each one is load-bearing.
 
 | Requirement | Why |

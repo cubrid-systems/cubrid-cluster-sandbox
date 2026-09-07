@@ -91,6 +91,37 @@ func (d *Docker) docker(ctx context.Context, args ...string) (*run.Result, error
 	return res, nil
 }
 
+// Preflight asks docker whether it can be used at all, and says which of the
+// three ways it cannot.
+//
+// Without it the first failure a new user sees is whichever docker command the
+// assembly happened to reach first, reported as an internal one:
+//
+//	csb: docker build -q -t csb-base:c2441fad0156 /tmp/csb-base-3108629510 exited 1:
+//	Cannot connect to the Docker daemon at unix:///var/run/docker.sock
+//
+// That is a precondition wearing a build step's clothes, and the commonest case
+// -- a user who is not in the docker group -- looks exactly the same as a daemon
+// that is not running while needing a different remedy.
+func (d *Docker) Preflight(ctx context.Context) error {
+	res, err := d.R.Run(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+	if err != nil {
+		return fmt.Errorf("docker is not on this machine's PATH, and a node is a container: %w", err)
+	}
+	if res.ExitCode == 0 {
+		return nil
+	}
+	stderr := strings.TrimSpace(res.Stderr)
+	if i := strings.IndexByte(stderr, '\n'); i > 0 {
+		stderr = stderr[:i]
+	}
+	if strings.Contains(stderr, "permission denied") {
+		return fmt.Errorf("docker is installed and this user cannot reach its socket: %s"+
+			". Add yourself to the docker group (and log in again), or run as a user that is in it", stderr)
+	}
+	return fmt.Errorf("docker is installed and its daemon could not be reached: %s", stderr)
+}
+
 // EnsureImage builds the base image if this machine does not have it. Returns
 // true when it had to build, which the caller reports because the first run of
 // the tool is otherwise a mysterious minute.

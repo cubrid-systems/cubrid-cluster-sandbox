@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -148,6 +149,129 @@ func scenarioFlags(fs *flag.FlagSet) {
 	fs.Bool("keep", false, "leave the cluster standing when a step fails")
 }
 
+// measurable is the closed list Measure's own comment claims. It was closed in
+// prose only: an unknown name produced a column of nulls rather than a refusal,
+// which is a table reporting something nobody can go and look at.
+var measurable = []string{
+	"role_change.measured", "role_change.predicted", "canary.seconds", "diff.differs",
+}
+
+// createdRoles are the values `master_is` can name. They are roles at CREATE
+// time, which is the point of the field.
+var createdRoles = []string{"master", "slave", "standalone"}
+
+var bindingRef = regexp.MustCompile(`\$\{([^}]*)\}`)
+
+// validate refuses a scenario for what it says, before a cluster is stood up for
+// it. Every check here used to be paid for at runtime and most of them after
+// `cluster create` had already spent its fifty seconds: a verb misspelt in step
+// nine is a two-minute round trip to learn, and a `${score}` that no matrix key
+// fills is not learned at all -- string substitution leaves the literal text in
+// the argv, so a sweep runs every point against the same value and reports a
+// table.
+func (s *Scenario) validate() error {
+	// The two bindings the runner supplies itself, beside the matrix: the repeat
+	// counter, and the generated cluster name a step needs to tell somebody's
+	// program which database to talk to.
+	bound := map[string]bool{"repeat": true, "cluster": true}
+	for k := range s.Matrix {
+		bound[k] = true
+	}
+
+	for _, m := range s.Measure {
+		if !oneOf(m, measurable) {
+			return Usage("measure %q is not something this tool emits (want: %s)",
+				m, strings.Join(measurable, ", "))
+		}
+	}
+	if err := allBound("cluster.set", s.Cluster.Set, bound); err != nil {
+		return err
+	}
+	if err := allBound("cluster.set_hidden", s.Cluster.SetHidden, bound); err != nil {
+		return err
+	}
+
+	for i, st := range s.Steps {
+		n := i + 1
+		if len(st.Run) == 0 && st.Await == nil {
+			return Usage("step %d has neither run nor await, so there is nothing for it to do or to assert", n)
+		}
+		if err := allBound(fmt.Sprintf("step %d", n), st.Run, bound); err != nil {
+			return err
+		}
+		if err := knownVerb(n, st.Run); err != nil {
+			return err
+		}
+		if st.Within != "" {
+			if _, err := time.ParseDuration(st.Within); err != nil {
+				return Usage("step %d: within %q is not a duration (60s, 2m, 1h30m)", n, st.Within)
+			}
+		}
+		if st.RoleChange != "" {
+			if _, err := time.ParseDuration(st.RoleChange); err != nil {
+				return Usage("step %d: role_change_within %q is not a duration (60s, 2m)", n, st.RoleChange)
+			}
+		}
+		if st.Await != nil && st.Await.MasterIs != "" && !oneOf(st.Await.MasterIs, createdRoles) {
+			return Usage("step %d: master_is %q is not a created role (want: %s)",
+				n, st.Await.MasterIs, strings.Join(createdRoles, ", "))
+		}
+	}
+	return nil
+}
+
+// knownVerb checks a step's argv against the same registry the command line
+// dispatches through, which is what makes "a step is an argv this tool already
+// accepts" checkable rather than only stated.
+func knownVerb(n int, argv []string) error {
+	if len(argv) == 0 {
+		return nil
+	}
+	if len(argv) == 1 {
+		return Usage("step %d: run needs a noun and a verb, and has only %q", n, argv[0])
+	}
+	noun, verb := argv[0], argv[1]
+	if strings.Contains(noun, "${") || strings.Contains(verb, "${") {
+		return nil // resolved per matrix point; nothing to check here
+	}
+	if _, ok := lookup(noun, verb); ok {
+		return nil
+	}
+	if !knownNoun(noun) {
+		return Usage("step %d: unknown noun %q (want: %s)", n, noun, strings.Join(nouns, ", "))
+	}
+	return Usage("step %d: %s has no verb %q (want: %s)", n, noun, verb, strings.Join(verbsOf(noun), ", "))
+}
+
+// allBound reports a ${name} that nothing will fill.
+func allBound(where string, in []string, bound map[string]bool) error {
+	for _, v := range in {
+		for _, m := range bindingRef.FindAllStringSubmatch(v, -1) {
+			if bound[m[1]] {
+				continue
+			}
+			have := make([]string, 0, len(bound))
+			for k := range bound {
+				have = append(have, k)
+			}
+			sort.Strings(have)
+			return Usage("%s refers to ${%s}, which nothing fills (have: %s). An unfilled"+
+				" reference travels into the argv as literal text",
+				where, m[1], strings.Join(have, ", "))
+		}
+	}
+	return nil
+}
+
+func oneOf(s string, in []string) bool {
+	for _, x := range in {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
 // cmdScenarioRun stands a cluster up, walks the steps, and says pass or fail.
 func cmdScenarioRun(c *Ctx) (any, error) {
 	if len(c.Args) != 1 {
@@ -158,11 +282,25 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		return nil, Precondition("no_scenario", "%v", err)
 	}
 	var s Scenario
-	if err := json.Unmarshal(b, &s); err != nil {
+	// DisallowUnknownFields, because a key this tool does not act on is a key
+	// that silently does nothing -- and half of them are assertions, so the step
+	// runs, checks nothing and prints ok. `contain` for `contains` is the whole
+	// distance between a scenario that verifies something and one that verifies
+	// nothing while passing.
+	//
+	// This is the rule the tool already applies to a CTP conf it did not write
+	// ("unknown keys are refused rather than carried, and named", cluster.go
+	// §ctpSets). Its own format had the weaker rule.
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&s); err != nil {
 		return nil, Usage("%s is not a scenario: %v", c.Args[0], err)
 	}
 	if len(s.Steps) == 0 {
 		return nil, Usage("%s has no steps", c.Args[0])
+	}
+	if err := s.validate(); err != nil {
+		return nil, err
 	}
 	build := c.str("build")
 	if build == "" {

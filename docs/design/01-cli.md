@@ -35,13 +35,19 @@ Seven nouns, one per thing a user can hold in their head:
 | `fault` | the failure vocabulary |
 | `repl` | replication, as an observable |
 | `ha` | role transitions |
-| `load` | the workload driver ([`06-traffic.md`](06-traffic.md)) |
+| `scenario` | a sequence of the above, written down and run against a build |
 | `record` | what happened to this cluster ([`07-record.md`](07-record.md)) |
 
-The last two are late additions and the reason is worth keeping: phase 0 assumed
-a scenario brings its own traffic and leaves its own notes. The field's tracker
-showed that assumption is what left its threshold measurement unusable for four
-years — a load nobody specified, and a result nobody could attribute.
+`record` is a late addition and the reason is worth keeping: phase 0 assumed a
+scenario leaves its own notes. The field's tracker showed that assumption is what
+left its threshold measurement unusable for four years — a load nobody specified,
+and a result nobody could attribute.
+
+There was an eighth, `load`, and it is gone: the driver could not exceed about
+twenty statements a second and its numbers kept being read as the engine's, so
+the workload went back to being the caller's program and this tool's job is the
+place it runs ([`06-traffic.md`](06-traffic.md)). What it did that was not a
+workload is `fault contend`.
 
 ## 2. Selectors
 
@@ -187,6 +193,32 @@ cannot report something nobody can go and look at.
 
 JSON rather than YAML because this tool has no dependencies and is not acquiring
 one for a config format.
+
+**A scenario is refused for what it says, before a cluster is stood up for it.**
+Two rules, and both were learned from what the format used to tolerate.
+
+*Unknown keys are refused and named.* This is the rule the tool already applies
+to a CTP `ha_repl.conf` it did not write ([`02-topology.md`](02-topology.md) §7)
+— the engine accepts a file with a key it ignores, so a typo takes effect nowhere
+and is reported by nothing. Its own format had the weaker rule, and the cost is
+worse here than there: half the keys in a step are *assertions*, so `contain` for
+`contains` produced a step that ran, checked nothing and printed `ok`. A green
+result that verified nothing is the one failure a tool like this cannot have.
+
+*Everything checkable is checked before `cluster create`.* Every step's argv goes
+through the same `lookup` the command line dispatches through, which is what
+makes "a step is an argv this tool already accepts" a property rather than a
+sentence; `within` and `role_change_within` have to parse as durations, where an
+unparseable `within` used to fall back to 60 s in silence; `master_is` has to be
+a role a node can be created with; `measure` has to be on the closed list its own
+paragraph claims, where an unknown name used to produce a column of nulls; and
+every `${name}` has to be filled by a matrix key or by one of the two bindings
+the runner supplies itself (`cluster`, `repeat`) — substitution is a string
+replace, so an unfilled reference travels into the argv as the literal text
+`${score}` and a sweep runs every point against the same value.
+
+A verb misspelt in step nine used to be a two-minute round trip to learn. It is
+now an exit **2** before anything is created.
 
 ### `repl`
 
@@ -366,3 +398,42 @@ surface ever again promises something ahead of its implementation.
 `--verbose` is worth its keep for a tool whose main value is knowing an ordering
 a user does not: seeing what it ran is how somebody learns the assembly, and how
 they debug it when an engine release changes the sequence.
+
+## 8. Help
+
+`--help` is resolved against the surface rather than by scanning for the token,
+because where it appears says what it is asking about:
+
+```
+csb --help                 the whole surface: seven nouns and their verbs
+csb cluster --help         one noun's verbs
+csb cluster create --help  one command, and the flags IT declares
+csb node exec master -- csql --help    a question for csql, not for csb
+```
+
+The last line is the reason it is resolved rather than scanned. A bare `--` ends
+this tool's arguments — the same rule `--json` follows for the same reason — and
+a help token after it belongs to the program being run on the node. Scanning
+answered it here and never ran the command.
+
+**A command's own flags are part of the surface, and were reachable only from
+the README.** Forty-five of them, each declared with a written description beside
+it and printed nowhere: the only way to learn that `fault lag` takes `--stage`,
+or that `cluster create` takes `--from-ctp`, was to read a document. `--help`
+after a noun and a verb now prints that command's flag set, rendered with the
+double dash every line of documentation uses rather than the flag package's
+single one. A test walks the registry and fails if any declared flag is missing
+from its command's help, so a flag cannot go back to being invisible.
+
+The **selector grammar** (§2) and the **exit codes** (§6) are in the global help
+for the same reason: `[selector]` in a usage line means nothing to somebody who
+has not read §2, and a harness author should not have to.
+
+A noun on its own — `csb cluster` — is an incomplete command and still exits
+**2**, but what it prints is that noun's verbs rather than all thirty-five.
+
+**A flag that does not parse names the remedy.** `flag provided but not defined:
+-stage` is the flag package's vocabulary: one dash where every line of this
+project's documentation uses two, and no way to find out what *is* defined —
+which, until the paragraph above, was true. It now reads `unknown flag --stag
+(csb fault lag --help lists this command's flags)`.

@@ -927,7 +927,7 @@ func cmdFaultFailcount(c *Ctx) (any, error) {
 
 func quiesceFlags(fs *flag.FlagSet) {
 	fs.String("mode", "ro", "ro (reads allowed) or so (slave only)")
-	fs.String("mechanism", "broker", "broker (the field's mechanism) or load (this tool's own driver)")
+	fs.String("mechanism", "broker", "broker: the field's own mechanism, and since csb load went the only one")
 }
 
 func cmdClusterQuiesce(c *Ctx) (any, error) {
@@ -957,9 +957,9 @@ func cmdClusterQuiesce(c *Ctx) (any, error) {
 		return nil, Usage("unknown --mechanism %q (want broker)", mech)
 	}
 
-	// Neither mechanism closes a door the tool does not own.
+	// It does not close a door the tool does not own.
 	c.Note("writers_not_all_stopped", SevWarn,
-		"a session opened directly against a node still writes; quiesce closes the broker and this tool's driver, and says which")
+		"a session opened directly against a node still writes; the broker is the only door this tool owns")
 	if !c.JSON && !c.Quiet {
 		fmt.Fprintf(c.Out, "quiesced %s (mechanism=%s mode=%s)\n", c.Cluster, orUnknown(mech), c.str("mode"))
 		printNotes(c)

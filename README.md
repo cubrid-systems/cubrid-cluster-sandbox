@@ -156,6 +156,12 @@ exits 4 when the row does not arrive, `repl diff` exits 1 when the sides differ 
 plus `contains`/`absent` on what a step printed, `role_change_within` against the
 record's measured interval, and `await` for a state to arrive.
 
+A scenario is refused for what it says before a cluster is stood up for it: an
+unknown key is named rather than dropped, every step's argv goes through the same
+lookup the command line does, and every `${name}` has to be filled by something.
+A misspelt `contains` used to produce a step that ran, asserted nothing and
+printed `ok`.
+
 The build is an argument to the run rather than a field in the file, so one
 scenario runs against the build you just made and the one you are comparing it
 with. `matrix` and `repeats` turn one scenario into many runs, `${name}`
@@ -201,6 +207,10 @@ of the resource it runs on — a condition, held until cleared.
 | `ha` | `status` `promote` `failback` `resync` |
 | `scenario` | `run` |
 | `record` | `show` `export` |
+
+`csb <noun> <verb> --help` lists that command's own flags, `csb <noun> --help`
+lists one noun's verbs, and `csb --help` lists all seven — with the selector
+grammar and the exit codes, which is where a first-time caller needs them.
 
 Every command takes `--json` and has a documented exit code. Human output may
 change; `--json` is the contract:

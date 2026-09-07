@@ -253,6 +253,12 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	}
 
 	d := &backend.Docker{R: r}
+	// Ask docker whether it can be used before spending anything on the
+	// assumption that it can. It is a precondition, and it exits 3 like every
+	// other one rather than 1 through whichever command reached it first.
+	if err := d.Preflight(c.Ctx); err != nil {
+		return nil, Precondition("docker_unusable", "%v", err)
+	}
 	built, err := d.EnsureImage(c.Ctx, t)
 	if err != nil {
 		return nil, Failed("image_unavailable", "%v", err)
