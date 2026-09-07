@@ -38,9 +38,10 @@ sudo install bin/csb /usr/local/bin/     # optional
   CI runs on every push and pull request, and it is all CI can run.
 - `make e2e CSB_E2E_BUILD=~/cubrid/install.out` — the whole surface against a
   real build, about two minutes. Run it against an engine build before trusting
-  the tool with one. **CI cannot run this**: the engine is never in an image, so
-  a hosted runner has nothing to point `CSB_E2E_BUILD` at, and a job that ran it
-  would report a skip as a pass. A green tick does not mean the suite has run.
+  the tool with one. CI runs it **nightly, not on pull requests**: it fetches
+  CUBRID's own nightly drop, caches it by build id, and names that id in every
+  run — because a red suite means the tool broke *or* the engine did, and a check
+  that somebody else's commit can fail is a check people learn to ignore.
 
 State lives under `$CSB_HOME` (default `~/.local/share/csb`), one directory per
 cluster holding its `describe` artifact and its run record.

@@ -5,13 +5,13 @@
 # project, and it is deliberately the whole of this workflow.
 #
 # `make e2e` is NOT here and its absence is a decision rather than an oversight.
-# It needs a CUBRID install tree bind-mounted from the host, and this project's
-# first rule is that an engine is never put in an image
-# (docs/design/02-topology.md §3, DESIGN.md §2 G2) -- so there is nothing for a
-# hosted runner to point CSB_E2E_BUILD at. A job that ran it would report a skip
-# as a pass, which is the class of lie the tool itself refuses to tell.
+# It needs a real engine and it is a different kind of news: a red suite means
+# the tool broke OR the engine did. Gating a pull request on that lets somebody
+# else's commit, in another repository, fail yours -- so it lives in e2e.yml on a
+# schedule instead.
 #
-# It stays not optional, and it runs where an engine is:
+# It stays not optional, and it runs in e2e.yml -- nightly and on demand, against
+# CUBRID's own nightly drop, cached by build id -- and locally against your tree:
 #
 #   make e2e CSB_E2E_BUILD=~/cubrid/install.out
 #
