@@ -115,3 +115,47 @@ func TestPreflightSaysWhichWayDockerIsUnusable(t *testing.T) {
 		t.Errorf("a working docker was refused: %v", err)
 	}
 }
+
+// A node has to be allowed to write a core. Nothing set the limit, so a node
+// inherited dockerd's -- commonly 0 -- and the one artifact that says why the
+// engine died was discarded in silence.
+func TestANodeMayWriteACore(t *testing.T) {
+	top, err := topology.Resolve(topology.Options{
+		Name:   "hadb",
+		Engine: &engine.Identity{Kind: "build", Path: "/builds/install.out"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	top.Image = "csb-base:test"
+	line := strings.Join(NodePlan(top, top.Nodes[0], "/work/hadb", "/res", 1000, 1000), " ")
+	if !strings.Contains(line, "--ulimit core=-1:-1") {
+		t.Errorf("a node is started with no core limit raised: %s", line)
+	}
+}
+
+// Raising the limit is necessary and not sufficient: core_pattern decides where
+// the core goes, is machine-wide rather than per-container, and when it pipes to
+// a host crash handler a container's core is dropped with nothing said. csb
+// cannot change it, so it has to name it.
+func TestCorePatternNoteFiresOnlyWhenCoresAreLost(t *testing.T) {
+	dir := "/home/u/.local/share/csb/clusters/hadb/work/<node>/db"
+
+	msg := CorePatternNote("|/usr/share/apport/apport -p%p -s%s", dir)
+	if msg == "" {
+		t.Fatal("a piped core_pattern loses container cores and was not reported")
+	}
+	for _, want := range []string{"apport", "sysctl", CoreDest, dir} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the note does not carry %q: %s", want, msg)
+		}
+	}
+
+	// A pattern that writes a file is not a problem, and saying so anyway would
+	// be noise on every create.
+	for _, ok := range []string{"core", "/db/core.%e.%p", "/var/cores/%e-%p", ""} {
+		if got := CorePatternNote(ok, dir); got != "" {
+			t.Errorf("core_pattern %q writes a file and was reported anyway: %s", ok, got)
+		}
+	}
+}

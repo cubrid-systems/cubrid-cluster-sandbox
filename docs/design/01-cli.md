@@ -123,6 +123,18 @@ csb node exec    <selector> -- <command...>
 know that naming to read a failure. The default is every kind, newest lines
 first read; `--which` narrows it to the process the user suspects.
 
+**The logs are on the host, and `node logs` says where.** The engine writes into
+a bind-mounted work directory, so this verb tails files on this machine rather
+than shelling into a container — which is why it still answers for a node whose
+container is stopped, or gone, and why it is the right verb for a node that
+crashed. The path was nonetheless hidden: it was `json:"-"` on the field, and the
+directory was named in exactly one place, the note that says there are *no* logs.
+The address was therefore available when there was nothing to read and absent
+when there was something. Every file now carries its host `path` in the envelope,
+`data.dir` carries the work directory, and the human output prints the path under
+each header — so a reader can grep across the files, attach the directory to a
+ticket, or point another tool at it without already knowing the layout.
+
 Two details are from running it. The engine keeps a `<db>_latest.err` symlink
 beside each dated file, and following it prints the same log twice — or fails
 outright when it is stale and points at a file that has been rotated away, which

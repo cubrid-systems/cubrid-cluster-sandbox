@@ -53,7 +53,17 @@ type logFile struct {
 	Kind string `json:"kind"`
 	Node string `json:"node"`
 	Rel  string `json:"file"`
-	Path string `json:"-"`
+	// The path on THIS machine, not inside the container. These logs are on the
+	// host already -- the engine writes into a bind-mounted work directory and
+	// this verb tails them from here, which is why it still works on a node
+	// whose container is stopped or gone.
+	//
+	// It used to be `json:"-"`, and the directory appeared in exactly one place:
+	// the note that says there are no logs. So the address was available when
+	// there was nothing to read and hidden when there was. Anyone wanting to
+	// grep across the files, attach the directory to a ticket, or point another
+	// tool at it had to already know the layout.
+	Path string `json:"path"`
 	Size int64  `json:"bytes"`
 }
 
@@ -147,7 +157,7 @@ func cmdNodeLogs(c *Ctx) (any, error) {
 	if len(found) == 0 {
 		c.Note("no_logs", SevWarn,
 			fmt.Sprintf("no %s log has been written yet under %s", which, filepath.Join(a.Workdir, "<node>", "cubrid", "log")))
-		return map[string]any{"files": []logFile{}, "db": t.DB}, nil
+		return map[string]any{"files": []logFile{}, "db": t.DB, "dir": a.Workdir}, nil
 	}
 
 	offsets := make([]int64, len(found))
@@ -161,7 +171,7 @@ func cmdNodeLogs(c *Ctx) (any, error) {
 		}
 		offsets[i] = end
 		if !c.JSON && !c.Quiet {
-			fmt.Fprintf(c.Out, "== %s  %s (%s)\n", f.Node, f.Rel, f.Kind)
+			fmt.Fprintf(c.Out, "== %s  %s (%s)\n   %s\n", f.Node, f.Rel, f.Kind, f.Path)
 			for _, l := range ls {
 				fmt.Fprintln(c.Out, l)
 			}
@@ -173,7 +183,7 @@ func cmdNodeLogs(c *Ctx) (any, error) {
 	if !c.JSON && !c.Quiet {
 		printNotes(c)
 	}
-	return map[string]any{"files": found, "db": t.DB}, nil
+	return map[string]any{"files": found, "db": t.DB, "dir": a.Workdir}, nil
 }
 
 // followFiles prints what arrives after the tail, until the context ends.

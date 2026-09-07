@@ -122,6 +122,49 @@ func (d *Docker) Preflight(ctx context.Context) error {
 	return fmt.Errorf("docker is installed and its daemon could not be reached: %s", stderr)
 }
 
+// CorePattern reads the kernel's core_pattern, which decides where a crashing
+// process's core goes. It is a machine-wide setting rather than a per-container
+// one, so this reports rather than changes it.
+func CorePattern() (string, error) {
+	b, err := os.ReadFile("/proc/sys/kernel/core_pattern")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// CoreDest is where a core written by a node lands on this machine, given a
+// core_pattern that is a plain path. `/db` is already bind-mounted per node, so
+// a pattern under it needs no new mount and no new bookkeeping.
+const CoreDest = "/db/core.%e.%p"
+
+// CorePatternNote says whether a node's crash will leave a core anyone can open,
+// and what to do when it will not.
+//
+// Three layers have to agree and only two are ours: the container's core ulimit,
+// which NodePlan now raises; the destination, which is already a host-mounted
+// directory; and core_pattern, which is neither. A pattern beginning with `|`
+// hands the core to a host-side crash handler -- apport on Ubuntu -- which does
+// not attribute a container process to a host package and drops it. The result
+// is no core anywhere, with nothing said, which is how an engine that segfaults
+// under load gets diagnosed from the kernel ring buffer instead of a backtrace.
+//
+// It returns "" when the pattern will produce a file.
+func CorePatternNote(pattern, hostDBDir string) string {
+	if pattern == "" || !strings.HasPrefix(pattern, "|") {
+		return ""
+	}
+	handler := strings.Fields(strings.TrimPrefix(pattern, "|"))
+	name := "a host crash handler"
+	if len(handler) > 0 {
+		name = handler[0]
+	}
+	return "kernel.core_pattern pipes cores to " + name +
+		", which does not keep one written by a process inside a container: a node that crashes will leave no core." +
+		" To collect them: sudo sysctl -w kernel.core_pattern='" + CoreDest + "'" +
+		" -- they then appear under " + hostDBDir + ". It is a machine-wide setting, so csb reports it rather than changing it"
+}
+
 // EnsureImage builds the base image if this machine does not have it. Returns
 // true when it had to build, which the caller reports because the first run of
 // the tool is otherwise a mysterious minute.
@@ -192,6 +235,13 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir, resultsDir stri
 		"--cap-add=NET_ADMIN", // the fault mechanisms are route and qdisc operations
 		"--shm-size", t.Resources.ShmSize,
 		"--user", strconv.Itoa(uid) + ":" + strconv.Itoa(gid), // files stay editable on the host
+		// A crashing engine must be allowed to write a core. Nothing was set
+		// here, so a node inherited whatever soft limit dockerd happened to
+		// have -- commonly 0, which silently discards the one artifact that
+		// says why cub_server died. Raising it is necessary and not sufficient:
+		// the kernel's core_pattern decides where the core goes and is global
+		// rather than per-container, which is why CorePatternNote exists.
+		"--ulimit", "core=-1:-1",
 		"--label", "csb.cluster=" + t.Cluster,
 		"--label", "csb.node=" + node.Name,
 		"--label", "csb.role=" + node.Role,

@@ -290,6 +290,15 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		return nil, Failed("store_unwritable", "%v", err)
 	}
+	// Say now, while a cluster is being built to break, whether a crash on it
+	// will leave anything to open. The alternative is finding out afterwards,
+	// which is how a segfaulting engine came to be diagnosed here from the
+	// kernel ring buffer with no backtrace at all.
+	if pattern, perr := backend.CorePattern(); perr == nil {
+		if msg := backend.CorePatternNote(pattern, filepath.Join(workdir, "<node>", "db")); msg != "" {
+			c.Note("cores_not_collected", SevWarn, msg)
+		}
+	}
 	// The network comes before the artifact, because the ping host is resolved
 	// from it and the artifact has to carry what the cluster was actually built
 	// with -- a describe that omits the ping host describes a different cluster.
