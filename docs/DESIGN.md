@@ -964,3 +964,46 @@ tailnet. The split-brain flavours would be **re-measured**, not re-designed.
 
 **Yes as a backend option, no as a default**, and the spike's scope is those four
 operations.
+
+**OQ12 — Where does `make e2e` run, now that CI exists and cannot run it?**
+*Owner*: this project, with whoever owns CI runners. *Raised* 2026-09-07.
+*Verification*: one `workflow_dispatch` of `e2e.yml` reaching `make e2e` and
+finishing, on whatever runner is chosen.
+
+`check.yml` runs gofmt, `go vet` and the unit tests on every push, which is all a
+hosted runner can honestly verify about this project. The suite that matters —
+the one whose absence let two fault mechanisms be merged, documented and never
+executed — needs a real engine, and §2 G2 forbids putting one in an image. So
+`e2e.yml` fetches CUBRID's own nightly drop and caches it by build id.
+
+**Everything about that works except the link.** Measured 2026-09-07: the tarball
+is 283 MB with a published `hash.md5` that verifies, it unpacks to the layout
+`engine.Resolve` asks for, a fresh install tree is 242 MB compressed against a
+10 GB cache, and the published nightly needs `GLIBC_2.2.5` against the base
+image's 2.39 — the glibc floor, which was the worry, has enormous margin.
+Downloaded by hand and run locally, `make e2e` against it is 17 pass, 0 fail.
+
+From a GitHub-hosted runner the same fetch ran at **about 27 KB/s** and did not
+finish an 86 MB file in 31 minutes, against 2.6 MB/s from a machine near the
+mirror. At that rate a 283 MB nightly is three hours, and it changes daily so the
+cache misses daily. **Mirroring the artifact does not help**: the mirroring job
+pays the same rate. So the workflow has no schedule — scheduling something
+measured not to work is worse than not scheduling it — and carries `runner` as an
+input rather than a hardcoded `ubuntu-latest`, because which runner to use is
+this question.
+
+Two things are answered by the first run on a runner inside CUBRID's network, and
+neither is answerable without one:
+
+- **Whether the drop is fast from there.** Presumably yes, which is the whole
+  premise; it has not been measured.
+- **Whether a runner grants `--cap-add=NET_ADMIN` and `iptables` inside a
+  container.** `fault partition --mechanism drop` and `ping-unavailable
+  --mechanism icmp` are both packet-level and both fail without it — and this
+  project has already shipped those two unexecuted once, because `iptables` was
+  missing from the base image (`design/03-assembly.md` §4). A CI that runs
+  everything except them would be the same gap with a green tick over it.
+
+If no runner appears, the honest resolution is to delete `e2e.yml` rather than
+leave a workflow nobody can run, and keep the suite where it has always been: on
+the machine of whoever has an engine.
