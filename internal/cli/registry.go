@@ -128,7 +128,7 @@ func cmdClusterLs(c *Ctx) (any, error) {
 			continue
 		}
 		asked++
-		d := &backend.Docker{R: r, E: k}
+		d := &backend.Driver{R: r, E: k}
 		running, derr := d.RunningClusters(c.Ctx)
 		if derr != nil {
 			c.Note("backend_unavailable", SevWarn,

@@ -63,7 +63,7 @@ func (s *Set) add(a Active) error { s.List = append(s.List, a); return s.save() 
 
 // Injector runs the mechanisms.
 type Injector struct {
-	D *backend.Docker
+	D *backend.Driver
 	T *topology.Topology
 }
 

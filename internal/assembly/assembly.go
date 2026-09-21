@@ -34,7 +34,7 @@ const (
 )
 
 type Assembler struct {
-	D       *backend.Docker
+	D       *backend.Driver
 	T       *topology.Topology
 	Workdir string
 	Log     io.Writer // step narration; nil for silence

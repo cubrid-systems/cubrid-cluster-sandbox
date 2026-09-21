@@ -144,17 +144,17 @@ func TestHasContainerAsksTheBackendItWasGiven(t *testing.T) {
 	// podman holds the container; docker does not.
 	fakeBackends(t, 1, 0)
 
-	if (&Docker{R: &run.Runner{}, E: KindDocker}).HasContainer(context.Background(), "pmha-n1") {
+	if (&Driver{R: &run.Runner{}, E: KindDocker}).HasContainer(context.Background(), "pmha-n1") {
 		t.Error("docker reported a container it does not have")
 	}
-	if !(&Docker{R: &run.Runner{}, E: KindPodman}).HasContainer(context.Background(), "pmha-n1") {
+	if !(&Driver{R: &run.Runner{}, E: KindPodman}).HasContainer(context.Background(), "pmha-n1") {
 		t.Error("podman did not report the container it has")
 	}
 }
 
 func TestHasContainerIsFalseWhenTheBackendIsNotThere(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	if (&Docker{R: &run.Runner{}, E: KindDocker}).HasContainer(context.Background(), "n1") {
+	if (&Driver{R: &run.Runner{}, E: KindDocker}).HasContainer(context.Background(), "n1") {
 		t.Error("a backend that is not installed cannot hold a container")
 	}
 }

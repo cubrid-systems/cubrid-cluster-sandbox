@@ -99,7 +99,7 @@ func TestPreflightSaysWhichWayDockerIsUnusable(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fakeDocker(t, c.script)
-			d := &Docker{R: &run.Runner{}}
+			d := &Driver{R: &run.Runner{}}
 			err := d.Preflight(context.Background())
 			if err == nil {
 				t.Fatalf("%s: reported usable", c.name)
@@ -111,7 +111,7 @@ func TestPreflightSaysWhichWayDockerIsUnusable(t *testing.T) {
 	}
 
 	fakeDocker(t, "echo 29.0.1")
-	if err := (&Docker{R: &run.Runner{}}).Preflight(context.Background()); err != nil {
+	if err := (&Driver{R: &run.Runner{}}).Preflight(context.Background()); err != nil {
 		t.Errorf("a working docker was refused: %v", err)
 	}
 }

@@ -79,7 +79,7 @@ var (
 // `Append LSA`, and nothing else. It does NOT read applyinfo's Estimated Delay,
 // which is the field the design's objection was actually about: that one prints
 // "-" on its first sample because process_rate is zero until a second iteration.
-func MasterAppend(ctx context.Context, d *backend.Docker, t *topology.Topology, from, master string) (int, error) {
+func MasterAppend(ctx context.Context, d *backend.Driver, t *topology.Topology, from, master string) (int, error) {
 	res, err := d.Exec(ctx, from, t.DB, "cubrid applyinfo -r "+master+" "+t.DB+" 2>/dev/null")
 	if err != nil {
 		return 0, err
@@ -92,7 +92,7 @@ func MasterAppend(ctx context.Context, d *backend.Docker, t *topology.Topology, 
 }
 
 // Read gathers tier 1 and tier 2 for every node in the topology.
-func Read(ctx context.Context, d *backend.Docker, t *topology.Topology) (*Status, error) {
+func Read(ctx context.Context, d *backend.Driver, t *topology.Topology) (*Status, error) {
 	live := map[string]bool{}
 	if states, err := d.Nodes(ctx, t.Cluster); err == nil {
 		for _, s := range states {
@@ -124,7 +124,7 @@ func Read(ctx context.Context, d *backend.Docker, t *topology.Topology) (*Status
 // Without it a stalled copier shows a falling or zero apply lag -- the
 // reassuring direction -- because the applier keeps draining what is already on
 // disk while nothing new arrives.
-func attachMasterReference(ctx context.Context, d *backend.Docker, t *topology.Topology, st *Status) {
+func attachMasterReference(ctx context.Context, d *backend.Driver, t *topology.Topology, st *Status) {
 	master := ""
 	for _, n := range st.Nodes {
 		if n.Server == "registered_and_active" {
@@ -156,7 +156,7 @@ func attachMasterReference(ctx context.Context, d *backend.Docker, t *topology.T
 
 // readRepl reads db_ha_apply_info over SQL. Everything it can go wrong in is a
 // note with a code, because each corresponds to something that was measured.
-func readRepl(ctx context.Context, d *backend.Docker, t *topology.Topology, node string, notes *[]Note) *Repl {
+func readRepl(ctx context.Context, d *backend.Driver, t *topology.Topology, node string, notes *[]Note) *Repl {
 	res, err := d.Exec(ctx, node, t.DB,
 		"csql -u dba -t -N -c 'SELECT eof_lsa_pageid, final_lsa_pageid, fail_counter FROM db_ha_apply_info' "+t.DB+" 2>/dev/null")
 	if err != nil || res.ExitCode != 0 {
@@ -225,7 +225,7 @@ type Canary struct {
 }
 
 // Check writes a marker on master and waits for it on standby.
-func Check(ctx context.Context, d *backend.Docker, t *topology.Topology, master, standby, table string, wait time.Duration) (*Canary, error) {
+func Check(ctx context.Context, d *backend.Driver, t *topology.Topology, master, standby, table string, wait time.Duration) (*Canary, error) {
 	if table == "" {
 		table = "csb_canary"
 	}

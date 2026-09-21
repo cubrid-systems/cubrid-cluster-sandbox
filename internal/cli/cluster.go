@@ -258,7 +258,7 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 				"); it may be in a state the engine's documentation does not describe")
 	}
 
-	d := &backend.Docker{R: r, E: backendFor(c, t.Backend)}
+	d := &backend.Driver{R: r, E: backendFor(c, t.Backend)}
 	// Ask the backend whether it can be used before spending anything on the
 	// assumption that it can. It is a precondition, and it exits 3 like every
 	// other one rather than 1 through whichever command reached it first.
@@ -450,7 +450,7 @@ func loadCluster(c *Ctx) (*assembly.Assembler, *topology.Topology, error) {
 	if err := json.Unmarshal(b, &t); err != nil {
 		return nil, nil, Failed("describe_malformed", "%v", err)
 	}
-	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: backendFor(c, t.Backend)}
+	d := &backend.Driver{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: backendFor(c, t.Backend)}
 	a := &assembly.Assembler{D: d, T: &t, Workdir: filepath.Join(c.Store.ClusterDir(c.Cluster), "work")}
 	if !c.Quiet && !c.JSON {
 		a.Log = c.Out
@@ -517,7 +517,7 @@ func cmdClusterDown(c *Ctx) (any, error) {
 
 var glibcRe = regexp.MustCompile(`(\d+\.\d+)\s*$`)
 
-func imageGlibc(ctx context.Context, d *backend.Docker, image string) (string, error) {
+func imageGlibc(ctx context.Context, d *backend.Driver, image string) (string, error) {
 	res, err := d.RunInImage(ctx, image, "ldd", "--version")
 	if err != nil || res.ExitCode != 0 {
 		return "", fmt.Errorf("ldd --version in %s failed", image)
@@ -564,7 +564,7 @@ func cmdClusterDestroy(c *Ctx) (any, error) {
 		network = c.Cluster + "-net"
 	}
 
-	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: backendFor(c, t.Backend)}
+	d := &backend.Driver{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: backendFor(c, t.Backend)}
 	removed, leftBehind, err := d.Destroy(c.Ctx, c.Cluster, network)
 	if err != nil {
 		return nil, Failed("destroy_failed", "%v", err)
@@ -792,7 +792,7 @@ func otherBackendHas(c *Ctx, inUse backend.Kind, node string) (backend.Kind, boo
 		if k == inUse || !k.Available() {
 			continue
 		}
-		d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: k}
+		d := &backend.Driver{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: k}
 		if d.HasContainer(c.Ctx, node) {
 			return k, true
 		}

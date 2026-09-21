@@ -1,6 +1,7 @@
-// Package backend turns a topology into containers. It shells out to docker
-// rather than using the SDK, because the command line is what a user can
-// reproduce by hand (ADR-001), and every plan is a []string a test can read.
+// Package backend turns a topology into containers. It shells out to a
+// container CLI -- docker or podman, which Kind names -- rather than using an
+// SDK, because the command line is what a user can reproduce by hand
+// (ADR-001), and every plan is a []string a test can read.
 //
 // The engine is never in an image. A host-built tree is bind-mounted read-only,
 // so rebuilding the engine rebuilds nothing here -- that is DESIGN.md §2 G2, and
@@ -75,22 +76,31 @@ func imageFor(recipe string) string {
 	return "csb-base:" + hex.EncodeToString(sum[:])[:12]
 }
 
-type Docker struct {
+// Driver performs the eleven operations ADR-002 says a backend must provide,
+// against whichever container CLI E names.
+//
+// Called Driver and not Docker because it drives either one, not Backend
+// because backend.Backend stutters, and not Engine because in this project an
+// engine is CUBRID -- Topology.Engine is the build under test, and a type that
+// took that word would make every `d.Engine` a question.
+type Driver struct {
 	R *run.Runner
 	// E is the container backend. Empty means docker, which is what every
 	// cluster made before this field existed was built with.
-	//
-	// The type is still called Docker: it drives either CLI now, and renaming
-	// it reaches assembly, fault and the CLI for no behaviour. Left as a
-	// follow-up rather than mixed into this change.
 	E Kind
 }
 
-// Cmd is the engine's command name, for a caller that has to build its own
+// Cmd is the backend's command name, for a caller that has to build its own
 // argv -- `node shell`, which replaces this process rather than running one.
-func (d *Docker) Cmd() string { return d.E.Cmd() }
+func (d *Driver) Cmd() string { return d.E.Cmd() }
 
-func (d *Docker) docker(ctx context.Context, args ...string) (*run.Result, error) {
+// cli runs the backend's CLI and turns a non-zero exit into an error.
+//
+// Named cli rather than run because d.R.Run sits beside it in this file and
+// does something different: it reports how the command went, and this decides
+// that a non-zero exit is a failure.
+
+func (d *Driver) cli(ctx context.Context, args ...string) (*run.Result, error) {
 	cmd := d.E.Cmd()
 	res, err := d.R.Run(ctx, cmd, args...)
 	if err != nil {
@@ -115,7 +125,7 @@ func (d *Docker) docker(ctx context.Context, args ...string) (*run.Result, error
 // That is a precondition wearing a build step's clothes, and the commonest case
 // -- a user who is not in the docker group -- looks exactly the same as a daemon
 // that is not running while needing a different remedy.
-func (d *Docker) Preflight(ctx context.Context) error {
+func (d *Driver) Preflight(ctx context.Context) error {
 	res, err := d.R.Run(ctx, d.E.Cmd(), "version", "--format", "{{.Server.Version}}")
 	if err != nil {
 		return fmt.Errorf("%s is not on this machine's PATH, and a node is a container: %w", d.E.Cmd(), err)
@@ -193,7 +203,7 @@ func CorePatternNote(pattern, hostDBDir string) string {
 // EnsureImage builds the recipe THIS topology needs, which is not always the
 // base one: a tailnet topology has a tailnet client in it, and because the tag
 // is the hash of the recipe the two are different images that never collide.
-func (d *Docker) EnsureImage(ctx context.Context, t *topology.Topology) (bool, error) {
+func (d *Driver) EnsureImage(ctx context.Context, t *topology.Topology) (bool, error) {
 	recipe := Recipe(t)
 	tag := imageFor(recipe)
 	if _, err := d.R.Run(ctx, d.E.Cmd(), "image", "inspect", tag); err == nil {
@@ -209,17 +219,17 @@ func (d *Docker) EnsureImage(ctx context.Context, t *topology.Topology) (bool, e
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(recipe), 0o644); err != nil {
 		return false, err
 	}
-	if _, err := d.docker(ctx, "build", "-q", "-t", tag, dir); err != nil {
+	if _, err := d.cli(ctx, "build", "-q", "-t", tag, dir); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (d *Docker) EnsureNetwork(ctx context.Context, name, cluster string) error {
+func (d *Driver) EnsureNetwork(ctx context.Context, name, cluster string) error {
 	if res, _ := d.R.Run(ctx, d.E.Cmd(), "network", "inspect", name); res != nil && res.ExitCode == 0 {
 		return nil
 	}
-	_, err := d.docker(ctx, "network", "create", "--label", "csb.cluster="+cluster, name)
+	_, err := d.cli(ctx, "network", "create", "--label", "csb.cluster="+cluster, name)
 	return err
 }
 
@@ -231,7 +241,7 @@ func (d *Docker) EnsureNetwork(ctx context.Context, name, cluster string) error 
 // host with it and neither side can tell "the peer is gone" from "I am gone".
 // The gateway survives a route cut between the nodes, which is what makes the
 // two split-brain flavours different scenarios rather than one.
-func (d *Docker) NetworkGateway(ctx context.Context, name string) (string, error) {
+func (d *Driver) NetworkGateway(ctx context.Context, name string) (string, error) {
 	res, err := d.R.Run(ctx, d.E.Cmd(), "network", "inspect", "-f",
 		d.E.GatewayTemplate(), name)
 	if err != nil {
@@ -324,7 +334,7 @@ func NodePlan(e Kind, t *topology.Topology, node topology.Node, workdir, results
 // behind, and the answer is to pick up from the state found rather than to make
 // the user clean up first (docs/design/03-assembly.md §1). An existing container
 // is started if it is stopped and left alone if it is running.
-func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topology.Node, workdir, resultsDir string, uid, gid int) error {
+func (d *Driver) CreateNode(ctx context.Context, t *topology.Topology, node topology.Node, workdir, resultsDir string, uid, gid int) error {
 	if err := os.MkdirAll(filepath.Join(workdir, node.Name, "db"), 0o755); err != nil {
 		return err
 	}
@@ -332,10 +342,10 @@ func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topo
 		if strings.TrimSpace(res.Stdout) == "true" {
 			return nil
 		}
-		_, err := d.docker(ctx, "start", node.Name)
+		_, err := d.cli(ctx, "start", node.Name)
 		return err
 	}
-	_, err := d.docker(ctx, NodePlan(d.E, t, node, workdir, resultsDir, uid, gid)...)
+	_, err := d.cli(ctx, NodePlan(d.E, t, node, workdir, resultsDir, uid, gid)...)
 	return err
 }
 
@@ -355,7 +365,7 @@ func NodeEnv(node, db string) []string {
 }
 
 // Exec runs a shell command inside a node with that environment.
-func (d *Docker) Exec(ctx context.Context, node, db, command string) (*run.Result, error) {
+func (d *Driver) Exec(ctx context.Context, node, db, command string) (*run.Result, error) {
 	args := []string{"exec"}
 	for _, e := range NodeEnv(node, db) {
 		args = append(args, "-e", e)
@@ -372,8 +382,8 @@ type NodeState struct {
 
 // Nodes reports what is actually running for a cluster, which is where cluster
 // state comes from: the world, not a lock file.
-func (d *Docker) Nodes(ctx context.Context, cluster string) ([]NodeState, error) {
-	res, err := d.docker(ctx, "ps", "-a",
+func (d *Driver) Nodes(ctx context.Context, cluster string) ([]NodeState, error) {
+	res, err := d.cli(ctx, "ps", "-a",
 		"--filter", "label=csb.cluster="+cluster,
 		"--format", "{{.Names}}\t{{.State}}\t"+d.E.LabelTemplate("csb.role"))
 	if err != nil {
@@ -405,7 +415,7 @@ func (d *Docker) Nodes(ctx context.Context, cluster string) ([]NodeState, error)
 // `tailscale logout` expires a node's key and does NOT delete the device unless
 // the auth key was an ephemeral one. Measured the hard way: a destroyed cluster
 // left two machines in a tailnet's device list.
-func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed, leftBehind []string, err error) {
+func (d *Driver) Destroy(ctx context.Context, cluster, network string) (removed, leftBehind []string, err error) {
 	nodes, nerr := d.Nodes(ctx, cluster)
 	if nerr != nil {
 		return nil, nil, nerr
@@ -414,7 +424,7 @@ func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed,
 		if left := d.logOutOfTailnet(ctx, n.Name); left != "" {
 			leftBehind = append(leftBehind, left)
 		}
-		if _, e := d.docker(ctx, "rm", "-f", n.Name); e == nil {
+		if _, e := d.cli(ctx, "rm", "-f", n.Name); e == nil {
 			removed = append(removed, n.Name)
 		}
 	}
@@ -430,7 +440,7 @@ func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed,
 // A non-ephemeral node stays in the tailnet's device list after logout, showing
 // as logged out rather than disappearing, and removing it needs the admin
 // console or the API. This tool has neither, so it reports rather than pretends.
-func (d *Docker) logOutOfTailnet(ctx context.Context, node string) string {
+func (d *Driver) logOutOfTailnet(ctx context.Context, node string) string {
 	res, err := d.Privileged(ctx, node, "command -v tailscale >/dev/null || exit 3; tailscale logout")
 	if err != nil || res == nil {
 		return ""
@@ -460,13 +470,13 @@ func (d *Docker) logOutOfTailnet(ctx context.Context, node string) string {
 // root's; the nodes otherwise run as the invoking user. A backend that cannot
 // offer this cannot host the fault verbs, and saying so is better than each of
 // them discovering it separately.
-func (d *Docker) Privileged(ctx context.Context, node, command string) (*run.Result, error) {
+func (d *Driver) Privileged(ctx context.Context, node, command string) (*run.Result, error) {
 	return d.R.Run(ctx, d.E.Cmd(), "exec", "-u", "0", node, "sh", "-c", command)
 }
 
 // Addr is the address a peer is reached at on the cluster's own network. It is
 // what an unreachability is expressed against.
-func (d *Docker) Addr(ctx context.Context, network, node string) (string, error) {
+func (d *Driver) Addr(ctx context.Context, network, node string) (string, error) {
 	res, err := d.R.Run(ctx, d.E.Cmd(), "inspect", "-f",
 		"{{(index .NetworkSettings.Networks \""+network+"\").IPAddress}}", node)
 	if err != nil {
@@ -487,15 +497,15 @@ func (d *Docker) Addr(ctx context.Context, network, node string) (string, error)
 // different engine code paths, which is why the mechanism is part of the
 // operation rather than an implementation detail
 // (docs/design/04-faults.md §3).
-func (d *Docker) Unreach(ctx context.Context, from, addr, mechanism string) error {
+func (d *Driver) Unreach(ctx context.Context, from, addr, mechanism string) error {
 	return d.reachability(ctx, from, addr, mechanism, false)
 }
 
-func (d *Docker) Reach(ctx context.Context, from, addr, mechanism string) error {
+func (d *Driver) Reach(ctx context.Context, from, addr, mechanism string) error {
 	return d.reachability(ctx, from, addr, mechanism, true)
 }
 
-func (d *Docker) reachability(ctx context.Context, from, addr, mechanism string, undo bool) error {
+func (d *Driver) reachability(ctx context.Context, from, addr, mechanism string, undo bool) error {
 	if addr == "" {
 		return fmt.Errorf("no address to cut from %s", from)
 	}
@@ -533,7 +543,7 @@ func (d *Docker) reachability(ctx context.Context, from, addr, mechanism string,
 // two places that have to agree. The listing is `ls` -- a cluster whose state
 // directory is gone but whose containers are running has to appear, because
 // cluster state comes from the world and never from a lock file (operation 9).
-func (d *Docker) RunningClusters(ctx context.Context) (map[string]int, error) {
+func (d *Driver) RunningClusters(ctx context.Context) (map[string]int, error) {
 	res, err := d.R.Run(ctx, d.E.Cmd(), "ps", "--filter", "label=csb.cluster",
 		"--format", d.E.LabelTemplate("csb.cluster"))
 	if err != nil {
@@ -558,7 +568,7 @@ func (d *Docker) RunningClusters(ctx context.Context) (map[string]int, error) {
 // Pulled back for the reason above, and it is the one operation that cannot go
 // through the runner: `node shell` replaces this process so the TTY is the
 // engine's own. So the backend says what to exec and the CLI execs it.
-func (d *Docker) ShellArgv(node, db string) []string {
+func (d *Driver) ShellArgv(node, db string) []string {
 	argv := []string{d.E.Cmd(), "exec", "-it"}
 	for _, e := range NodeEnv(node, db) {
 		argv = append(argv, "-e", e)
@@ -574,8 +584,8 @@ func (d *Docker) ShellArgv(node, db string) []string {
 // backend it asked docker to start a podman container and reported the node
 // missing. A node that is genuinely not there is a precondition with its own
 // remedy, so the error says which it was.
-func (d *Docker) StartNode(ctx context.Context, node string) error {
-	_, err := d.docker(ctx, "start", node)
+func (d *Driver) StartNode(ctx context.Context, node string) error {
+	_, err := d.cli(ctx, "start", node)
 	return err
 }
 
@@ -585,7 +595,7 @@ func (d *Docker) StartNode(ctx context.Context, node string) error {
 // The argv is the backend's and the answer is the caller's: this returns the
 // result rather than parsing it, because what is being asked -- a glibc
 // version, so far -- is the CLI's policy and not the backend's.
-func (d *Docker) RunInImage(ctx context.Context, image string, argv ...string) (*run.Result, error) {
+func (d *Driver) RunInImage(ctx context.Context, image string, argv ...string) (*run.Result, error) {
 	args := append([]string{"run", "--rm", image}, argv...)
 	return d.R.Run(ctx, d.E.Cmd(), args...)
 }
@@ -597,7 +607,7 @@ func (d *Docker) RunInImage(ctx context.Context, image string, argv ...string) (
 // not found, so that "the cluster is gone" can be corrected to "you asked the
 // wrong tool". A cluster that records its backend never needs this; one whose
 // describe artifact predates the field does.
-func (d *Docker) HasContainer(ctx context.Context, name string) bool {
+func (d *Driver) HasContainer(ctx context.Context, name string) bool {
 	res, err := d.R.Run(ctx, d.E.Cmd(), "inspect", "-f", "{{.Id}}", name)
 	return err == nil && res.ExitCode == 0
 }
