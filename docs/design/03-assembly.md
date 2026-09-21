@@ -210,6 +210,22 @@ it is in, as long as it is not the master.
 The tool still completes a promotion that is stuck, because the state is real
 whether or not we can say what put us in it.
 
+**And we still cannot.** The state was hit again on 2026-09-21 — a pair left
+with no master, one node holding `to_be_active` and `fail_counter` 5 — and four
+attempts to reproduce the way in all recovered cleanly instead:
+
+| attempt | result |
+|---|---|
+| `node kill` the master, then `cluster up` | slave to `active` in ~8 s; killed node returns as standby |
+| the master's container killed outright | slave to `registered_and_active` in ~15 s, with `fail_counter` 5 |
+| the master's container stopped, then `cluster up` | master returns as master, slave never leaves standby |
+| the container returned during the promotion window | slave went standby → active without holding `to_be_active` |
+
+A non-zero `fail_counter` does **not** stop the engine from completing its own
+promotion — only from this tool completing one that has already stalled. So
+whatever holds a node in `to_be_active` is something else, and naming it is
+[`DESIGN.md`](../DESIGN.md) §9 OQ14.
+
 `cubrid changemode -m active -f` completes it. The tool runs that only when it
 can show the move is safe — the applier drained (`eof == final`) and
 `fail_counter` at zero — because forcing the transition while the applier is
