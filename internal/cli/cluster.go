@@ -35,7 +35,8 @@ func createFlags(fs *flag.FlagSet) {
 	fs.String("db", "", "database name (default: the cluster name)")
 	fs.String("image", "", "base image (default: the one csb builds from its own recipe)")
 	fs.String("ping-mode", "icmp", "icmp, tcp or none")
-	fs.String("network", "docker", "docker (one host's bridge) or tailnet (nodes join a tailnet)")
+	fs.String("network", "bridge", "bridge (one host's own network) or tailnet (nodes join a tailnet)")
+	fs.String("backend", "", "docker or podman; empty picks whichever is installed ($CSB_BACKEND)")
 	fs.String("ts-authkey", "", "tailnet auth key; or CSB_TS_AUTHKEY. Never stored in the artifact")
 	fs.Int("clients", 0, "client nodes beside the HA group: where a workload runs")
 	fs.String("tools", "", "a host directory the clients get read-only at /tools")
@@ -224,6 +225,11 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 	t, err := topology.Resolve(topology.Options{
 		Name: name, Preset: c.str("preset"), Nodes: nodes, DB: c.str("db"),
 		Image: c.str("image"), PingMode: c.str("ping-mode"), Network: c.str("network"),
+		// The decision, not the flag. --backend is one of three ways the
+		// backend gets chosen and the least used; a cluster stood up with
+		// $CSB_BACKEND or by detection recorded nothing, which is the case the
+		// field exists for.
+		Backend: string(backendFor(c, "")),
 		Clients: clients, Tools: c.str("tools"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
 		CPUs:       cpus, Set: set, SetHidden: setHidden,
@@ -252,7 +258,7 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 				"); it may be in a state the engine's documentation does not describe")
 	}
 
-	d := &backend.Docker{R: r}
+	d := &backend.Docker{R: r, E: backendFor(c, t.Backend)}
 	// Ask docker whether it can be used before spending anything on the
 	// assumption that it can. It is a precondition, and it exits 3 like every
 	// other one rather than 1 through whichever command reached it first.
@@ -272,7 +278,7 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	// image fails to load. Catch it with that sentence rather than with a linker
 	// error (docs/design/02-topology.md §3).
 	if id.MinGlibc != "" {
-		if have, gerr := imageGlibc(c.Ctx, r, t.Image); gerr == nil && have != "" {
+		if have, gerr := imageGlibc(c.Ctx, d, t.Image); gerr == nil && have != "" {
 			if less(have, id.MinGlibc) {
 				return nil, Precondition("glibc_too_old",
 					"the engine at %s needs glibc %s and the image %s has %s; build against an older distribution or choose another image",
@@ -444,7 +450,7 @@ func loadCluster(c *Ctx) (*assembly.Assembler, *topology.Topology, error) {
 	if err := json.Unmarshal(b, &t); err != nil {
 		return nil, nil, Failed("describe_malformed", "%v", err)
 	}
-	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}}
+	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: backendFor(c, t.Backend)}
 	a := &assembly.Assembler{D: d, T: &t, Workdir: filepath.Join(c.Store.ClusterDir(c.Cluster), "work")}
 	if !c.Quiet && !c.JSON {
 		a.Log = c.Out
@@ -458,7 +464,7 @@ func cmdClusterUp(c *Ctx) (any, error) {
 		return nil, err
 	}
 	for _, n := range t.Nodes {
-		if res, e := a.D.R.Run(c.Ctx, "docker", "start", n.Name); e != nil || res.ExitCode != 0 {
+		if e := a.D.StartNode(c.Ctx, n.Name); e != nil {
 			return nil, Precondition("no_container",
 				"%s is not there; cluster create builds it", n.Name)
 		}
@@ -506,8 +512,8 @@ func cmdClusterDown(c *Ctx) (any, error) {
 
 var glibcRe = regexp.MustCompile(`(\d+\.\d+)\s*$`)
 
-func imageGlibc(ctx context.Context, r *run.Runner, image string) (string, error) {
-	res, err := r.Run(ctx, "docker", "run", "--rm", image, "ldd", "--version")
+func imageGlibc(ctx context.Context, d *backend.Docker, image string) (string, error) {
+	res, err := d.RunInImage(ctx, image, "ldd", "--version")
 	if err != nil || res.ExitCode != 0 {
 		return "", fmt.Errorf("ldd --version in %s failed", image)
 	}
@@ -553,7 +559,7 @@ func cmdClusterDestroy(c *Ctx) (any, error) {
 		network = c.Cluster + "-net"
 	}
 
-	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}}
+	d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: backendFor(c, t.Backend)}
 	removed, leftBehind, err := d.Destroy(c.Ctx, c.Cluster, network)
 	if err != nil {
 		return nil, Failed("destroy_failed", "%v", err)
@@ -569,9 +575,20 @@ func cmdClusterDestroy(c *Ctx) (any, error) {
 				strings.Join(leftBehind, ", ")+". An ephemeral auth key removes them automatically; a reusable one does not")
 	}
 
+	// Emptied rather than removed, and the reason is measured. A rootless
+	// podman keeps a mount namespace alive between commands, so a bind-mount
+	// source that is deleted and recreated is bound by its OLD inode in the next
+	// cluster: /work comes up empty inside the node while the host directory has
+	// the tree in it, and the first thing that fails is `createdb exited 127:
+	// cubrid: command not found`. docker survives the same destroy-and-create
+	// because its daemon resolves the path per container.
+	//
+	// Keeping the directory keeps the inode, so neither engine can hold a stale
+	// one. What is left behind is an empty directory; --purge takes the whole
+	// cluster directory anyway.
 	workdir := filepath.Join(c.Store.ClusterDir(c.Cluster), "work")
-	if err := os.RemoveAll(workdir); err != nil {
-		c.Note("workdir_not_removed", SevWarn, err.Error())
+	if err := emptyDir(workdir); err != nil {
+		c.Note("workdir_not_emptied", SevWarn, err.Error())
 	}
 
 	purge := c.fs.Lookup("purge").Value.String() == "true"
@@ -735,4 +752,37 @@ func createFrom(c *Ctx, path string) (any, error) {
 // hosts fragment travels into a node without a here-doc.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// backendFor decides which container backend a command drives.
+//
+// Recorded beats asked beats detected. A cluster is reached with what made it,
+// because a machine with both installed would otherwise look for a podman
+// cluster with docker and report it gone -- which reads as "the cluster is
+// missing" rather than "you are asking the wrong tool".
+func backendFor(c *Ctx, recorded string) backend.Kind {
+	if k := backend.Kind(recorded); k.Valid() {
+		return k
+	}
+	if k := backend.Kind(c.str("backend")); k.Valid() {
+		return k
+	}
+	return backend.Detect()
+}
+
+// emptyDir removes a directory's contents and keeps the directory.
+func emptyDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if rerr := os.RemoveAll(filepath.Join(dir, e.Name())); rerr != nil {
+			return rerr
+		}
+	}
+	return nil
 }

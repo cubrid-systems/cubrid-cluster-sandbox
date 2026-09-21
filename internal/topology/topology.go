@@ -53,21 +53,26 @@ type Params struct {
 // Topology is also the describe artifact: the same value the tool builds from is
 // the one it hands to the next person, so they cannot drift.
 type Topology struct {
-	Schema      string           `json:"schema"`
-	Cluster     string           `json:"cluster"`
-	Preset      string           `json:"preset"`
-	DB          string           `json:"db"`
-	Network     string           `json:"network"`
-	Image       string           `json:"image"`
-	PingMode    string           `json:"ping_mode"`
-	PingHost    string           `json:"ping_host,omitempty"`
-	NetworkKind string           `json:"network_kind,omitempty"` // docker (default) | tailnet
-	Tools       string           `json:"tools,omitempty"`        // host directory the clients get read-only
-	WithBroker  bool             `json:"with_broker"`
-	Nodes       []Node           `json:"nodes"`
-	Engine      *engine.Identity `json:"engine,omitempty"`
-	Resources   Resources        `json:"resources,omitempty"`
-	Parameters  Params           `json:"parameters,omitempty"`
+	Schema      string `json:"schema"`
+	Cluster     string `json:"cluster"`
+	Preset      string `json:"preset"`
+	DB          string `json:"db"`
+	Network     string `json:"network"`
+	Image       string `json:"image"`
+	PingMode    string `json:"ping_mode"`
+	PingHost    string `json:"ping_host,omitempty"`
+	NetworkKind string `json:"network_kind,omitempty"` // bridge (default) | tailnet
+	// Backend is the container backend that made this cluster: docker or
+	// podman. Recorded rather than detected each time, because a cluster has to
+	// be reached with what made it -- a machine that has both would otherwise
+	// find a podman cluster with docker and report it gone.
+	Backend    string           `json:"backend,omitempty"`
+	Tools      string           `json:"tools,omitempty"` // host directory the clients get read-only
+	WithBroker bool             `json:"with_broker"`
+	Nodes      []Node           `json:"nodes"`
+	Engine     *engine.Identity `json:"engine,omitempty"`
+	Resources  Resources        `json:"resources,omitempty"`
+	Parameters Params           `json:"parameters,omitempty"`
 }
 
 type Options struct {
@@ -77,7 +82,8 @@ type Options struct {
 	DB         string
 	Image      string
 	PingMode   string
-	Network    string // docker (default) | tailnet
+	Network    string // bridge (default) | tailnet
+	Backend    string // docker (default) | podman
 	Clients    int    // client nodes beside the HA group
 	Tools      string // a host directory the clients get read-only
 	WithBroker bool
@@ -119,8 +125,13 @@ const (
 	// host's bridge; `tailnet` makes each node a member of a tailnet, which is
 	// the only one of the two that can span machines
 	// (docs/design/ADR-002-backend-contract.md).
-	NetDocker  = "docker"
-	NetTailnet = "tailnet"
+	// NetBridge is one host's own container network. It was called "docker"
+	// until a second backend existed, at which point the name said the tool
+	// rather than the thing -- podman's bridge is a bridge too. The old spelling
+	// is still accepted, because it is in every describe artifact written so far.
+	NetBridge    = "bridge"
+	NetBridgeWas = "docker"
+	NetTailnet   = "tailnet"
 
 	PingICMP = "icmp"
 	PingTCP  = "tcp"
@@ -162,11 +173,11 @@ func Resolve(o Options) (*Topology, error) {
 	}
 
 	net := o.Network
-	if net == "" {
-		net = NetDocker
+	if net == "" || net == NetBridgeWas {
+		net = NetBridge
 	}
-	if net != NetDocker && net != NetTailnet {
-		return nil, fmt.Errorf("unknown --network %q (want docker or tailnet)", net)
+	if net != NetBridge && net != NetTailnet {
+		return nil, fmt.Errorf("unknown --network %q (want bridge or tailnet)", net)
 	}
 	ping := o.PingMode
 	if ping == "" {
@@ -182,7 +193,7 @@ func Resolve(o Options) (*Topology, error) {
 	t := &Topology{
 		Schema: Schema, Cluster: name, Preset: preset,
 		DB: firstNonEmpty(o.DB, name), Network: name + "-net",
-		Image: o.Image, PingMode: ping, NetworkKind: net, WithBroker: o.WithBroker,
+		Image: o.Image, PingMode: ping, NetworkKind: net, Backend: o.Backend, WithBroker: o.WithBroker,
 		Engine:    o.Engine,
 		Resources: Resources{CPUs: o.CPUs, ShmSize: firstNonEmpty(o.ShmSize, "1g")},
 		Parameters: Params{

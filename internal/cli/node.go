@@ -12,8 +12,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/backend"
 )
 
 func logsFlags(fs *flag.FlagSet) {
@@ -222,12 +220,12 @@ func followFiles(c *Ctx, files []logFile, offsets []int64) {
 	}
 }
 
-// cmdNodeShell replaces this process with `docker exec -it`.
+// cmdNodeShell replaces this process with the engine's `exec -it`.
 //
 // A shell is the one verb that cannot answer through the envelope: it hands the
 // terminal over and does not come back. Replacing the process rather than
 // wrapping it is what gives a real TTY -- job control, signals and line editing
-// all come from docker's own stdin instead of from a pipe this tool would be
+// all come from the engine's own stdin instead of from a pipe this tool would be
 // sitting in the middle of.
 func cmdNodeShell(c *Ctx) (any, error) {
 	if c.JSON {
@@ -249,15 +247,14 @@ func cmdNodeShell(c *Ctx) (any, error) {
 		return nil, Precondition("ambiguous_selector",
 			"node shell needs exactly one node; %q resolved to %d", sel, len(names))
 	}
-	bin, err := exec.LookPath("docker")
+	// The argv is the backend's: it knows which engine made this cluster, and
+	// with two engines a second place that assumed one would be a second place
+	// to keep in step (ADR-002's argument for internal/fault, applied again).
+	argv := a.D.ShellArgv(names[0], t.DB)
+	bin, err := exec.LookPath(argv[0])
 	if err != nil {
-		return nil, Failed("no_docker", "%v", err)
+		return nil, Failed("no_engine", "%v", err)
 	}
-	argv := []string{"docker", "exec", "-it"}
-	for _, e := range backend.NodeEnv(names[0], t.DB) {
-		argv = append(argv, "-e", e)
-	}
-	argv = append(argv, names[0], "bash", "-l")
 	// Nothing after this line runs on success.
 	return nil, Failed("exec_failed", "%v", syscall.Exec(bin, argv, os.Environ()))
 }

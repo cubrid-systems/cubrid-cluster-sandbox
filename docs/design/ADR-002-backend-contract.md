@@ -2,9 +2,9 @@
 title: ADR-002 — What a backend has to provide
 category: design
 project: cluster-sandbox
-summary: The eleven operations a backend must offer, derived from what the docker one already does rather than invented for backends that do not exist yet. Evaluated against a tailnet and against Kubernetes/cubrid-operator. A tailnet changes four of the eleven and leaves the fault verbs intact, which is why it is a network for a backend rather than a backend. Kubernetes collides with two founding constraints and with the operator's own purpose, which is the strongest argument for OQ4's second reading.
+summary: The eleven operations a backend must offer, derived from what the docker one already does rather than invented for backends that do not exist yet. Evaluated against a tailnet and against Kubernetes/cubrid-operator. A tailnet changes four of the eleven and leaves the fault verbs intact, which is why it is a network for a backend rather than a backend. Kubernetes collides with two founding constraints and with the operator's own purpose, which is the strongest argument for OQ4's second reading. Since measured against podman: the eleven held, the interface was not declared, and a backend is a parameter carrying four differences.
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-21
 status: accepted
 lang: en
 ---
@@ -15,6 +15,9 @@ lang: en
 
 **Accepted 2026-09-03.** The contract is named and the docker backend is moved
 onto it. No Go interface is declared yet; see *Why no interface yet*.
+
+**Amended 2026-09-21.** A second backend exists — podman — and it did not want
+the interface that section predicted. See *Measured against podman 4.9.3*.
 
 ## Context
 
@@ -201,6 +204,73 @@ written to make possible. The sampling here is at five-second granularity and is
 not a comparison against the bridge's 9 s: that would need the switchover
 harness, and it is the next thing worth running rather than a number to quote.
 
+## Measured against podman 4.9.3, 2026-09-21
+
+The second implementation arrived, which is the moment §"Why no interface yet"
+said the `interface` would cost nothing to be wrong about. It was not declared,
+because the second backend is not a second implementation.
+
+Every flag the docker backend passes, podman accepts verbatim — `--init`,
+`--cap-add`, `--shm-size`, `--ulimit`, `--label`, `--device`, `--cpus`, `-v`,
+`--network`, `--hostname`. `podman network create` is `docker network create`;
+`podman exec` is `docker exec`. None of the eleven operations needed a second
+code path. Four things differ, and each is a flag or a template:
+
+| | difference | docker | podman (rootless) | operation |
+|---|---|---|---|---|
+| 1 | owning files as the invoking user | `--user 1000:1000` | `--userns=keep-id` | 11 |
+| 2 | opening an ICMP socket | already permitted | `--cap-add=NET_RAW` | 3 |
+| 3 | a network's gateway | `.IPAM.Config[0].Gateway` | `.Subnets[].Gateway` | 3 |
+| 4 | a container's label in `ps` | `{{.Label "k"}}` | `{{index .Labels "k"}}` | 9 |
+
+So the prediction the list was written to test — that a second backend is eleven
+things rather than a rewrite — held. What it got wrong is the shape of the
+answer: a parameter, not an implementation. Two 95%-identical implementations
+would have put the four differences in the two files a reader has to diff.
+
+### The part the contract did not say
+
+**Three of the four fail silently, and that is the finding.** A wrong template
+does not fail the command — it returns empty, or writes a template error where
+the value should be, and exits 0:
+
+- difference 3 gave a cluster no ping host, so `no_ping_host` appeared after it
+  came up serving, and the two split-brain flavours stopped being different
+  scenarios;
+- difference 4 made a running pair report `LIVE no` and made `cluster ls` say it
+  had no containers, which reads as a cluster that did not come up;
+- difference 1 surfaces as `touch: /work/a: Permission denied` inside a node,
+  three operations away from the flag that caused it.
+
+An operation that cannot fail loudly needs a test that asserts its spelling
+rather than a comment recording it. The four are pinned in
+`internal/backend/engine_test.go`.
+
+### What is not measured
+
+**No fault verb has been executed under podman.** The tooling answers — `iptables`,
+`tc` and `ip` all respond inside a rootless node, and the gateway is routable —
+but that is operations 2–4 read, not written. This project has shipped exactly
+this gap before: `partition --mechanism drop` and `ping-unavailable --mechanism
+icmp` were merged, documented and never run, because iptables was missing from
+the base image. A backend whose fault verbs are unexecuted is a backend that has
+not been tested for what this tool is for.
+
+### Two more, which are about the host and not the CLI
+
+- **A cluster must be reached with the backend that made it.** On a machine with
+  both installed, detection alone looks for a podman cluster with docker and
+  reports it gone. The backend is therefore recorded in `describe` — the
+  decision, not the flag, because `$CSB_BACKEND` and detection are how it is
+  normally chosen and both leave the flag empty.
+- **Operation 10 cannot delete a bind-mount source.** Rootless podman keeps a
+  mount namespace alive between commands, so a directory that is removed and
+  recreated is bound by its old inode in the next cluster: `/work` is empty
+  inside the node while the host directory has the tree in it, and the first
+  thing that fails is `createdb exited 127: cubrid: command not found`. docker
+  survives the same destroy-and-create because its daemon resolves the path per
+  container. `Destroy` empties the workdir and keeps it.
+
 ## Consequences
 
 1. `internal/fault` no longer contains the word `docker`. The cut, the privileged
@@ -211,3 +281,6 @@ harness, and it is the next thing worth running rather than a number to quote.
    not a backend**, and the argument is its own reconciliation loop.
 4. A second backend is now a list of eleven things rather than a rewrite, and the
    list is short enough to disagree with.
+5. The list was tested and held; the `interface` was not declared. A backend is a
+   parameter — `backend.Kind` — carrying four measured differences, and a
+   cluster records which one made it.

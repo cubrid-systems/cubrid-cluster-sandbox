@@ -77,16 +77,28 @@ func imageFor(recipe string) string {
 
 type Docker struct {
 	R *run.Runner
+	// E is the container backend. Empty means docker, which is what every
+	// cluster made before this field existed was built with.
+	//
+	// The type is still called Docker: it drives either CLI now, and renaming
+	// it reaches assembly, fault and the CLI for no behaviour. Left as a
+	// follow-up rather than mixed into this change.
+	E Kind
 }
 
+// Cmd is the engine's command name, for a caller that has to build its own
+// argv -- `node shell`, which replaces this process rather than running one.
+func (d *Docker) Cmd() string { return d.E.Cmd() }
+
 func (d *Docker) docker(ctx context.Context, args ...string) (*run.Result, error) {
-	res, err := d.R.Run(ctx, "docker", args...)
+	cmd := d.E.Cmd()
+	res, err := d.R.Run(ctx, cmd, args...)
 	if err != nil {
-		return res, fmt.Errorf("docker could not be run: %w", err)
+		return res, fmt.Errorf("%s could not be run: %w", cmd, err)
 	}
 	if res.ExitCode != 0 {
-		return res, fmt.Errorf("docker %s exited %d: %s",
-			strings.Join(args, " "), res.ExitCode, strings.TrimSpace(res.Stderr))
+		return res, fmt.Errorf("%s %s exited %d: %s",
+			cmd, strings.Join(args, " "), res.ExitCode, strings.TrimSpace(res.Stderr))
 	}
 	return res, nil
 }
@@ -104,9 +116,9 @@ func (d *Docker) docker(ctx context.Context, args ...string) (*run.Result, error
 // -- a user who is not in the docker group -- looks exactly the same as a daemon
 // that is not running while needing a different remedy.
 func (d *Docker) Preflight(ctx context.Context) error {
-	res, err := d.R.Run(ctx, "docker", "version", "--format", "{{.Server.Version}}")
+	res, err := d.R.Run(ctx, d.E.Cmd(), "version", "--format", "{{.Server.Version}}")
 	if err != nil {
-		return fmt.Errorf("docker is not on this machine's PATH, and a node is a container: %w", err)
+		return fmt.Errorf("%s is not on this machine's PATH, and a node is a container: %w", d.E.Cmd(), err)
 	}
 	if res.ExitCode == 0 {
 		return nil
@@ -116,8 +128,18 @@ func (d *Docker) Preflight(ctx context.Context) error {
 		stderr = stderr[:i]
 	}
 	if strings.Contains(stderr, "permission denied") {
+		// podman rootless has no socket to be denied and no group to join, so
+		// the remedy that is right for docker is misleading there.
+		if d.E.Rootless() {
+			return fmt.Errorf("%s is installed and refused: %s", d.E.Cmd(), stderr)
+		}
 		return fmt.Errorf("docker is installed and this user cannot reach its socket: %s"+
 			". Add yourself to the docker group (and log in again), or run as a user that is in it", stderr)
+	}
+	// docker has a daemon to be unreachable and podman does not, so the sentence
+	// that is accurate for one is misleading for the other.
+	if d.E.Rootless() {
+		return fmt.Errorf("podman is installed and could not be used: %s", stderr)
 	}
 	return fmt.Errorf("docker is installed and its daemon could not be reached: %s", stderr)
 }
@@ -174,8 +196,8 @@ func CorePatternNote(pattern, hostDBDir string) string {
 func (d *Docker) EnsureImage(ctx context.Context, t *topology.Topology) (bool, error) {
 	recipe := Recipe(t)
 	tag := imageFor(recipe)
-	if _, err := d.R.Run(ctx, "docker", "image", "inspect", tag); err == nil {
-		if res, _ := d.R.Run(ctx, "docker", "image", "inspect", tag); res != nil && res.ExitCode == 0 {
+	if _, err := d.R.Run(ctx, d.E.Cmd(), "image", "inspect", tag); err == nil {
+		if res, _ := d.R.Run(ctx, d.E.Cmd(), "image", "inspect", tag); res != nil && res.ExitCode == 0 {
 			return false, nil
 		}
 	}
@@ -194,7 +216,7 @@ func (d *Docker) EnsureImage(ctx context.Context, t *topology.Topology) (bool, e
 }
 
 func (d *Docker) EnsureNetwork(ctx context.Context, name, cluster string) error {
-	if res, _ := d.R.Run(ctx, "docker", "network", "inspect", name); res != nil && res.ExitCode == 0 {
+	if res, _ := d.R.Run(ctx, d.E.Cmd(), "network", "inspect", name); res != nil && res.ExitCode == 0 {
 		return nil
 	}
 	_, err := d.docker(ctx, "network", "create", "--label", "csb.cluster="+cluster, name)
@@ -210,8 +232,8 @@ func (d *Docker) EnsureNetwork(ctx context.Context, name, cluster string) error 
 // The gateway survives a route cut between the nodes, which is what makes the
 // two split-brain flavours different scenarios rather than one.
 func (d *Docker) NetworkGateway(ctx context.Context, name string) (string, error) {
-	res, err := d.R.Run(ctx, "docker", "network", "inspect", "-f",
-		"{{(index .IPAM.Config 0).Gateway}}", name)
+	res, err := d.R.Run(ctx, d.E.Cmd(), "network", "inspect", "-f",
+		d.E.GatewayTemplate(), name)
 	if err != nil {
 		return "", err
 	}
@@ -225,16 +247,14 @@ func (d *Docker) NetworkGateway(ctx context.Context, name string) (string, error
 // NodePlan is the argv for one container, kept separate from running it so the
 // container requirements in docs/design/03-assembly.md §4 can be asserted
 // without a docker daemon.
-func NodePlan(t *topology.Topology, node topology.Node, workdir, resultsDir string, uid, gid int) []string {
+func NodePlan(e Kind, t *topology.Topology, node topology.Node, workdir, resultsDir string, uid, gid int) []string {
 	args := []string{
 		"run", "-d",
 		"--name", node.Name,
 		"--hostname", node.Name, // the heartbeat resolves peers by hostname
 		"--network", t.Network,
-		"--init",              // without a reaping PID 1, heartbeat stop never returns
-		"--cap-add=NET_ADMIN", // the fault mechanisms are route and qdisc operations
+		"--init", // without a reaping PID 1, heartbeat stop never returns
 		"--shm-size", t.Resources.ShmSize,
-		"--user", strconv.Itoa(uid) + ":" + strconv.Itoa(gid), // files stay editable on the host
 		// A crashing engine must be allowed to write a core. Nothing was set
 		// here, so a node inherited whatever soft limit dockerd happened to
 		// have -- commonly 0, which silently discards the one artifact that
@@ -246,6 +266,15 @@ func NodePlan(t *topology.Topology, node topology.Node, workdir, resultsDir stri
 		"--label", "csb.node=" + node.Name,
 		"--label", "csb.role=" + node.Role,
 	}
+	// The fault mechanisms are route and qdisc operations, so NET_ADMIN is both
+	// engines'. A rootless container additionally needs NET_RAW or it cannot
+	// open an ICMP socket -- and the engine's own split-brain discrimination is
+	// a ping (engine.go, difference 2).
+	args = append(args, e.CapabilityArgs()...)
+	// And how the node comes to own its files as the invoking user, which is
+	// --user on docker and --userns=keep-id under rootless podman. It decides
+	// ADR-002 operation 11 (engine.go, difference 1).
+	args = append(args, e.IdentityArgs(uid, gid)...)
 	if t.Resources.CPUs > 0 {
 		args = append(args, "--cpus", strconv.FormatFloat(t.Resources.CPUs, 'g', -1, 64))
 	}
@@ -299,14 +328,14 @@ func (d *Docker) CreateNode(ctx context.Context, t *topology.Topology, node topo
 	if err := os.MkdirAll(filepath.Join(workdir, node.Name, "db"), 0o755); err != nil {
 		return err
 	}
-	if res, err := d.R.Run(ctx, "docker", "inspect", "-f", "{{.State.Running}}", node.Name); err == nil && res.ExitCode == 0 {
+	if res, err := d.R.Run(ctx, d.E.Cmd(), "inspect", "-f", "{{.State.Running}}", node.Name); err == nil && res.ExitCode == 0 {
 		if strings.TrimSpace(res.Stdout) == "true" {
 			return nil
 		}
 		_, err := d.docker(ctx, "start", node.Name)
 		return err
 	}
-	_, err := d.docker(ctx, NodePlan(t, node, workdir, resultsDir, uid, gid)...)
+	_, err := d.docker(ctx, NodePlan(d.E, t, node, workdir, resultsDir, uid, gid)...)
 	return err
 }
 
@@ -332,7 +361,7 @@ func (d *Docker) Exec(ctx context.Context, node, db, command string) (*run.Resul
 		args = append(args, "-e", e)
 	}
 	args = append(args, node, "bash", "-lc", command)
-	return d.R.Run(ctx, "docker", args...)
+	return d.R.Run(ctx, d.E.Cmd(), args...)
 }
 
 type NodeState struct {
@@ -346,7 +375,7 @@ type NodeState struct {
 func (d *Docker) Nodes(ctx context.Context, cluster string) ([]NodeState, error) {
 	res, err := d.docker(ctx, "ps", "-a",
 		"--filter", "label=csb.cluster="+cluster,
-		"--format", "{{.Names}}\t{{.State}}\t{{.Label \"csb.role\"}}")
+		"--format", "{{.Names}}\t{{.State}}\t"+d.E.LabelTemplate("csb.role"))
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +418,7 @@ func (d *Docker) Destroy(ctx context.Context, cluster, network string) (removed,
 			removed = append(removed, n.Name)
 		}
 	}
-	if res, _ := d.R.Run(ctx, "docker", "network", "rm", network); res != nil && res.ExitCode == 0 {
+	if res, _ := d.R.Run(ctx, d.E.Cmd(), "network", "rm", network); res != nil && res.ExitCode == 0 {
 		removed = append(removed, network)
 	}
 	return removed, leftBehind, nil
@@ -432,13 +461,13 @@ func (d *Docker) logOutOfTailnet(ctx context.Context, node string) string {
 // offer this cannot host the fault verbs, and saying so is better than each of
 // them discovering it separately.
 func (d *Docker) Privileged(ctx context.Context, node, command string) (*run.Result, error) {
-	return d.R.Run(ctx, "docker", "exec", "-u", "0", node, "sh", "-c", command)
+	return d.R.Run(ctx, d.E.Cmd(), "exec", "-u", "0", node, "sh", "-c", command)
 }
 
 // Addr is the address a peer is reached at on the cluster's own network. It is
 // what an unreachability is expressed against.
 func (d *Docker) Addr(ctx context.Context, network, node string) (string, error) {
-	res, err := d.R.Run(ctx, "docker", "inspect", "-f",
+	res, err := d.R.Run(ctx, d.E.Cmd(), "inspect", "-f",
 		"{{(index .NetworkSettings.Networks \""+network+"\").IPAddress}}", node)
 	if err != nil {
 		return "", err
@@ -493,4 +522,70 @@ func (d *Docker) reachability(ctx context.Context, from, addr, mechanism string,
 		return fmt.Errorf("%s on %s: %s", cmd, from, strings.TrimSpace(res.Stderr))
 	}
 	return nil
+}
+
+// RunningClusters is the clusters the engine can see right now, and how many
+// containers each still has.
+//
+// Pulled back from internal/cli/registry.go, which ran `docker ps` itself. That
+// is the same leak ADR-002 closed in internal/fault, for the same reason: with a
+// second engine, backend knowledge in a second package is backend knowledge in
+// two places that have to agree. The listing is `ls` -- a cluster whose state
+// directory is gone but whose containers are running has to appear, because
+// cluster state comes from the world and never from a lock file (operation 9).
+func (d *Docker) RunningClusters(ctx context.Context) (map[string]int, error) {
+	res, err := d.R.Run(ctx, d.E.Cmd(), "ps", "--filter", "label=csb.cluster",
+		"--format", d.E.LabelTemplate("csb.cluster"))
+	if err != nil {
+		return nil, fmt.Errorf("%s could not be run: %w", d.E.Cmd(), err)
+	}
+	if res.ExitCode != 0 {
+		return nil, fmt.Errorf("%s exited %d", d.E.Cmd(), res.ExitCode)
+	}
+	// One line per container, so the count is the tally rather than the length:
+	// `ls` shows how many containers a cluster still has.
+	out := map[string]int{}
+	for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out[line]++
+		}
+	}
+	return out, nil
+}
+
+// ShellArgv is the command that hands the terminal to a node.
+//
+// Pulled back for the reason above, and it is the one operation that cannot go
+// through the runner: `node shell` replaces this process so the TTY is the
+// engine's own. So the backend says what to exec and the CLI execs it.
+func (d *Docker) ShellArgv(node, db string) []string {
+	argv := []string{d.E.Cmd(), "exec", "-it"}
+	for _, e := range NodeEnv(node, db) {
+		argv = append(argv, "-e", e)
+	}
+	return append(argv, node, "bash", "-l")
+}
+
+// StartNode starts a container that already exists, which is what `cluster up`
+// does before it drives the group to serving.
+//
+// Pulled back from internal/cli/cluster.go for the reason the rest of this file
+// was: it ran `docker start` through the runner directly, so with a second
+// backend it asked docker to start a podman container and reported the node
+// missing. A node that is genuinely not there is a precondition with its own
+// remedy, so the error says which it was.
+func (d *Docker) StartNode(ctx context.Context, node string) error {
+	_, err := d.docker(ctx, "start", node)
+	return err
+}
+
+// RunInImage runs one command in a throwaway container of an image, for a
+// question about the image rather than about a node.
+//
+// The argv is the backend's and the answer is the caller's: this returns the
+// result rather than parsing it, because what is being asked -- a glibc
+// version, so far -- is the CLI's policy and not the backend's.
+func (d *Docker) RunInImage(ctx context.Context, image string, argv ...string) (*run.Result, error) {
+	args := append([]string{"run", "--rm", image}, argv...)
+	return d.R.Run(ctx, d.E.Cmd(), args...)
 }
