@@ -259,11 +259,11 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	}
 
 	d := &backend.Docker{R: r, E: backendFor(c, t.Backend)}
-	// Ask docker whether it can be used before spending anything on the
+	// Ask the backend whether it can be used before spending anything on the
 	// assumption that it can. It is a precondition, and it exits 3 like every
 	// other one rather than 1 through whichever command reached it first.
 	if err := d.Preflight(c.Ctx); err != nil {
-		return nil, Precondition("docker_unusable", "%v", err)
+		return nil, Precondition("backend_unusable", "%v", err)
 	}
 	built, err := d.EnsureImage(c.Ctx, t)
 	if err != nil {
@@ -465,6 +465,11 @@ func cmdClusterUp(c *Ctx) (any, error) {
 	}
 	for _, n := range t.Nodes {
 		if e := a.D.StartNode(c.Ctx, n.Name); e != nil {
+			if k, ok := otherBackendHas(c, a.D.E, n.Name); ok {
+				return nil, Precondition("wrong_backend",
+					"%s is a %s container and this cluster is being reached with %s, because its describe artifact "+
+						"records no backend; re-run with CSB_BACKEND=%s", n.Name, k, a.D.Cmd(), k)
+			}
 			return nil, Precondition("no_container",
 				"%s is not there; cluster create builds it", n.Name)
 		}
@@ -760,6 +765,12 @@ func shellQuote(s string) string {
 // because a machine with both installed would otherwise look for a podman
 // cluster with docker and report it gone -- which reads as "the cluster is
 // missing" rather than "you are asking the wrong tool".
+//
+// Only `create` defines --backend, and that is the design rather than an
+// omission: it is the one command that chooses a backend. Everywhere else the
+// cluster's own record decides, and $CSB_BACKEND is the escape hatch for an
+// artifact written before the record existed. The flag lookup here is shared
+// with create and reads empty for every other verb.
 func backendFor(c *Ctx, recorded string) backend.Kind {
 	if k := backend.Kind(recorded); k.Valid() {
 		return k
@@ -768,6 +779,25 @@ func backendFor(c *Ctx, recorded string) backend.Kind {
 		return k
 	}
 	return backend.Detect()
+}
+
+// otherBackendHas names an installed backend, other than the one in use, that
+// holds a container by this name.
+//
+// Reached only when a node was not found. For a cluster that records its
+// backend this never fires; for one whose artifact predates the field it turns
+// the message the recording was added to prevent into the remedy.
+func otherBackendHas(c *Ctx, inUse backend.Kind, node string) (backend.Kind, bool) {
+	for _, k := range backend.Kinds {
+		if k == inUse || !k.Available() {
+			continue
+		}
+		d := &backend.Docker{R: &run.Runner{Verbose: c.Verbose, Log: c.Err}, E: k}
+		if d.HasContainer(c.Ctx, node) {
+			return k, true
+		}
+	}
+	return "", false
 }
 
 // emptyDir removes a directory's contents and keeps the directory.

@@ -17,7 +17,7 @@ For engine developers, QA, and external contributors. Part of
 
 | | Why |
 |---|---|
-| **Docker** | a node is a container, and a partition is a route operation inside one. Tested against 29.x |
+| **Docker or podman** | a node is a container, and a partition is a route operation inside one. Tested against docker 29.x and podman 4.9.3 (rootless). Whichever is installed is used; `$CSB_BACKEND` chooses when both are, and a cluster records the one that made it |
 | **Go** | to build `csb`. There are no binary releases yet |
 | **A CUBRID install tree** | the engine under test. Your own build (`install.out`), or an unpacked release — bind-mounted read-only, never put in an image |
 
@@ -34,7 +34,7 @@ make dist                      # a static binary at bin/csb
 sudo install bin/csb /usr/local/bin/     # optional
 ```
 
-- `make check` — gofmt, `go vet`, unit tests. No Docker, no engine. This is what
+- `make check` — gofmt, `go vet`, unit tests. No container backend, no engine. This is what
   CI runs on every push and pull request, and it is all CI can run.
 - `make e2e CSB_E2E_BUILD=~/cubrid/install.out` — the whole surface against a
   real build, about two minutes. Run it against an engine build before trusting
@@ -256,8 +256,8 @@ elsewhere, and the run record says what happened to this one.
 [`docs/DESIGN.md`](docs/DESIGN.md) §4 fixes the boundaries;
 [`docs/design/`](docs/design/) specifies what crosses each one.
 
-`--network tailnet` puts the nodes on a tailnet instead of a docker bridge, so a
-topology can span machines ([ADR-002](docs/design/ADR-002-backend-contract.md)).
+`--network tailnet` puts the nodes on a tailnet instead of `bridge`, one host's own
+container network, so a topology can span machines ([ADR-002](docs/design/ADR-002-backend-contract.md)).
 
 ## Status
 

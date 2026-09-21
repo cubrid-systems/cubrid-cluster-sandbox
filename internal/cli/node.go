@@ -253,7 +253,10 @@ func cmdNodeShell(c *Ctx) (any, error) {
 	argv := a.D.ShellArgv(names[0], t.DB)
 	bin, err := exec.LookPath(argv[0])
 	if err != nil {
-		return nil, Failed("no_engine", "%v", err)
+		// Not no_engine: in this project "engine" is CUBRID, and that code
+		// already means the build under test could not be resolved. A missing
+		// container CLI is a different condition with a different remedy.
+		return nil, Failed("no_backend", "%v", err)
 	}
 	// Nothing after this line runs on success.
 	return nil, Failed("exec_failed", "%v", syscall.Exec(bin, argv, os.Environ()))

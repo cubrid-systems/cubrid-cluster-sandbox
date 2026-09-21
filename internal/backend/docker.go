@@ -589,3 +589,15 @@ func (d *Docker) RunInImage(ctx context.Context, image string, argv ...string) (
 	args := append([]string{"run", "--rm", image}, argv...)
 	return d.R.Run(ctx, d.E.Cmd(), args...)
 }
+
+// HasContainer reports whether this backend holds a container by this name,
+// running or not.
+//
+// Asked of a backend that is *not* the one in use, and only after a node was
+// not found, so that "the cluster is gone" can be corrected to "you asked the
+// wrong tool". A cluster that records its backend never needs this; one whose
+// describe artifact predates the field does.
+func (d *Docker) HasContainer(ctx context.Context, name string) bool {
+	res, err := d.R.Run(ctx, d.E.Cmd(), "inspect", "-f", "{{.Id}}", name)
+	return err == nil && res.ExitCode == 0
+}

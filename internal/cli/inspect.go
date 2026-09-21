@@ -62,7 +62,28 @@ func readStatus(c *Ctx) (*inspect.Status, error) {
 	if len(st.Nodes) > 0 && !st.Serving() {
 		c.Note("not_serving", SevWarn, "no single node is registered_and_active")
 	}
+	// A cluster read with the wrong backend looks exactly like a cluster that
+	// is down: every node dead, nothing serving. Only an artifact that records
+	// no backend can land here, and only on a machine with both installed --
+	// but that is the machine where the reading is wrong rather than bleak.
+	if t.Backend == "" && !anyLive(st) {
+		if k, ok := otherBackendHas(c, a.D.E, t.Nodes[0].Name); ok {
+			c.Note("wrong_backend", SevError,
+				"every node reads dead because this cluster is being reached with "+a.D.Cmd()+
+					", and its nodes are "+string(k)+" containers; it records no backend, so re-run with CSB_BACKEND="+string(k))
+		}
+	}
 	return st, nil
+}
+
+// anyLive reports whether the backend saw a single running node.
+func anyLive(st *inspect.Status) bool {
+	for _, n := range st.Nodes {
+		if n.Live {
+			return true
+		}
+	}
+	return false
 }
 
 func dash(p *int) string {

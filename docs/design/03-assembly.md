@@ -226,12 +226,18 @@ that needed a forced promotion is not the same evidence as one that did not.
 
 ## 4. Container requirements
 
-**Docker is asked whether it can be used before anything is spent assuming it
-can.** `cluster create` — both paths, since the check sits in the half they share
-— runs one `docker version` and maps the three ways it can fail onto the three
+**The backend is asked whether it can be used before anything is spent assuming
+it can.** `cluster create` — both paths, since the check sits in the half they
+share — runs one `<backend> version` and maps the ways it can fail onto
 different remedies: not on `PATH` (install it), a daemon that cannot be reached
-(start it), and a socket this user is not permitted (join the `docker` group, and
-log in again). All three are precondition failures, exit **3**.
+(start it), and a socket this user is not permitted (join the `docker` group,
+and log in again). All are precondition failures, exit **3**, code
+`backend_unusable`.
+
+The last two are docker's, and saying them about podman would be misleading:
+rootless podman has no daemon to be unreachable and no socket to be denied, so
+there is no group to join. It gets its own two sentences rather than docker's
+(ADR-002, *Measured against podman 4.9.3*).
 
 They used to arrive as one message, and it was whichever docker command the
 assembly happened to reach first, reported as an internal one: `csb: docker build

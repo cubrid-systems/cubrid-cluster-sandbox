@@ -131,7 +131,7 @@ func cmdClusterLs(c *Ctx) (any, error) {
 		d := &backend.Docker{R: r, E: k}
 		running, derr := d.RunningClusters(c.Ctx)
 		if derr != nil {
-			c.Note("engine_unavailable", SevWarn,
+			c.Note("backend_unavailable", SevWarn,
 				d.Cmd()+" is installed and could not be used, so anything it holds is missing here: "+derr.Error())
 			continue
 		}
@@ -143,7 +143,7 @@ func cmdClusterLs(c *Ctx) (any, error) {
 		}
 	}
 	if asked == 0 {
-		c.Note("engine_unavailable", SevWarn,
+		c.Note("backend_unavailable", SevWarn,
 			"no container backend is on this machine's PATH, so this lists stored state only")
 	}
 

@@ -148,9 +148,10 @@ is how this verb failed on its first run against a healthy cluster. It skips
 symlinks. And **`--follow` is bounded by `--timeout` rather than by Ctrl-C**:
 every other verb here is bounded, and a command that can only be stopped by hand
 cannot go in a script. `--follow` has no envelope to close, so it refuses
-`--json` — as does `node shell`, which replaces this process with `docker exec
--it` because a real TTY has to come from docker's own stdin and not through a
-pipe this tool sits in.
+`--json` — as does `node shell`, which replaces this process with the backend's
+`exec -it` because a real TTY has to come from the backend's own stdin and not
+through a pipe this tool sits in. The argv is the backend's own, because it
+knows which one made the cluster.
 
 ### `fault`
 
@@ -359,8 +360,11 @@ Three rules that come from measurement rather than taste:
   `ambiguous_apply_info`, `load_rate_not_held`, `quiesce_active`,
   `hidden_parameter_set` and `clock_skew` are the measurement codes, and each
   corresponds to something that was observed. The operational ones are
-  `no_such_cluster`, `no_describe`, `stale_state`, `docker_unavailable` and
-  `not_implemented`.
+  `no_such_cluster`, `no_describe`, `stale_state`, `backend_unavailable`,
+  `backend_unusable`, `no_backend`, `wrong_backend` and `not_implemented`. The
+  four backend codes are separate from `no_engine` on purpose: here "engine" is
+  CUBRID, so a missing container CLI and a missing build under test are
+  different conditions with different remedies.
 - **Timestamps are the sample's, not the report's.** A `repl status` that
   reports a row `applylogdb` wrote four seconds ago says so, because during an
   apply stall that row stops moving while looking perfectly healthy.

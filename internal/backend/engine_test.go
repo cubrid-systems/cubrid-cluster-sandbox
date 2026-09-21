@@ -1,9 +1,14 @@
 package backend
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
 
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/topology"
 )
@@ -113,5 +118,43 @@ func TestTheEmptyBackendIsDocker(t *testing.T) {
 	// keep being reached with what made it.
 	if got := Kind("").Cmd(); got != "docker" {
 		t.Errorf("a cluster with no recorded backend is a docker cluster: got %q", got)
+	}
+}
+
+// fakeBackends puts a stub `docker` and a stub `podman` on PATH, each exiting
+// with the given code for `inspect`. It is how the wrong-backend path is tested
+// without two container engines and a real container.
+func fakeBackends(t *testing.T, dockerExit, podmanExit int) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, code := range map[string]int{"docker": dockerExit, "podman": podmanExit} {
+		script := fmt.Sprintf("#!/bin/sh\nexit %d\n", code)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+}
+
+// TestHasContainerAsksTheBackendItWasGiven is the lookup behind the message
+// that turns "the cluster is gone" into "you asked the wrong tool". It only
+// ever runs against the backend that is *not* in use, so asking the wrong one
+// would make the correction itself wrong.
+func TestHasContainerAsksTheBackendItWasGiven(t *testing.T) {
+	// podman holds the container; docker does not.
+	fakeBackends(t, 1, 0)
+
+	if (&Docker{R: &run.Runner{}, E: KindDocker}).HasContainer(context.Background(), "pmha-n1") {
+		t.Error("docker reported a container it does not have")
+	}
+	if !(&Docker{R: &run.Runner{}, E: KindPodman}).HasContainer(context.Background(), "pmha-n1") {
+		t.Error("podman did not report the container it has")
+	}
+}
+
+func TestHasContainerIsFalseWhenTheBackendIsNotThere(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if (&Docker{R: &run.Runner{}, E: KindDocker}).HasContainer(context.Background(), "n1") {
+		t.Error("a backend that is not installed cannot hold a container")
 	}
 }
