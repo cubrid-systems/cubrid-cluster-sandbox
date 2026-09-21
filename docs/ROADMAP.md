@@ -292,6 +292,21 @@ inside, and whether a runner grants `NET_ADMIN` and `iptables` in a container,
 which two fault mechanisms need and which this project has already shipped
 unexecuted once. If no runner appears, deleting `e2e.yml` is the honest end.
 
+**Is podman a supported backend, or one that was made to work once? — raised
+2026-09-21** ([`DESIGN.md`](DESIGN.md) §9 OQ13;
+[`design/ADR-002`](design/ADR-002-backend-contract.md)). A second backend exists
+and the eleven-operation contract held: four differences, each a flag or a
+template, and every fault verb executed and reversed on a rootless pair. Three
+of the four failed silently before they were found, which is why they are now
+pinned by tests that assert their spelling.
+
+**Nothing keeps it true.** `check.yml` runs those tests and executes none of the
+mechanisms; `e2e.yml` runs the suite on whatever the runner has, which is docker.
+So the choice is a matrix that doubles the slowest thing here, a best-effort
+claim in README that decays, or dropping the parameter. It waits on the runner
+question above, because the reason to keep podman is the same reason that one is
+open: rootless needs no daemon and no group membership.
+
 **Implementation language — decided 2026-09-02.**
 [`design/ADR-001`](design/ADR-001-implementation-language.md) accepts **Go** for
 the provisioner and shell for the operator-facing scripts. The earlier draft

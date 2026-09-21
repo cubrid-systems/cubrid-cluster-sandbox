@@ -1007,3 +1007,44 @@ neither is answerable without one:
 If no runner appears, the honest resolution is to delete `e2e.yml` rather than
 leave a workflow nobody can run, and keep the suite where it has always been: on
 the machine of whoever has an engine.
+
+**Partly narrowed 2026-09-21, by the podman work.** The second of those two is no
+longer a question about capability in general. On a rootless pmha pair,
+`--cap-add=NET_ADMIN` is granted and `iptables` writes succeed inside the user
+namespace: both `partition --mechanism drop` and `ping-unavailable --mechanism
+icmp` were executed and reversed, and the split brain produced the engine's own
+`ha_ping_hosts` sentence verbatim (ADR-002, *Every fault verb, executed on a
+rootless pair*). That is this desktop and not a hosted runner, so it does not
+close the question — but it moves the thing to try first from "ask for a
+privileged docker runner" to "check whether the runner can run rootless podman",
+which a hosted `ubuntu-latest` ships.
+
+**OQ13 — Is podman a supported backend, or one that was made to work once?**
+*Owner*: this project. *Raised* 2026-09-21. *Verification*: `make e2e` green
+under `CSB_BACKEND=podman`, on a machine where it is already green under docker.
+
+A second backend was added because a machine had podman and not a usable docker,
+and the eleven operations held: four differences, each a flag or a template, and
+every fault verb executed and reversed on a rootless pair (ADR-002). What is not
+settled is what that buys and what it costs to keep.
+
+The cost is a second thing every change has to stay true for, and nothing
+enforces it today. `check.yml` runs unit tests, which pin the four differences by
+spelling but execute none of them. `e2e.yml` runs the suite on whatever the
+runner has, which is docker. So podman is verified by one session's manual run
+and by tests that cannot catch a fifth difference the way the fourth was missed
+— by being written down as "nothing else".
+
+The buy is OQ12's second half: rootless podman needs no daemon and no group
+membership, which is the shape of a runner constraint rather than a preference.
+
+Three ways out, and they are not equal:
+
+- **Supported.** `make e2e` runs twice, or once per backend in a matrix, on a
+  machine with both. Doubles the slowest thing this project has.
+- **Best-effort.** Kept working when someone notices, documented as such in
+  README's Prerequisites, and not claimed in CI. Honest, and decays.
+- **Dropped.** The parameter comes out and `backend.Kind` goes with it. Cheapest
+  and forecloses OQ12's rootless path.
+
+The answer depends on OQ12 having a runner, so this question waits on that one.
