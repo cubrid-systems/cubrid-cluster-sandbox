@@ -215,7 +215,27 @@ can show the move is safe — the applier drained (`eof == final`) and
 `fail_counter` at zero — because forcing the transition while the applier is
 behind is exactly how data written after the promotion gets overwritten by
 replication log arriving late, which is the lab's stated reason for refusing to
-force it in general. When it cannot show that, it refuses and says what is
+force it in general.
+
+**The two conditions are not one condition, and saying them as one was a dead
+end.** An applier that has not drained is fixed by waiting. A non-zero
+`fail_counter` is not: it counts rows the slave could not apply, the engine
+leaves it standing on purpose ([`04-faults.md`](04-faults.md) §5), and the only
+repair is a rebuild from a master. They used to share a sentence, and the
+sentence was the drain one — so a node at 187 of 187 with `fail_counter` 5 was
+told "replication has to drain first", which it had. Worse, the repair it did
+not name needs a master, and a group in this state has none: `cluster up`
+refuses because the move is unsafe, `ha resync` refuses because it rebuilds
+from a master, and `ha promote` used to refuse because there is none to take
+away. Three correct refusals and no way out.
+
+Now each condition says its own remedy, `cluster status` says it too rather
+than leaving it to be collected from three commands that each fail, and
+`ha promote <node>` completes a stalled promotion when the group has no master.
+`--force` is the one override, and only over `fail_counter` — never over the
+drain, because waiting fixes that one and forcing past it buys nothing.
+
+When it cannot show the move is safe, it refuses and says what is
 outstanding — which is not a rare path: in one measured run the applier held two
 pages (`eof` 178, `final` 176) and neither figure moved over 100 seconds, so the
 drained condition was never reached and `cluster up` reported that rather than

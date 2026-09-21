@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 func promoteFlags(fs *flag.FlagSet) {
 	fs.Duration("wait", 120*time.Second, "bound on the promotion")
+	fs.Bool("force", false, "complete a to_be_active node whose fail_counter is not zero, accepting the divergence")
 }
 
 // masters reports which nodes are serving as one. Two is not a promotion
@@ -85,7 +87,7 @@ func takeMasterAway(c *Ctx, a *assembly.Assembler, t *topology.Topology, current
 				if n.Server == "registered_and_to_be_active" {
 					stuck++
 					if stuck >= 5 {
-						forced, ferr := a.CompletePromotion(c.Ctx, target)
+						forced, ferr := a.CompletePromotion(c.Ctx, target, c.fs.Lookup("force") != nil && c.fs.Lookup("force").Value.String() == "true")
 						if forced {
 							c.Note("promotion_completed", SevWarn,
 								target+" held to_be_active with its applier drained, so the promotion was completed with `changemode -m active -f`")
@@ -107,6 +109,52 @@ func takeMasterAway(c *Ctx, a *assembly.Assembler, t *topology.Topology, current
 	}
 }
 
+// toBeActive names the node holding registered_and_to_be_active, if one is.
+func toBeActive(st *inspect.Status) string {
+	for _, n := range st.Nodes {
+		if n.Server == "registered_and_to_be_active" {
+			return n.Name
+		}
+	}
+	return ""
+}
+
+// completeStalled finishes a promotion that started and did not, which is the
+// only verb that can act on a group with no master.
+//
+// It is `ha promote` rather than a new noun because that is what it does: the
+// node is already the group's candidate and the heartbeat already chose it.
+// What is missing is the last step, and --force is where an operator accepts
+// the one thing that cannot be made safe by waiting.
+func completeStalled(c *Ctx, a *assembly.Assembler, waiting string, force bool) (any, error) {
+	if blocker := a.PromotionBlocker(c.Ctx, waiting, force); blocker != nil {
+		if errors.Is(blocker, assembly.ErrApplyInfoUnread) {
+			return nil, Precondition("apply_info_unread",
+				"%s holds to_be_active and db_ha_apply_info has no row yet, so whether finishing is safe cannot be answered; re-run in a moment", waiting)
+		}
+		return nil, Precondition("promotion_not_safe", "%v", blocker)
+	}
+	forced, err := a.CompletePromotion(c.Ctx, waiting, force)
+	if err != nil {
+		return nil, Precondition("promotion_not_safe", "%v", err)
+	}
+	if !forced {
+		return nil, Failed("promotion_not_completed", "%s did not take the completion", waiting)
+	}
+	if force {
+		c.Note("divergence_accepted", SevError,
+			waiting+" was promoted with a non-zero fail_counter: the rows it could not apply are now the group's truth, "+
+				"and the other node has to be rebuilt from it rather than the other way round")
+	}
+	c.Note("promotion_completed", SevWarn,
+		waiting+" held to_be_active and the group had no master; the promotion was completed with `changemode -m active -f`")
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "%s promoted by completing a stalled promotion\n", waiting)
+		printNotes(c)
+	}
+	return map[string]any{"promoted": waiting, "completed_stalled": true, "forced": force, "changed": true}, nil
+}
+
 func cmdHaPromote(c *Ctx) (any, error) {
 	sel, err := selectorArg(c)
 	if err != nil {
@@ -124,6 +172,7 @@ func cmdHaPromote(c *Ctx) (any, error) {
 		return nil, Precondition("ambiguous_selector", "ha promote needs exactly one node; %q resolved to %d", sel, len(names))
 	}
 	target := names[0]
+	force := c.fs.Lookup("force") != nil && c.fs.Lookup("force").Value.String() == "true"
 
 	st, err := inspect.Read(c.Ctx, a.D, t)
 	if err != nil {
@@ -138,8 +187,18 @@ func cmdHaPromote(c *Ctx) (any, error) {
 		c.Note("already_active", SevInfo, target+" is already the master; nothing to do")
 		return map[string]any{"promoted": target, "seconds": 0.0, "changed": false}, nil
 	case len(ms) == 0:
+		// A group with no master is not always a group that cannot have one.
+		// A node holding to_be_active is a promotion that started and did not
+		// finish, and completing it is the only route back: `cluster up`
+		// refuses because the move is unsafe, `ha resync` refuses because it
+		// rebuilds from a master, and promote used to refuse because there is
+		// none to take away. Three correct refusals and no way out.
+		if waiting := toBeActive(st); waiting != "" {
+			return completeStalled(c, a, waiting, force)
+		}
 		return nil, Precondition("no_master",
-			"the group has no master, so there is none to take away; promote works by making the heartbeat decide, not by forcing a role")
+			"the group has no master and no node is holding to_be_active, so there is none to take away and none to finish; "+
+				"promote works by making the heartbeat decide, not by forcing a role")
 	}
 	current := ms[0]
 
