@@ -1007,3 +1007,75 @@ neither is answerable without one:
 If no runner appears, the honest resolution is to delete `e2e.yml` rather than
 leave a workflow nobody can run, and keep the suite where it has always been: on
 the machine of whoever has an engine.
+
+**Partly narrowed 2026-09-21, by the podman work.** The second of those two is no
+longer a question about capability in general. On a rootless pmha pair,
+`--cap-add=NET_ADMIN` is granted and `iptables` writes succeed inside the user
+namespace: both `partition --mechanism drop` and `ping-unavailable --mechanism
+icmp` were executed and reversed, and the split brain produced the engine's own
+`ha_ping_hosts` sentence verbatim (ADR-002, *Every fault verb, executed on a
+rootless pair*). That is this desktop and not a hosted runner, so it does not
+close the question — but it moves the thing to try first from "ask for a
+privileged docker runner" to "check whether the runner can run rootless podman",
+which a hosted `ubuntu-latest` ships.
+
+**OQ13 — Is podman a supported backend, or one that was made to work once?**
+*Owner*: this project. *Raised* 2026-09-21. *Verification*: `make e2e` green
+under `CSB_BACKEND=podman`, on a machine where it is already green under docker.
+
+A second backend was added because a machine had podman and not a usable docker,
+and the eleven operations held: four differences, each a flag or a template, and
+every fault verb executed and reversed on a rootless pair (ADR-002). What is not
+settled is what that buys and what it costs to keep.
+
+The cost is a second thing every change has to stay true for, and nothing
+enforces it today. `check.yml` runs unit tests, which pin the four differences by
+spelling but execute none of them. `e2e.yml` runs the suite on whatever the
+runner has, which is docker. So podman is verified by one session's manual run
+and by tests that cannot catch a fifth difference the way the fourth was missed
+— by being written down as "nothing else".
+
+The buy is OQ12's second half: rootless podman needs no daemon and no group
+membership, which is the shape of a runner constraint rather than a preference.
+
+Three ways out, and they are not equal:
+
+- **Supported.** `make e2e` runs twice, or once per backend in a matrix, on a
+  machine with both. Doubles the slowest thing this project has.
+- **Best-effort.** Kept working when someone notices, documented as such in
+  README's Prerequisites, and not claimed in CI. Honest, and decays.
+- **Dropped.** The parameter comes out and `backend.Kind` goes with it. Cheapest
+  and forecloses OQ12's rootless path.
+
+The answer depends on OQ12 having a runner, so this question waits on that one.
+
+**OQ14 — What actually holds a node in `to_be_active`?**
+*Owner*: this project. *Raised* 2026-09-21. *Verification*: a sequence that
+lands a pair in "no master, one node holding `to_be_active`" on demand, run
+twice.
+
+The completion path in `Assembler.Up` and `takeMasterAway` exists for a state
+the field reported — a node that refused writes for eight hours — and this
+project's first reproduction of it turned out to be a bug in this tool rather
+than the engine (`design/03-assembly.md` §3). The state was met again on
+2026-09-21, with a group that had no master and no verb that could give it one,
+and four attempts to re-enter it deliberately all recovered cleanly instead:
+crash the master and return it, kill its container, stop its container, and
+return the container inside the promotion window.
+
+One thing that was suspected and is now ruled out: a non-zero `fail_counter`
+does not stop the engine from completing its own promotion. A slave with
+`fail_counter` 5 went to `registered_and_active` in about 15 seconds on its
+own. The counter only stops *this tool* from completing a promotion that has
+already stalled, which is a different sentence and now a different message.
+
+Why it matters more than a curiosity: the escape added on the same day
+(`ha promote` completing a stalled promotion, `--force` over the counter) is
+verified by unit tests on the judgement and by the CLI surface, and **not** by
+an end-to-end run, because there is no way to stand the state up. A repair for
+a state nobody can produce is a repair nobody can test.
+
+Where to look next, in order of cheapness: the applier's own refusal path
+(a `db_ha_apply_info` row pointing past a deleted archive is what the field
+case was), a peer that re-registers mid-promotion, and `ha_ping_hosts`
+answering differently to the two nodes at the moment of the decision.

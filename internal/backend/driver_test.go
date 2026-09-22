@@ -25,7 +25,7 @@ func TestNodePlanCarriesEveryContainerRequirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	top.Image = "csb-base:test"
-	argv := NodePlan(top, top.Nodes[0], "/work/hadb", "/res", 1000, 1000)
+	argv := NodePlan(KindDocker, top, top.Nodes[0], "/work/hadb", "/res", 1000, 1000)
 	line := strings.Join(argv, " ")
 
 	must := map[string]string{
@@ -49,7 +49,7 @@ func TestNodePlanCarriesEveryContainerRequirement(t *testing.T) {
 func TestNodePlanOmitsCPUsWhenUnset(t *testing.T) {
 	top, _ := topology.Resolve(topology.Options{Name: "hadb"})
 	top.Image = "img"
-	if line := strings.Join(NodePlan(top, top.Nodes[0], "/w", "/res", 0, 0), " "); strings.Contains(line, "--cpus") {
+	if line := strings.Join(NodePlan(KindDocker, top, top.Nodes[0], "/w", "/res", 0, 0), " "); strings.Contains(line, "--cpus") {
 		t.Errorf("an unset quota must not become --cpus 0: %s", line)
 	}
 }
@@ -99,7 +99,7 @@ func TestPreflightSaysWhichWayDockerIsUnusable(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			fakeDocker(t, c.script)
-			d := &Docker{R: &run.Runner{}}
+			d := &Driver{R: &run.Runner{}}
 			err := d.Preflight(context.Background())
 			if err == nil {
 				t.Fatalf("%s: reported usable", c.name)
@@ -111,7 +111,7 @@ func TestPreflightSaysWhichWayDockerIsUnusable(t *testing.T) {
 	}
 
 	fakeDocker(t, "echo 29.0.1")
-	if err := (&Docker{R: &run.Runner{}}).Preflight(context.Background()); err != nil {
+	if err := (&Driver{R: &run.Runner{}}).Preflight(context.Background()); err != nil {
 		t.Errorf("a working docker was refused: %v", err)
 	}
 }
@@ -128,7 +128,7 @@ func TestANodeMayWriteACore(t *testing.T) {
 		t.Fatal(err)
 	}
 	top.Image = "csb-base:test"
-	line := strings.Join(NodePlan(top, top.Nodes[0], "/work/hadb", "/res", 1000, 1000), " ")
+	line := strings.Join(NodePlan(KindDocker, top, top.Nodes[0], "/work/hadb", "/res", 1000, 1000), " ")
 	if !strings.Contains(line, "--ulimit core=-1:-1") {
 		t.Errorf("a node is started with no core limit raised: %s", line)
 	}

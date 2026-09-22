@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"sort"
@@ -61,8 +62,48 @@ func readStatus(c *Ctx) (*inspect.Status, error) {
 	}
 	if len(st.Nodes) > 0 && !st.Serving() {
 		c.Note("not_serving", SevWarn, "no single node is registered_and_active")
+		// "Not serving" is where the reader used to be left. A group with no
+		// master and a node holding to_be_active is a promotion that started
+		// and did not finish, and the reason it did not is the whole of what
+		// to do next -- so status says it here instead of making someone
+		// collect it from three commands that each refuse.
+		if len(masters(st)) == 0 {
+			if waiting := toBeActive(st); waiting != "" {
+				switch blocker := a.PromotionBlocker(c.Ctx, waiting, false); {
+				case blocker == nil:
+					c.Note("promotion_completable", SevWarn,
+						waiting+" holds to_be_active and finishing it is safe; `ha promote "+waiting+"` completes it")
+				case errors.Is(blocker, assembly.ErrApplyInfoUnread):
+					c.Note("apply_info_unread", SevInfo,
+						waiting+" holds to_be_active and db_ha_apply_info has no row yet, so whether finishing is safe cannot be answered")
+				default:
+					c.Note("promotion_stalled", SevError, blocker.Error())
+				}
+			}
+		}
+	}
+	// A cluster read with the wrong backend looks exactly like a cluster that
+	// is down: every node dead, nothing serving. Only an artifact that records
+	// no backend can land here, and only on a machine with both installed --
+	// but that is the machine where the reading is wrong rather than bleak.
+	if t.Backend == "" && !anyLive(st) {
+		if k, ok := otherBackendHas(c, a.D.E, t.Nodes[0].Name); ok {
+			c.Note("wrong_backend", SevError,
+				"every node reads dead because this cluster is being reached with "+a.D.Cmd()+
+					", and its nodes are "+string(k)+" containers; it records no backend, so re-run with CSB_BACKEND="+string(k))
+		}
 	}
 	return st, nil
+}
+
+// anyLive reports whether the backend saw a single running node.
+func anyLive(st *inspect.Status) bool {
+	for _, n := range st.Nodes {
+		if n.Live {
+			return true
+		}
+	}
+	return false
 }
 
 func dash(p *int) string {

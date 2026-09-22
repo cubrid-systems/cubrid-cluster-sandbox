@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/backend"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/run"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/selector"
@@ -115,26 +116,35 @@ func cmdClusterLs(c *Ctx) (any, error) {
 		rows[n] = &clusterRow{Name: n, HasState: true}
 	}
 
+	// Every backend, not the detected one. `ls` is the one command that is not
+	// about a named cluster, so it has no recorded backend to be reached with --
+	// and asking only the preferred one is how a running podman pair came to be
+	// listed with no containers on a machine that also has docker, which reads
+	// as "nothing is up" and is the opposite of what ls is for.
 	r := &run.Runner{Verbose: c.Verbose, Log: c.Err}
-	res, derr := r.Run(c.Ctx, "docker", "ps", "--filter", "label=csb.cluster", "--format", "{{.Label \"csb.cluster\"}}")
-	switch {
-	case derr != nil:
-		c.Note("docker_unavailable", SevWarn,
-			"docker could not be run, so this lists stored state only: "+derr.Error())
-	case res.ExitCode != 0:
-		c.Note("docker_unavailable", SevWarn,
-			"docker exited "+fmt.Sprint(res.ExitCode)+", so this lists stored state only")
-	default:
-		for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			if rows[line] == nil {
-				rows[line] = &clusterRow{Name: line}
-			}
-			rows[line].Containers++
+	asked := 0
+	for _, k := range backend.Kinds {
+		if !k.Available() {
+			continue
 		}
+		asked++
+		d := &backend.Driver{R: r, E: k}
+		running, derr := d.RunningClusters(c.Ctx)
+		if derr != nil {
+			c.Note("backend_unavailable", SevWarn,
+				d.Cmd()+" is installed and could not be used, so anything it holds is missing here: "+derr.Error())
+			continue
+		}
+		for name, n := range running {
+			if rows[name] == nil {
+				rows[name] = &clusterRow{Name: name}
+			}
+			rows[name].Containers += n
+		}
+	}
+	if asked == 0 {
+		c.Note("backend_unavailable", SevWarn,
+			"no container backend is on this machine's PATH, so this lists stored state only")
 	}
 
 	out := make([]clusterRow, 0, len(rows))

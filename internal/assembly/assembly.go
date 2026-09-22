@@ -8,6 +8,7 @@ package assembly
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -33,7 +34,7 @@ const (
 )
 
 type Assembler struct {
-	D       *backend.Docker
+	D       *backend.Driver
 	T       *topology.Topology
 	Workdir string
 	Log     io.Writer // step narration; nil for silence
@@ -504,7 +505,7 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 		if st == "registered_and_to_be_active" {
 			stuck++
 			if stuck >= 5 { // ~10 s of it, which is well past the normal transit
-				forced, err := a.CompletePromotion(ctx, waiting)
+				forced, err := a.CompletePromotion(ctx, waiting, false)
 				if err != nil {
 					// Not safe *yet* is the usual case: the applier still has a
 					// page or two to drain. Keep the reason and keep waiting --
@@ -615,22 +616,66 @@ func (a *Assembler) applyPosition(ctx context.Context, node string) (eof, final,
 // replication log arriving late, which is the lab's stated reason for refusing
 // to force it in general. So the tool checks first and refuses if it cannot
 // prove the case, rather than deciding on the operator's behalf.
-func (a *Assembler) CompletePromotion(ctx context.Context, node string) (bool, error) {
+// ErrApplyInfoUnread is "the question cannot be answered yet", which is not the
+// same answer as "unsafe": db_ha_apply_info has no row, so waiting is right and
+// refusing is not.
+var ErrApplyInfoUnread = errors.New("db_ha_apply_info has no row yet")
+
+// PromotionBlocker is why completing this node's promotion would not be safe,
+// or nil if it would be.
+//
+// Separated from performing it so that `cluster status` can say the same
+// sentence without changing anything -- a group with no master and a node that
+// cannot finish becoming one is a state the tool used to leave a reader to
+// infer from three separate refusals.
+//
+// The two conditions are not the same condition and used to share a sentence.
+// An applier that has not drained is fixed by waiting. A non-zero fail_counter
+// is not: it counts rows this slave could not apply and the engine leaves it
+// standing on purpose, so no amount of waiting moves it and the only repair is
+// a rebuild from a master. Telling someone to drain when they are drained is
+// advice that cannot be followed.
+func (a *Assembler) PromotionBlocker(ctx context.Context, node string, force bool) error {
+	eof, final, fail, ok := a.applyPosition(ctx, node)
+	if !ok {
+		return ErrApplyInfoUnread
+	}
+	return promotionBlocker(node, eof, final, fail, force)
+}
+
+// promotionBlocker is the judgement without the query, so the four answers can
+// be asserted without a cluster. Each is reachable and none of them fails
+// loudly: the wrong one is a sentence someone acts on.
+func promotionBlocker(node string, eof, final, fail int, force bool) error {
+	if eof != final {
+		return fmt.Errorf(
+			"%s holds to_be_active and completing it is not safe: the applier is at %d of %d, so %d page(s) have still to drain. "+
+				"Waiting is the remedy -- forcing it now is what the late log overwrites",
+			node, final, eof, eof-final)
+	}
+	if fail != 0 && !force {
+		return fmt.Errorf(
+			"%s holds to_be_active with its applier drained (%d of %d), but fail_counter is %d: rows it could not apply. "+
+				"Promoting it makes those rows the group's truth. `ha resync --path slave` rebuilds it from a master and clears the counter; "+
+				"if this group has no master to rebuild from, `ha promote %s --force` completes the promotion and accepts the divergence",
+			node, final, eof, fail, node)
+	}
+	return nil
+}
+
+func (a *Assembler) CompletePromotion(ctx context.Context, node string, force bool) (bool, error) {
 	m := node
 	if m == "" {
 		m = a.Master().Name
 	}
-	eof, final, fail, ok := a.applyPosition(ctx, m)
-	if !ok {
-		return false, nil // no row yet; keep waiting rather than guessing
+	if err := a.PromotionBlocker(ctx, m, force); err != nil {
+		if errors.Is(err, ErrApplyInfoUnread) {
+			return false, nil // keep waiting rather than guessing
+		}
+		return false, err
 	}
-	if fail != 0 || eof != final {
-		return false, fmt.Errorf(
-			"%s is stuck in to_be_active and completing it is not safe: the applier is at %d of %d with fail_counter=%d. "+
-				"Replication has to drain first, or the data written after a forced promotion is what the late log overwrites",
-			m, final, eof, fail)
-	}
-	a.step("%s held to_be_active with its applier drained (%d/%d, fail 0); completing the promotion", m, final, eof)
+	eof, final, _, _ := a.applyPosition(ctx, m)
+	a.step("%s held to_be_active with its applier drained (%d/%d); completing the promotion", m, final, eof)
 	a.Forced = true
 	res, err := a.D.Exec(ctx, m, a.T.DB, "cubrid changemode -m active -f "+a.T.DB)
 	if err != nil {

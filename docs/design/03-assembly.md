@@ -210,12 +210,48 @@ it is in, as long as it is not the master.
 The tool still completes a promotion that is stuck, because the state is real
 whether or not we can say what put us in it.
 
+**And we still cannot.** The state was hit again on 2026-09-21 — a pair left
+with no master, one node holding `to_be_active` and `fail_counter` 5 — and four
+attempts to reproduce the way in all recovered cleanly instead:
+
+| attempt | result |
+|---|---|
+| `node kill` the master, then `cluster up` | slave to `active` in ~8 s; killed node returns as standby |
+| the master's container killed outright | slave to `registered_and_active` in ~15 s, with `fail_counter` 5 |
+| the master's container stopped, then `cluster up` | master returns as master, slave never leaves standby |
+| the container returned during the promotion window | slave went standby → active without holding `to_be_active` |
+
+A non-zero `fail_counter` does **not** stop the engine from completing its own
+promotion — only from this tool completing one that has already stalled. So
+whatever holds a node in `to_be_active` is something else, and naming it is
+[`DESIGN.md`](../DESIGN.md) §9 OQ14.
+
 `cubrid changemode -m active -f` completes it. The tool runs that only when it
 can show the move is safe — the applier drained (`eof == final`) and
 `fail_counter` at zero — because forcing the transition while the applier is
 behind is exactly how data written after the promotion gets overwritten by
 replication log arriving late, which is the lab's stated reason for refusing to
-force it in general. When it cannot show that, it refuses and says what is
+force it in general.
+
+**The two conditions are not one condition, and saying them as one was a dead
+end.** An applier that has not drained is fixed by waiting. A non-zero
+`fail_counter` is not: it counts rows the slave could not apply, the engine
+leaves it standing on purpose ([`04-faults.md`](04-faults.md) §5), and the only
+repair is a rebuild from a master. They used to share a sentence, and the
+sentence was the drain one — so a node at 187 of 187 with `fail_counter` 5 was
+told "replication has to drain first", which it had. Worse, the repair it did
+not name needs a master, and a group in this state has none: `cluster up`
+refuses because the move is unsafe, `ha resync` refuses because it rebuilds
+from a master, and `ha promote` used to refuse because there is none to take
+away. Three correct refusals and no way out.
+
+Now each condition says its own remedy, `cluster status` says it too rather
+than leaving it to be collected from three commands that each fail, and
+`ha promote <node>` completes a stalled promotion when the group has no master.
+`--force` is the one override, and only over `fail_counter` — never over the
+drain, because waiting fixes that one and forcing past it buys nothing.
+
+When it cannot show the move is safe, it refuses and says what is
 outstanding — which is not a rare path: in one measured run the applier held two
 pages (`eof` 178, `final` 176) and neither figure moved over 100 seconds, so the
 drained condition was never reached and `cluster up` reported that rather than
@@ -226,12 +262,18 @@ that needed a forced promotion is not the same evidence as one that did not.
 
 ## 4. Container requirements
 
-**Docker is asked whether it can be used before anything is spent assuming it
-can.** `cluster create` — both paths, since the check sits in the half they share
-— runs one `docker version` and maps the three ways it can fail onto the three
+**The backend is asked whether it can be used before anything is spent assuming
+it can.** `cluster create` — both paths, since the check sits in the half they
+share — runs one `<backend> version` and maps the ways it can fail onto
 different remedies: not on `PATH` (install it), a daemon that cannot be reached
-(start it), and a socket this user is not permitted (join the `docker` group, and
-log in again). All three are precondition failures, exit **3**.
+(start it), and a socket this user is not permitted (join the `docker` group,
+and log in again). All are precondition failures, exit **3**, code
+`backend_unusable`.
+
+The last two are docker's, and saying them about podman would be misleading:
+rootless podman has no daemon to be unreachable and no socket to be denied, so
+there is no group to join. It gets its own two sentences rather than docker's
+(ADR-002, *Measured against podman 4.9.3*).
 
 They used to arrive as one message, and it was whichever docker command the
 assembly happened to reach first, reported as an internal one: `csb: docker build

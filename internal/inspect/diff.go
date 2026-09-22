@@ -48,7 +48,7 @@ type Diff struct {
 // wrote its own log and both succeeded -- so that list is empty exactly when the
 // divergence is largest. The catalog does not depend on anything having gone
 // wrong.
-func UserTables(ctx context.Context, d *backend.Docker, t *topology.Topology, node string) ([]string, error) {
+func UserTables(ctx context.Context, d *backend.Driver, t *topology.Topology, node string) ([]string, error) {
 	res, err := d.Exec(ctx, node, t.DB,
 		"csql -u dba -t -N -c \"SELECT class_name FROM db_class WHERE is_system_class='NO' AND class_type='CLASS' ORDER BY class_name\" "+t.DB+" 2>/dev/null")
 	if err != nil {
@@ -69,7 +69,7 @@ func UserTables(ctx context.Context, d *backend.Docker, t *topology.Topology, no
 	return out, nil
 }
 
-func countRows(ctx context.Context, d *backend.Docker, t *topology.Topology, node, table string) (int, error) {
+func countRows(ctx context.Context, d *backend.Driver, t *topology.Topology, node, table string) (int, error) {
 	res, err := d.Exec(ctx, node, t.DB,
 		"csql -u dba -t -N -c \"SELECT count(*) FROM ["+table+"]\" "+t.DB+" 2>/dev/null")
 	if err != nil {
@@ -92,7 +92,7 @@ func countRows(ctx context.Context, d *backend.Docker, t *topology.Topology, nod
 
 // CompareTables asks both databases what they hold. Tables that exist on only one
 // side are a difference too, and are reported rather than skipped.
-func CompareTables(ctx context.Context, d *backend.Docker, t *topology.Topology, master, standby string, only []string) (*Diff, error) {
+func CompareTables(ctx context.Context, d *backend.Driver, t *topology.Topology, master, standby string, only []string) (*Diff, error) {
 	tables := only
 	if len(tables) == 0 {
 		var err error

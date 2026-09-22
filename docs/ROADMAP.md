@@ -292,6 +292,38 @@ inside, and whether a runner grants `NET_ADMIN` and `iptables` in a container,
 which two fault mechanisms need and which this project has already shipped
 unexecuted once. If no runner appears, deleting `e2e.yml` is the honest end.
 
+**What actually holds a node in `to_be_active`? — raised 2026-09-21**
+([`DESIGN.md`](DESIGN.md) §9 OQ14;
+[`design/03-assembly.md`](design/03-assembly.md) §3). A pair was met with no
+master, one node holding `to_be_active`, and three verbs that each refused
+correctly — `cluster up` because the move was unsafe, `ha resync` because it
+rebuilds from a master, `ha promote` because there was none to take away. The
+closure is fixed: the two refusal conditions now say their own remedies,
+`cluster status` names the stall, and `ha promote` completes it with `--force`
+over the one condition waiting cannot clear.
+
+**The repair is the tested part; the state is not.** Four attempts to re-enter
+it deliberately all recovered cleanly, and a non-zero `fail_counter` was ruled
+out as the cause — a slave carrying one promoted itself in about 15 seconds. So
+the escape is verified by unit tests and the CLI surface, never end to end. A
+repair for a state nobody can produce is a repair nobody can test, which is why
+this is open rather than closed.
+
+**Is podman a supported backend, or one that was made to work once? — raised
+2026-09-21** ([`DESIGN.md`](DESIGN.md) §9 OQ13;
+[`design/ADR-002`](design/ADR-002-backend-contract.md)). A second backend exists
+and the eleven-operation contract held: four differences, each a flag or a
+template, and every fault verb executed and reversed on a rootless pair. Three
+of the four failed silently before they were found, which is why they are now
+pinned by tests that assert their spelling.
+
+**Nothing keeps it true.** `check.yml` runs those tests and executes none of the
+mechanisms; `e2e.yml` runs the suite on whatever the runner has, which is docker.
+So the choice is a matrix that doubles the slowest thing here, a best-effort
+claim in README that decays, or dropping the parameter. It waits on the runner
+question above, because the reason to keep podman is the same reason that one is
+open: rootless needs no daemon and no group membership.
+
 **Implementation language — decided 2026-09-02.**
 [`design/ADR-001`](design/ADR-001-implementation-language.md) accepts **Go** for
 the provisioner and shell for the operator-facing scripts. The earlier draft

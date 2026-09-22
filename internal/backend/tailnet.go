@@ -29,7 +29,7 @@ import (
 //
 // The auth key is passed on the command line inside the node and never stored:
 // it is a credential, and `describe` is an artifact people paste into issues.
-func (d *Docker) TailnetUp(ctx context.Context, node, authKey, hostname string) (string, error) {
+func (d *Driver) TailnetUp(ctx context.Context, node, authKey, hostname string) (string, error) {
 	if authKey == "" {
 		return "", fmt.Errorf("a tailnet needs an auth key: pass --ts-authkey or set CSB_TS_AUTHKEY")
 	}
@@ -55,7 +55,7 @@ func (d *Docker) TailnetUp(ctx context.Context, node, authKey, hostname string) 
 
 // TailnetAddr is the node's address on the tailnet. It is the address the peers
 // use and the address a cut is expressed against.
-func (d *Docker) TailnetAddr(ctx context.Context, node string) (string, error) {
+func (d *Driver) TailnetAddr(ctx context.Context, node string) (string, error) {
 	res, err := d.Privileged(ctx, node, "tailscale ip -4")
 	if err != nil {
 		return "", err
@@ -82,14 +82,14 @@ func (d *Docker) TailnetAddr(ctx context.Context, node string) (string, error) {
 // the same thing: no route, so connect() fails at once rather than hanging. The
 // packet-level mechanism needs no change, because netfilter does not care which
 // table would have carried the packet.
-func (d *Docker) UnreachOn(ctx context.Context, t *topology.Topology, from, addr, mechanism string) error {
+func (d *Driver) UnreachOn(ctx context.Context, t *topology.Topology, from, addr, mechanism string) error {
 	if t.NetworkKind == topology.NetTailnet && mechanism != "drop" {
 		return d.tailnetRule(ctx, from, addr, false)
 	}
 	return d.Unreach(ctx, from, addr, mechanism)
 }
 
-func (d *Docker) ReachOn(ctx context.Context, t *topology.Topology, from, addr, mechanism string) error {
+func (d *Driver) ReachOn(ctx context.Context, t *topology.Topology, from, addr, mechanism string) error {
 	if t.NetworkKind == topology.NetTailnet && mechanism != "drop" {
 		return d.tailnetRule(ctx, from, addr, true)
 	}
@@ -99,7 +99,7 @@ func (d *Docker) ReachOn(ctx context.Context, t *topology.Topology, from, addr, 
 // tailnetRulePriority sits below tailscale's own rules, which start at 5210.
 const tailnetRulePriority = "1000"
 
-func (d *Docker) tailnetRule(ctx context.Context, from, addr string, undo bool) error {
+func (d *Driver) tailnetRule(ctx context.Context, from, addr string, undo bool) error {
 	if addr == "" {
 		return fmt.Errorf("no address to cut from %s", from)
 	}
@@ -120,7 +120,7 @@ func (d *Docker) tailnetRule(ctx context.Context, from, addr string, undo bool) 
 
 // Addr resolves by the topology's network kind, so callers ask for "the address
 // a peer is reached at" and do not care which network answers.
-func (d *Docker) AddrOn(ctx context.Context, t *topology.Topology, node string) (string, error) {
+func (d *Driver) AddrOn(ctx context.Context, t *topology.Topology, node string) (string, error) {
 	if t.NetworkKind == topology.NetTailnet {
 		return d.TailnetAddr(ctx, node)
 	}

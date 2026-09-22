@@ -308,7 +308,7 @@ user:
   one of the two split-brain flavours — and when it does, the deviation is named
   and travels in `describe` (principle 6 in [`README.md`](README.md)).
 
-  **The host is the docker network's gateway**, and that is a requirement rather
+  **The host is the container network's gateway**, and that is a requirement rather
   than a convenience: a ping host has to sit *outside* the pair, or a partition
   between the two nodes takes the ping host with it and neither side can tell
   "the peer is gone" from "I am gone". The gateway survives a route cut between
