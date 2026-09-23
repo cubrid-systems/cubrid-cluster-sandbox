@@ -263,9 +263,24 @@ created and nothing else. A rebuild with `--from` does not inherit them, because
 a label says who claimed a cluster rather than what it is.
 
 `cluster ls` also reports each cluster's **disk** and the **machines** its nodes
-are on. Disk because a pair's volumes and copy log only grow — eleven pairs here
-reached 53 GB and nothing said so until `ls` did. Machines because a node records
-the host it ran on, which is one value today and the field placement will fill.
+are on:
+
+```
+$ csb cluster ls
+NAME                 STATE    CONTAINERS  DISK      HOST               LABELS
+hadb                 yes      2           2.9G      hgryoo-desktop     run=tk-4f2a
+pmha                 yes      2           11.1G     hgryoo-desktop     -
+tkha                 yes      0           1K                           -
+```
+
+Disk because a pair's volumes and copy log only grow and never shrink: a per-case
+reset clears the schema, not the space. Eleven pairs on one machine reached 53 GB
+and took the filesystem to 98%, and the filesystem's own total could not say
+*which* pair to remove. Machines because a node records the host it ran on —
+one value today, and the field placement will fill.
+
+A cluster created before those fields existed shows them empty rather than
+guessing, and so does one this tool did not create.
 
 `--network tailnet` puts the nodes on a tailnet instead of `bridge`, one host's own
 container network, so a topology can span machines ([ADR-002](docs/design/ADR-002-backend-contract.md)).
