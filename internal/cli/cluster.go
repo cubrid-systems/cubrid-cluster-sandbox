@@ -38,6 +38,7 @@ func createFlags(fs *flag.FlagSet) {
 	fs.String("network", "bridge", "bridge (one host's own network) or tailnet (nodes join a tailnet)")
 	fs.String("backend", "", "docker or podman; empty picks whichever is installed ($CSB_BACKEND)")
 	fs.String("ts-authkey", "", "tailnet auth key; or CSB_TS_AUTHKEY. Never stored in the artifact")
+	fs.Var(&repeatable{}, "label", "key=value recorded in the artifact and never interpreted (repeatable)")
 	fs.Int("clients", 0, "client nodes beside the HA group: where a workload runs")
 	fs.String("tools", "", "a host directory the clients get read-only at /tools")
 	fs.String("ping-host", "", "the witness a node pings to tell 'the peer is gone' from 'I am gone'")
@@ -143,6 +144,40 @@ func fromArtifact(c *Ctx, path string) (*topology.Topology, *engine.Identity, er
 			"the artifact was built against %s and that tree is not on this machine; pass --build PATH to a tree of your own", want)
 	}
 
+	// Two fields do not survive a rebuild, and they are left out for two
+	// different reasons.
+	//
+	// `host` is an observation of where a node ran, and this is a different
+	// machine's turn to make it. Carrying the original would name a machine that
+	// is not here -- the same reason `ping_host` is resolved fresh rather than
+	// read back (see standUp).
+	//
+	// `labels` are a claim by whoever ran create, not a property of the
+	// topology. Inheriting them would let a cluster rebuilt by hand carry
+	// somebody else's ownership tag and be destroyed by a tool that thinks it
+	// made it.
+	here := thisMachine()
+	for i := range t.Nodes {
+		t.Nodes[i].Host = here
+	}
+	if len(t.Labels) > 0 {
+		c.Note("labels_not_inherited", SevInfo,
+			fmt.Sprintf("the artifact carries %d label(s); a rebuild does not inherit them, because a label says who claimed that cluster rather than what it is", len(t.Labels)))
+		t.Labels = nil
+	}
+	if own := repeated(c, "label"); len(own) > 0 {
+		for _, kv := range own {
+			k, v, serr := strings.Cut(kv, "=")
+			if !serr {
+				return nil, nil, Usage("--label wants key=value, got %q", kv)
+			}
+			if t.Labels == nil {
+				t.Labels = map[string]string{}
+			}
+			t.Labels[k] = v
+		}
+	}
+
 	r := &run.Runner{Verbose: c.Verbose, Log: c.Err}
 	id, err := engine.Resolve(c.Ctx, buildPath, r)
 	if err != nil {
@@ -233,6 +268,11 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 		Clients: clients, Tools: c.str("tools"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
 		CPUs:       cpus, Set: set, SetHidden: setHidden,
+		Labels: repeated(c, "label"),
+		// Recorded where it is observed. A machine knows its own name; a
+		// cluster does not, and asking it later would be asking the wrong
+		// question once its nodes are not all in one place.
+		Host:   thisMachine(),
 		Engine: id,
 	})
 	if err != nil {
@@ -815,4 +855,17 @@ func emptyDir(dir string) error {
 		}
 	}
 	return nil
+}
+
+// thisMachine is how this host calls itself, and it is written into every node
+// created here.
+//
+// The hostname and not an address: an address belongs to a network and a node
+// may be on several, while the name is what a person uses to say which machine
+// they mean. On a tailnet it is also the name the peers resolve.
+func thisMachine() string {
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return strings.TrimSpace(h)
+	}
+	return ""
 }

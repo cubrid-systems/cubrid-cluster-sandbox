@@ -256,6 +256,17 @@ elsewhere, and the run record says what happened to this one.
 [`docs/DESIGN.md`](docs/DESIGN.md) §4 fixes the boundaries;
 [`docs/design/`](docs/design/) specifies what crosses each one.
 
+`--label key=value` (repeatable) records a fact in the artifact that csb never
+interprets and `cluster ls` reports. It exists for the tool that asked for a
+cluster: labelled with which run made it, that run can later destroy what it
+created and nothing else. A rebuild with `--from` does not inherit them, because
+a label says who claimed a cluster rather than what it is.
+
+`cluster ls` also reports each cluster's **disk** and the **machines** its nodes
+are on. Disk because a pair's volumes and copy log only grow — eleven pairs here
+reached 53 GB and nothing said so until `ls` did. Machines because a node records
+the host it ran on, which is one value today and the field placement will fill.
+
 `--network tailnet` puts the nodes on a tailnet instead of `bridge`, one host's own
 container network, so a topology can span machines ([ADR-002](docs/design/ADR-002-backend-contract.md)).
 

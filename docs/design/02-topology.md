@@ -128,13 +128,17 @@ is one of the two things worth measuring for adoption
 schema: csb/v1
 cluster: hadb
 preset: ha
+labels:                   # recorded, never interpreted, not inherited by --from
+  run: tk-2026-09-23-4f2a
 nodes:
   - name: hadb-n1
     role: master          # the role at create time, not now
+    host: hgryoo-desktop  # the machine it ran on, observed not instructed
     overrides:
       ha_copy_sync_mode: sync
   - name: hadb-n2
     role: slave
+    host: hgryoo-desktop
 engine:
   kind: build
   path: /data/workspace/cubrid/install.out
@@ -166,12 +170,26 @@ quiesce:                  # absent when writes are not blocked
   since: 2026-08-28T07:15:30Z
 ```
 
-Five things about this schema are load-bearing.
+Seven things about this schema are load-bearing.
 
 **`engine.identity` rather than `engine.path`.** A build tree does not travel,
 so recording its path alone reproduces nothing. Recording the commit and the
 build environment lets the second person produce an equivalent tree, and lets
 the tool *tell them* when theirs is not.
+
+**`host` is where a node ran, not where it must run.** `create --from` observes it
+again on the machine doing the rebuild, for the same reason `ping_host` is
+resolved fresh: a machine name is local to whoever issued it, and an artifact
+that insisted on the original would name a machine that is not there. Rebuilding
+a two-machine cluster on one machine gives a one-machine cluster and says so.
+
+**`labels` are a claim, not a property.** They are recorded verbatim and never
+interpreted — the tools that drive this one have facts about a cluster that this
+one has no business understanding, and which test run asked for a cluster is the
+one that matters: it is what lets that run destroy what it created and nothing
+else. They are deliberately **not** inherited by `create --from`, because a
+cluster rebuilt by hand from somebody's artifact must not carry their ownership
+and then be destroyed out from under its new owner.
 
 **`role` is the role at create time.** After a failover the roles have swapped,
 and an artifact that recorded the current roles would recreate the cluster

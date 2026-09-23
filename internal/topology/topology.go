@@ -30,6 +30,20 @@ type Node struct {
 	// run that can reach the broker without publishing a port, and gives CTP's
 	// ha_repl the controller its conf has always required beside the pair.
 	Kind string `json:"kind,omitempty"` // db (default) | client
+
+	// Host is the machine this node actually runs on, as that machine calls
+	// itself. It is per node and not per cluster because the point of recording
+	// it at all is the case where a cluster's nodes differ -- masters here,
+	// slaves elsewhere -- and a cluster-level field would have to be taken away
+	// again to get there.
+	//
+	// It is an observation, never an instruction. `create --from` re-observes it
+	// for the same reason `ping_host` is re-resolved: a machine name is local to
+	// whoever issued it, and an artifact rebuilt somewhere else that insisted on
+	// the original would be naming a machine that is not there. Rebuilding a
+	// two-machine cluster on one machine produces a one-machine cluster, and
+	// says so, rather than failing.
+	Host string `json:"host,omitempty"`
 }
 
 const (
@@ -66,6 +80,17 @@ type Topology struct {
 	// podman. Recorded rather than detected each time, because a cluster has to
 	// be reached with what made it -- a machine that has both would otherwise
 	// find a podman cluster with docker and report it gone.
+	// Labels are recorded and reported and never interpreted. They exist because
+	// the tools that drive this one have facts about a cluster that this one has
+	// no business understanding -- which test run asked for it, above all, so
+	// that the run can later destroy what it created and nothing else.
+	//
+	// Deliberately NOT carried by `create --from`. A label is a claim by whoever
+	// ran create, not a property of the topology: a cluster rebuilt by hand from
+	// somebody's artifact must not inherit their ownership and then be destroyed
+	// out from under its new owner.
+	Labels map[string]string `json:"labels,omitempty"`
+
 	Backend    string           `json:"backend,omitempty"`
 	Tools      string           `json:"tools,omitempty"` // host directory the clients get read-only
 	WithBroker bool             `json:"with_broker"`
@@ -91,6 +116,8 @@ type Options struct {
 	ShmSize    string
 	Set        []string // key=value, validated
 	SetHidden  []string // key=value, written unvalidated
+	Labels     []string // key=value, recorded and never interpreted
+	Host       string   // the machine standing this up, as it calls itself
 	Engine     *engine.Identity
 }
 
@@ -208,12 +235,14 @@ func Resolve(o Options) (*Topology, error) {
 		if preset == "single" {
 			role = "standalone"
 		}
-		t.Nodes = append(t.Nodes, Node{Name: fmt.Sprintf("%s-n%d", name, i), Role: role, Kind: KindDB})
+		t.Nodes = append(t.Nodes, Node{
+			Name: fmt.Sprintf("%s-n%d", name, i), Role: role, Kind: KindDB, Host: o.Host})
 	}
 	// Clients are named apart from the database nodes so that neither the eye
 	// nor a selector can confuse them, and they carry no HA role at all.
 	for i := 1; i <= o.Clients; i++ {
-		t.Nodes = append(t.Nodes, Node{Name: fmt.Sprintf("%s-c%d", name, i), Kind: KindClient})
+		t.Nodes = append(t.Nodes, Node{
+			Name: fmt.Sprintf("%s-c%d", name, i), Kind: KindClient, Host: o.Host})
 	}
 	t.Tools = o.Tools
 
@@ -237,6 +266,16 @@ func Resolve(o Options) (*Topology, error) {
 			return nil, err
 		}
 		t.Parameters.Hidden[k] = v
+	}
+	for _, kv := range o.Labels {
+		k, v, err := split(kv)
+		if err != nil {
+			return nil, err
+		}
+		if t.Labels == nil {
+			t.Labels = map[string]string{}
+		}
+		t.Labels[k] = v
 	}
 	return t, nil
 }
