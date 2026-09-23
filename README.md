@@ -282,6 +282,18 @@ one value today, and the field placement will fill.
 A cluster created before those fields existed shows them empty rather than
 guessing, and so does one this tool did not create.
 
+And a label selects, not only describes:
+
+```bash
+csb cluster destroy --label testkit_run=tk0923a1f2
+```
+
+It lists what it is about to remove and what each holds before removing it, and
+**refuses a label nothing carries** — a typo that quietly succeeds reads exactly
+like a clean-up that worked, while the clusters are still there. One that will
+not go down is reported and the rest still go: one stuck cluster must not leave
+the other seven standing.
+
 `--network tailnet` puts the nodes on a tailnet instead of `bridge`, one host's own
 container network, so a topology can span machines ([ADR-002](docs/design/ADR-002-backend-contract.md)).
 

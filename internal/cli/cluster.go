@@ -589,9 +589,13 @@ func less(a, b string) bool {
 
 func destroyFlags(fs *flag.FlagSet) {
 	fs.Bool("purge", false, "also remove the describe artifact and the run record")
+	fs.String("label", "", "destroy every cluster carrying key=value instead of one named cluster")
 }
 
 func cmdClusterDestroy(c *Ctx) (any, error) {
+	if sel := strings.TrimSpace(c.str("label")); sel != "" {
+		return destroyByLabel(c, sel)
+	}
 	if err := requireCluster(c); err != nil {
 		return nil, err
 	}
@@ -868,4 +872,90 @@ func thisMachine() string {
 		return strings.TrimSpace(h)
 	}
 	return ""
+}
+
+// destroyByLabel removes every cluster carrying one label.
+//
+// # Why a selector at all
+//
+// A label that `ls` prints and nothing selects on is half a feature. The tool
+// that made eight pairs labelled them so it could find them again; finding them
+// and then typing eight destroys is the part a person gets wrong -- and gets
+// wrong in the direction of leaving some behind, which is how a machine reaches
+// 53 GB of pairs nobody meant to keep.
+//
+// # What it refuses
+//
+// A label that matches nothing. A typo in a selector that quietly succeeds
+// reads exactly like a clean-up that worked, and the pairs are still there.
+//
+// # What it says before it acts
+//
+// Every cluster it is about to destroy, and what each holds. This is the one
+// verb in the tool that can remove several things at once, and the list is the
+// last point at which a person can see that they meant a different label.
+func destroyByLabel(c *Ctx, sel string) (any, error) {
+	key, want, ok := strings.Cut(sel, "=")
+	if !ok || strings.TrimSpace(key) == "" {
+		return nil, Usage("--label wants key=value, got %q", sel)
+	}
+	if c.Cluster != "" {
+		return nil, Usage("--label selects the clusters to destroy, so --cluster cannot also name one")
+	}
+	names, err := c.Store.List()
+	if err != nil {
+		return nil, Failed("store_unreadable", "cannot read %s: %v", c.Store.ClustersDir(), err)
+	}
+	type match struct {
+		name  string
+		bytes int64
+	}
+	var hits []match
+	for _, n := range names {
+		_, labels := artifactFacts(c, n)
+		if labels[key] == want {
+			hits = append(hits, match{n, treeBytes(c.Store.ClusterDir(n))})
+		}
+	}
+	if len(hits) == 0 {
+		return nil, Precondition("no_such_label",
+			"no cluster on this machine carries %s; `cluster ls` shows what the labels are", sel)
+	}
+
+	var total int64
+	for _, h := range hits {
+		total += h.bytes
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "destroying %d cluster(s) carrying %s, holding %s:\n",
+			len(hits), sel, humanBytes(total))
+		for _, h := range hits {
+			fmt.Fprintf(c.Out, "  %-20s %s\n", h.name, humanBytes(h.bytes))
+		}
+	}
+
+	out := make([]map[string]any, 0, len(hits))
+	for _, h := range hits {
+		// Each through the single-cluster path, so one cluster's removal is the
+		// same operation whether it was named or selected -- including the
+		// tailnet warning and the emptied-not-removed workdir, which a second
+		// implementation would drift away from.
+		sub := *c
+		sub.Cluster = h.name
+		sub.Env.Cluster = h.name
+		res, derr := cmdClusterDestroy(&sub)
+		row := map[string]any{"cluster": h.name}
+		if derr != nil {
+			// Reported and carried on: one cluster that will not go down must
+			// not leave the other seven standing.
+			row["error"] = derr.Error()
+			c.Note("destroy_failed", SevWarn, h.name+": "+derr.Error())
+		} else if m, isMap := res.(map[string]any); isMap {
+			for k, v := range m {
+				row[k] = v
+			}
+		}
+		out = append(out, row)
+	}
+	return map[string]any{"destroyed": out}, nil
 }
