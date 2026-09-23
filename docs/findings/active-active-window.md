@@ -92,7 +92,19 @@ rows on cwa2347-n1:  1  101  201
 rows on cwa2347-n2:  1       201
 ```
 
-**That divergence is permanent, and nothing reports it.** On the same cluster, at
+**That divergence is permanent, and nothing reports it.**
+
+> **Corrected 2026-09-23 — it is not permanent.** `cubrid-testkit` repeated this with a read
+> at ninety seconds as well as at thirty: three of three runs differ at thirty and three of
+> three **agree at ninety**, with nothing written in between
+> (`evidence/ha/split-brain-divergence-converges.md` in that repository). The reading above is
+> a single read thirty seconds after one heal, and thirty seconds is inside the window this
+> very document measures two paragraphs below: *"a healed split brain does to replication for
+> the best part of a minute"*. The finding that stands is the one about the gauges — every
+> gauge reads healthy while the two databases hold different rows, and that is true whether
+> the difference is transient or not. What does not stand is `permanent`.
+
+On the same cluster, at
 the same moment:
 
 ```
