@@ -38,6 +38,7 @@ func createFlags(fs *flag.FlagSet) {
 	fs.String("network", "bridge", "bridge (one host's own network) or tailnet (nodes join a tailnet)")
 	fs.String("backend", "", "docker or podman; empty picks whichever is installed ($CSB_BACKEND)")
 	fs.String("ts-authkey", "", "tailnet auth key; or CSB_TS_AUTHKEY. Never stored in the artifact")
+	fs.Var(&repeatable{}, "label", "key=value recorded in the artifact and never interpreted (repeatable)")
 	fs.Int("clients", 0, "client nodes beside the HA group: where a workload runs")
 	fs.String("tools", "", "a host directory the clients get read-only at /tools")
 	fs.String("ping-host", "", "the witness a node pings to tell 'the peer is gone' from 'I am gone'")
@@ -143,6 +144,40 @@ func fromArtifact(c *Ctx, path string) (*topology.Topology, *engine.Identity, er
 			"the artifact was built against %s and that tree is not on this machine; pass --build PATH to a tree of your own", want)
 	}
 
+	// Two fields do not survive a rebuild, and they are left out for two
+	// different reasons.
+	//
+	// `host` is an observation of where a node ran, and this is a different
+	// machine's turn to make it. Carrying the original would name a machine that
+	// is not here -- the same reason `ping_host` is resolved fresh rather than
+	// read back (see standUp).
+	//
+	// `labels` are a claim by whoever ran create, not a property of the
+	// topology. Inheriting them would let a cluster rebuilt by hand carry
+	// somebody else's ownership tag and be destroyed by a tool that thinks it
+	// made it.
+	here := thisMachine()
+	for i := range t.Nodes {
+		t.Nodes[i].Host = here
+	}
+	if len(t.Labels) > 0 {
+		c.Note("labels_not_inherited", SevInfo,
+			fmt.Sprintf("the artifact carries %d label(s); a rebuild does not inherit them, because a label says who claimed that cluster rather than what it is", len(t.Labels)))
+		t.Labels = nil
+	}
+	if own := repeated(c, "label"); len(own) > 0 {
+		for _, kv := range own {
+			k, v, serr := strings.Cut(kv, "=")
+			if !serr {
+				return nil, nil, Usage("--label wants key=value, got %q", kv)
+			}
+			if t.Labels == nil {
+				t.Labels = map[string]string{}
+			}
+			t.Labels[k] = v
+		}
+	}
+
 	r := &run.Runner{Verbose: c.Verbose, Log: c.Err}
 	id, err := engine.Resolve(c.Ctx, buildPath, r)
 	if err != nil {
@@ -233,6 +268,11 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 		Clients: clients, Tools: c.str("tools"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
 		CPUs:       cpus, Set: set, SetHidden: setHidden,
+		Labels: repeated(c, "label"),
+		// Recorded where it is observed. A machine knows its own name; a
+		// cluster does not, and asking it later would be asking the wrong
+		// question once its nodes are not all in one place.
+		Host:   thisMachine(),
 		Engine: id,
 	})
 	if err != nil {
@@ -549,12 +589,29 @@ func less(a, b string) bool {
 
 func destroyFlags(fs *flag.FlagSet) {
 	fs.Bool("purge", false, "also remove the describe artifact and the run record")
+	fs.String("label", "", "destroy every cluster carrying key=value instead of one named cluster")
 }
 
 func cmdClusterDestroy(c *Ctx) (any, error) {
+	if sel := strings.TrimSpace(c.str("label")); sel != "" {
+		return destroyByLabel(c, sel)
+	}
 	if err := requireCluster(c); err != nil {
 		return nil, err
 	}
+	return destroyOne(c)
+}
+
+// destroyOne is the body: everything that removing ONE named cluster does.
+//
+// Split from the dispatcher above so that `--label` can reuse it. Calling the
+// dispatcher instead was a real bug and an instructive one: the sub-context
+// still carried `--label`, so every per-cluster call bounced off the guard that
+// refuses `--label` with `--cluster`, each failure was collected as a row, and
+// the command printed the list it was about to destroy and then reported
+// success having destroyed nothing. A verb that can say "destroying 7.0G" and
+// leave 7.0G standing is worse than one that cannot select at all.
+func destroyOne(c *Ctx) (any, error) {
 	var t topology.Topology
 	if b, err := os.ReadFile(c.Store.DescribePath(c.Cluster)); err == nil {
 		_ = json.Unmarshal(b, &t)
@@ -815,4 +872,117 @@ func emptyDir(dir string) error {
 		}
 	}
 	return nil
+}
+
+// thisMachine is how this host calls itself, and it is written into every node
+// created here.
+//
+// The hostname and not an address: an address belongs to a network and a node
+// may be on several, while the name is what a person uses to say which machine
+// they mean. On a tailnet it is also the name the peers resolve.
+func thisMachine() string {
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return strings.TrimSpace(h)
+	}
+	return ""
+}
+
+// destroyByLabel removes every cluster carrying one label.
+//
+// # Why a selector at all
+//
+// A label that `ls` prints and nothing selects on is half a feature. The tool
+// that made eight pairs labelled them so it could find them again; finding them
+// and then typing eight destroys is the part a person gets wrong -- and gets
+// wrong in the direction of leaving some behind, which is how a machine reaches
+// 53 GB of pairs nobody meant to keep.
+//
+// # What it refuses
+//
+// A label that matches nothing. A typo in a selector that quietly succeeds
+// reads exactly like a clean-up that worked, and the pairs are still there.
+//
+// # What it says before it acts
+//
+// Every cluster it is about to destroy, and what each holds. This is the one
+// verb in the tool that can remove several things at once, and the list is the
+// last point at which a person can see that they meant a different label.
+func destroyByLabel(c *Ctx, sel string) (any, error) {
+	key, want, ok := strings.Cut(sel, "=")
+	if !ok || strings.TrimSpace(key) == "" {
+		return nil, Usage("--label wants key=value, got %q", sel)
+	}
+	if c.Cluster != "" {
+		return nil, Usage("--label selects the clusters to destroy, so --cluster cannot also name one")
+	}
+	names, err := c.Store.List()
+	if err != nil {
+		return nil, Failed("store_unreadable", "cannot read %s: %v", c.Store.ClustersDir(), err)
+	}
+	type match struct {
+		name  string
+		bytes int64
+	}
+	var hits []match
+	for _, n := range names {
+		_, labels := artifactFacts(c, n)
+		if labels[key] == want {
+			hits = append(hits, match{n, treeBytes(c.Store.ClusterDir(n))})
+		}
+	}
+	if len(hits) == 0 {
+		return nil, Precondition("no_such_label",
+			"no cluster on this machine carries %s; `cluster ls` shows what the labels are", sel)
+	}
+
+	var total int64
+	for _, h := range hits {
+		total += h.bytes
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "destroying %d cluster(s) carrying %s, holding %s:\n",
+			len(hits), sel, humanBytes(total))
+		for _, h := range hits {
+			fmt.Fprintf(c.Out, "  %-20s %s\n", h.name, humanBytes(h.bytes))
+		}
+	}
+
+	out := make([]map[string]any, 0, len(hits))
+	removed := 0
+	for _, h := range hits {
+		// Each through the single-cluster path, so one cluster's removal is the
+		// same operation whether it was named or selected -- including the
+		// tailnet warning and the emptied-not-removed workdir, which a second
+		// implementation would drift away from.
+		sub := *c
+		sub.Cluster = h.name
+		sub.Env.Cluster = h.name
+		res, derr := destroyOne(&sub)
+		row := map[string]any{"cluster": h.name}
+		if derr != nil {
+			// Reported and carried on: one cluster that will not go down must
+			// not leave the other seven standing.
+			row["error"] = derr.Error()
+			c.Note("destroy_failed", SevWarn, h.name+": "+derr.Error())
+		} else if m, isMap := res.(map[string]any); isMap {
+			for k, v := range m {
+				row[k] = v
+			}
+		}
+		out = append(out, row)
+		if derr == nil {
+			removed++
+		}
+	}
+	// Reporting matters more here than anywhere else in the tool, because the
+	// operator asked for several things to go and cannot see which did. If none
+	// went, that is a failure however many rows were printed.
+	if removed == 0 {
+		return map[string]any{"destroyed": out},
+			Failed("destroy_failed", "none of the %d cluster(s) carrying %s could be destroyed", len(hits), sel)
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "destroyed %d of %d\n", removed, len(hits))
+	}
+	return map[string]any{"destroyed": out}, nil
 }

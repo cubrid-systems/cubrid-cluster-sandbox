@@ -256,6 +256,44 @@ elsewhere, and the run record says what happened to this one.
 [`docs/DESIGN.md`](docs/DESIGN.md) §4 fixes the boundaries;
 [`docs/design/`](docs/design/) specifies what crosses each one.
 
+`--label key=value` (repeatable) records a fact in the artifact that csb never
+interprets and `cluster ls` reports. It exists for the tool that asked for a
+cluster: labelled with which run made it, that run can later destroy what it
+created and nothing else. A rebuild with `--from` does not inherit them, because
+a label says who claimed a cluster rather than what it is.
+
+`cluster ls` also reports each cluster's **disk** and the **machines** its nodes
+are on:
+
+```
+$ csb cluster ls
+NAME                 STATE    CONTAINERS  DISK      HOST               LABELS
+hadb                 yes      2           2.9G      hgryoo-desktop     run=tk-4f2a
+pmha                 yes      2           11.1G     hgryoo-desktop     -
+tkha                 yes      0           1K                           -
+```
+
+Disk because a pair's volumes and copy log only grow and never shrink: a per-case
+reset clears the schema, not the space. Eleven pairs on one machine reached 53 GB
+and took the filesystem to 98%, and the filesystem's own total could not say
+*which* pair to remove. Machines because a node records the host it ran on —
+one value today, and the field placement will fill.
+
+A cluster created before those fields existed shows them empty rather than
+guessing, and so does one this tool did not create.
+
+And a label selects, not only describes:
+
+```bash
+csb cluster destroy --label testkit_run=tk0923a1f2
+```
+
+It lists what it is about to remove and what each holds before removing it, and
+**refuses a label nothing carries** — a typo that quietly succeeds reads exactly
+like a clean-up that worked, while the clusters are still there. One that will
+not go down is reported and the rest still go: one stuck cluster must not leave
+the other seven standing.
+
 `--network tailnet` puts the nodes on a tailnet instead of `bridge`, one host's own
 container network, so a topology can span machines ([ADR-002](docs/design/ADR-002-backend-contract.md)).
 
@@ -272,7 +310,7 @@ What has been measured with it — questions the field asked and could not answe
 | How is replication lag injected, and does the heartbeat allow it? | Suspend a stage; the heartbeat watches process *existence*, not progress, and does not interfere | [`replication-lag.md`](docs/findings/replication-lag.md) |
 | Is the return to the original master mechanically possible? | Yes — restored in 2 s with no row loss. The policy around it is not settled | [`failback.md`](docs/findings/failback.md) |
 | What actually decides when a cluster switches over? | Not the documented arithmetic. Nineteen runs: raising either heartbeat parameter fourfold leaves the measurement inside its own baseline band; `ha_calc_score_interval_in_msecs` moves it, by about 2× on means | [`switchover-threshold.md`](docs/findings/switchover-threshold.md) |
-| Does a healed partition run Active-Active, syncing both ways? | The window is real and is as long as `ha_calc_score_interval_in_msecs` — ~12 s at 15000 against ~1 s at the default. Rows cross in one direction only, and the divergence that is left is permanent and reported healthy by every gauge | [`active-active-window.md`](docs/findings/active-active-window.md) |
+| Does a healed partition run Active-Active, syncing both ways? | The window is real and is as long as `ha_calc_score_interval_in_msecs` — ~12 s at 15000 against ~1 s at the default. Rows cross in one direction only, and every gauge reads healthy while the two databases hold different rows. **The divergence itself is not permanent** — corrected 2026-09-23, it is gone by ninety seconds | [`active-active-window.md`](docs/findings/active-active-window.md) |
 
 **One decision short.** `ha failback` performs the return trip and stops where a
 person has to choose: who authorises it, and on what evidence. Nobody has written

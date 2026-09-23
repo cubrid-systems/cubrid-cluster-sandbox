@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -100,6 +101,19 @@ type clusterRow struct {
 	Name       string `json:"name"`
 	HasState   bool   `json:"has_state"`
 	Containers int    `json:"containers"`
+
+	// Hosts and Labels are read out of the artifact, so a cluster whose state
+	// this tool did not write reports neither. They are here because a field
+	// nothing displays is a field nobody can act on: `host` exists so an
+	// operator can see which machine a cluster is on once they are not all on
+	// one, and a label exists so the tool that asked for a cluster can find its
+	// own again -- neither is worth recording if `ls` will not say it.
+	Hosts  []string          `json:"hosts,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
+	// Bytes is what this cluster is costing on disk. A pair's volumes and copy
+	// log only grow, so the number an operator needs is per cluster and not per
+	// filesystem: eleven pairs reached 53 GB here and `ls` said nothing.
+	Bytes int64 `json:"bytes,omitempty"`
 }
 
 // cmdClusterLs answers from both sides: the state this tool keeps, and what is
@@ -113,7 +127,10 @@ func cmdClusterLs(c *Ctx) (any, error) {
 	}
 	rows := map[string]*clusterRow{}
 	for _, n := range names {
-		rows[n] = &clusterRow{Name: n, HasState: true}
+		row := &clusterRow{Name: n, HasState: true}
+		row.Hosts, row.Labels = artifactFacts(c, n)
+		row.Bytes = treeBytes(c.Store.ClusterDir(n))
+		rows[n] = row
 	}
 
 	// Every backend, not the detected one. `ls` is the one command that is not
@@ -164,13 +181,16 @@ func cmdClusterLs(c *Ctx) (any, error) {
 		if len(out) == 0 {
 			fmt.Fprintln(c.Out, "no clusters on this machine")
 		} else {
-			fmt.Fprintf(c.Out, "%-20s %-8s %s\n", "NAME", "STATE", "CONTAINERS")
+			fmt.Fprintf(c.Out, "%-20s %-8s %-11s %-9s %-18s %s\n",
+				"NAME", "STATE", "CONTAINERS", "DISK", "HOST", "LABELS")
 			for _, row := range out {
 				state := "-"
 				if row.HasState {
 					state = "yes"
 				}
-				fmt.Fprintf(c.Out, "%-20s %-8s %d\n", row.Name, state, row.Containers)
+				fmt.Fprintf(c.Out, "%-20s %-8s %-11d %-9s %-18s %s\n",
+					row.Name, state, row.Containers,
+					humanBytes(row.Bytes), strings.Join(row.Hosts, ","), labelText(row.Labels))
 			}
 		}
 		for _, n := range c.Env.Notes {
@@ -381,4 +401,78 @@ func ParseSelector(s string) (selector.Selector, error) {
 		return sel, Usage("%v", err)
 	}
 	return sel, nil
+}
+
+// artifactFacts reads the two things `ls` cannot learn from the world: which
+// machines a cluster's nodes are on, and what the tool that created it claimed.
+//
+// A cluster with no readable artifact reports neither rather than guessing. That
+// happens for one this tool did not create and for one written before these
+// fields existed, and in both cases an empty column is the honest answer.
+func artifactFacts(c *Ctx, name string) ([]string, map[string]string) {
+	b, err := os.ReadFile(c.Store.DescribePath(name))
+	if err != nil {
+		return nil, nil
+	}
+	var t topology.Topology
+	if json.Unmarshal(b, &t) != nil {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	var hosts []string
+	for _, n := range t.Nodes {
+		if n.Host != "" && !seen[n.Host] {
+			seen[n.Host] = true
+			hosts = append(hosts, n.Host)
+		}
+	}
+	sort.Strings(hosts)
+	return hosts, t.Labels
+}
+
+// treeBytes is what a cluster occupies. Walked rather than asked of the
+// filesystem, because the answer wanted is this cluster's share and not the
+// filesystem's total -- which is the number that was already available and did
+// not tell anyone which pair to destroy.
+func treeBytes(dir string) int64 {
+	var total int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, ierr := d.Info(); ierr == nil {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n <= 0:
+		return "-"
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1fG", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%dM", n/(1<<20))
+	default:
+		return fmt.Sprintf("%dK", n/(1<<10))
+	}
+}
+
+func labelText(m map[string]string) string {
+	if len(m) == 0 {
+		return "-"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+m[k])
+	}
+	return strings.Join(parts, " ")
 }
