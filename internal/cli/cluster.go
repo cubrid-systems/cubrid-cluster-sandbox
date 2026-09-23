@@ -599,6 +599,19 @@ func cmdClusterDestroy(c *Ctx) (any, error) {
 	if err := requireCluster(c); err != nil {
 		return nil, err
 	}
+	return destroyOne(c)
+}
+
+// destroyOne is the body: everything that removing ONE named cluster does.
+//
+// Split from the dispatcher above so that `--label` can reuse it. Calling the
+// dispatcher instead was a real bug and an instructive one: the sub-context
+// still carried `--label`, so every per-cluster call bounced off the guard that
+// refuses `--label` with `--cluster`, each failure was collected as a row, and
+// the command printed the list it was about to destroy and then reported
+// success having destroyed nothing. A verb that can say "destroying 7.0G" and
+// leave 7.0G standing is worse than one that cannot select at all.
+func destroyOne(c *Ctx) (any, error) {
 	var t topology.Topology
 	if b, err := os.ReadFile(c.Store.DescribePath(c.Cluster)); err == nil {
 		_ = json.Unmarshal(b, &t)
@@ -935,6 +948,7 @@ func destroyByLabel(c *Ctx, sel string) (any, error) {
 	}
 
 	out := make([]map[string]any, 0, len(hits))
+	removed := 0
 	for _, h := range hits {
 		// Each through the single-cluster path, so one cluster's removal is the
 		// same operation whether it was named or selected -- including the
@@ -943,7 +957,7 @@ func destroyByLabel(c *Ctx, sel string) (any, error) {
 		sub := *c
 		sub.Cluster = h.name
 		sub.Env.Cluster = h.name
-		res, derr := cmdClusterDestroy(&sub)
+		res, derr := destroyOne(&sub)
 		row := map[string]any{"cluster": h.name}
 		if derr != nil {
 			// Reported and carried on: one cluster that will not go down must
@@ -956,6 +970,19 @@ func destroyByLabel(c *Ctx, sel string) (any, error) {
 			}
 		}
 		out = append(out, row)
+		if derr == nil {
+			removed++
+		}
+	}
+	// Reporting matters more here than anywhere else in the tool, because the
+	// operator asked for several things to go and cannot see which did. If none
+	// went, that is a failure however many rows were printed.
+	if removed == 0 {
+		return map[string]any{"destroyed": out},
+			Failed("destroy_failed", "none of the %d cluster(s) carrying %s could be destroyed", len(hits), sel)
+	}
+	if !c.JSON && !c.Quiet {
+		fmt.Fprintf(c.Out, "destroyed %d of %d\n", removed, len(hits))
 	}
 	return map[string]any{"destroyed": out}, nil
 }
