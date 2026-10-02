@@ -56,6 +56,13 @@ func (n Node) IsClient() bool { return n.Kind == KindClient }
 type Resources struct {
 	CPUs    float64 `json:"cpus,omitempty"`
 	ShmSize string  `json:"shm_size,omitempty"`
+	// CPUSet pins the database nodes to these CPUs, and ClientCPUSet the
+	// clients. --cpus is a quota and says how much; these say where, which is
+	// what a measurement on a two-CCD machine needs: the engine on one die, the
+	// program driving it on the other, and neither migrating onto the other's
+	// cache. Written as the runtime takes them: "0-7,16-23".
+	CPUSet       string `json:"cpuset,omitempty"`
+	ClientCPUSet string `json:"client_cpuset,omitempty"`
 }
 
 type Params struct {
@@ -125,26 +132,28 @@ type Topology struct {
 }
 
 type Options struct {
-	Name        string
-	Preset      string
-	Nodes       int
-	DB          string
-	Image       string
-	PingMode    string
-	Network     string // bridge (default) | tailnet
-	Backend     string // docker (default) | podman
-	Clients     int    // client nodes beside the HA group
-	Tools       string // a host directory the clients get read-only
-	ClientImage string // the image the client nodes run; empty is the base image
-	WithBroker  bool
-	CPUs        float64
-	ShmSize     string
-	Set         []string // key=value, validated
-	SetHidden   []string // key=value, written unvalidated
-	BrokerSet   []string // KEY=VALUE for cubrid_broker.conf's [%csb] section
-	Labels      []string // key=value, recorded and never interpreted
-	Host        string   // the machine standing this up, as it calls itself
-	Engine      *engine.Identity
+	Name         string
+	Preset       string
+	Nodes        int
+	DB           string
+	Image        string
+	PingMode     string
+	Network      string // bridge (default) | tailnet
+	Backend      string // docker (default) | podman
+	Clients      int    // client nodes beside the HA group
+	Tools        string // a host directory the clients get read-only
+	ClientImage  string // the image the client nodes run; empty is the base image
+	WithBroker   bool
+	CPUs         float64
+	CPUSet       string // CPUs the database nodes are pinned to, "0-7,16-23"
+	ClientCPUSet string // CPUs the client nodes are pinned to
+	ShmSize      string
+	Set          []string // key=value, validated
+	SetHidden    []string // key=value, written unvalidated
+	BrokerSet    []string // KEY=VALUE for cubrid_broker.conf's [%csb] section
+	Labels       []string // key=value, recorded and never interpreted
+	Host         string   // the machine standing this up, as it calls itself
+	Engine       *engine.Identity
 }
 
 // haKeys is cubrid_ha.conf's surface. The list is the one the field's own
@@ -183,6 +192,10 @@ var brokerOwned = map[string]string{
 }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
+
+// cpusetRe is the list form every runtime takes for --cpuset-cpus: numbers
+// and ranges, comma-separated, no spaces.
+var cpusetRe = regexp.MustCompile(`^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$`)
 
 const (
 	// The network a topology's nodes address each other on. `docker` is one
@@ -268,7 +281,7 @@ func Resolve(o Options) (*Topology, error) {
 		DB: firstNonEmpty(o.DB, name), Network: name + "-net",
 		Image: o.Image, PingMode: ping, NetworkKind: net, Backend: o.Backend, HAMode: haMode, WithBroker: o.WithBroker,
 		Engine:    o.Engine,
-		Resources: Resources{CPUs: o.CPUs, ShmSize: firstNonEmpty(o.ShmSize, "1g")},
+		Resources: Resources{CPUs: o.CPUs, ShmSize: firstNonEmpty(o.ShmSize, "1g"), CPUSet: o.CPUSet, ClientCPUSet: o.ClientCPUSet},
 		Parameters: Params{
 			Common: map[string]string{}, HA: map[string]string{}, Hidden: map[string]string{},
 		},
@@ -289,6 +302,14 @@ func Resolve(o Options) (*Topology, error) {
 	for i := 1; i <= o.Clients; i++ {
 		t.Nodes = append(t.Nodes, Node{
 			Name: fmt.Sprintf("%s-c%d", name, i), Kind: KindClient, Host: o.Host})
+	}
+	for name, set := range map[string]string{"--cpuset": o.CPUSet, "--client-cpuset": o.ClientCPUSet} {
+		if set != "" && !cpusetRe.MatchString(set) {
+			return nil, fmt.Errorf("%s wants a CPU list the runtime takes, like 0-7,16-23; got %q", name, set)
+		}
+	}
+	if o.ClientCPUSet != "" && o.Clients == 0 {
+		return nil, fmt.Errorf("--client-cpuset pins the client nodes, and this cluster has none (--clients N)")
 	}
 	t.Tools = o.Tools
 	if o.ClientImage != "" && o.Clients == 0 {

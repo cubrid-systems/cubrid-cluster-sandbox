@@ -46,6 +46,8 @@ func createFlags(fs *flag.FlagSet) {
 	fs.Bool("with-broker", false, "run a broker, which is the door quiesce closes")
 	fs.Var(&repeatable{}, "broker-set", "KEY=VALUE for the broker's section of cubrid_broker.conf, e.g. MAX_NUM_APPL_SERVER=16 (repeatable)")
 	fs.Float64("cpus", 0, "CPU quota per node; host-load profiles are meaningless without it")
+	fs.String("cpuset", "", "CPUs the database nodes are pinned to, e.g. 0-7,16-23 (a quota says how much, this says where)")
+	fs.String("client-cpuset", "", "CPUs the client nodes are pinned to, e.g. 8-15,24-31")
 	fs.Var(&repeatable{}, "set", "key=value, validated (repeatable)")
 	fs.Var(&repeatable{}, "set-hidden", "key=value, written unvalidated (repeatable)")
 	fs.String("from", "", "a describe artifact to rebuild from")
@@ -202,7 +204,8 @@ func fromArtifact(c *Ctx, path string) (*topology.Topology, *engine.Identity, er
 			Name: n, Preset: t.Preset, Nodes: len(t.DBNodes()), Image: t.Image,
 			Clients: len(t.Clients()), Tools: t.Tools, ClientImage: t.ClientImage,
 			PingMode: t.PingMode, WithBroker: t.WithBroker,
-			CPUs: t.Resources.CPUs, ShmSize: t.Resources.ShmSize, Engine: id,
+			CPUs: t.Resources.CPUs, ShmSize: t.Resources.ShmSize,
+			CPUSet: t.Resources.CPUSet, ClientCPUSet: t.Resources.ClientCPUSet, Engine: id,
 		})
 		if rerr != nil {
 			return nil, nil, Usage("%v", rerr)
@@ -271,7 +274,8 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 		Backend: string(backendFor(c, "")),
 		Clients: clients, Tools: c.str("tools"), ClientImage: c.str("client-image"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
-		CPUs:       cpus, Set: set, SetHidden: setHidden, BrokerSet: repeated(c, "broker-set"),
+		CPUs:       cpus, CPUSet: c.str("cpuset"), ClientCPUSet: c.str("client-cpuset"),
+		Set: set, SetHidden: setHidden, BrokerSet: repeated(c, "broker-set"),
 		Labels: repeated(c, "label"),
 		// Recorded where it is observed. A machine knows its own name; a
 		// cluster does not, and asking it later would be asking the wrong

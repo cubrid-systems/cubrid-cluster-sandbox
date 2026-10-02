@@ -70,6 +70,30 @@ func TestNodePlanGivesClientsTheirOwnImage(t *testing.T) {
 	}
 }
 
+// A quota says how much; a cpuset says where. The database nodes and the
+// clients are pinned separately, and a node that was not asked to be pinned
+// carries no --cpuset-cpus at all.
+func TestNodePlanPinsEachKindWhereItWasAsked(t *testing.T) {
+	top, err := topology.Resolve(topology.Options{Name: "hadb", Clients: 1, CPUSet: "0-7,16-23", ClientCPUSet: "8-15,24-31"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	top.Image = "img"
+	db := strings.Join(NodePlan(KindDocker, top, top.Nodes[0], "/w", "/res", 0, 0), " ")
+	client := strings.Join(NodePlan(KindDocker, top, top.Nodes[len(top.Nodes)-1], "/w", "/res", 0, 0), " ")
+	if !strings.Contains(db, "--cpuset-cpus 0-7,16-23") || strings.Contains(db, "8-15") {
+		t.Errorf("the database node is not pinned to its own set: %s", db)
+	}
+	if !strings.Contains(client, "--cpuset-cpus 8-15,24-31") || strings.Contains(client, "0-7,16-23") {
+		t.Errorf("the client node is not pinned to its own set: %s", client)
+	}
+	only, _ := topology.Resolve(topology.Options{Name: "hadb", Clients: 1, CPUSet: "0-3"})
+	only.Image = "img"
+	if line := strings.Join(NodePlan(KindDocker, only, only.Nodes[len(only.Nodes)-1], "/w", "/res", 0, 0), " "); strings.Contains(line, "--cpuset-cpus") {
+		t.Errorf("a client that was not asked to be pinned carries a cpuset: %s", line)
+	}
+}
+
 func TestNodePlanOmitsCPUsWhenUnset(t *testing.T) {
 	top, _ := topology.Resolve(topology.Options{Name: "hadb"})
 	top.Image = "img"

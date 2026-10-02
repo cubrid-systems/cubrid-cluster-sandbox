@@ -153,6 +153,8 @@ parameters:               # every non-default, both files, per scope
 resources:                # what "saturated" means on this machine
   cpus: 4
   shm_size: 512m
+  cpuset: 0-7,16-23       # where, when asked: the engine on one die ...
+  client_cpuset: 8-15,24-31   # ... and the program driving it on the other
 faults:                   # WHAT IS CURRENTLY IN FORCE
   - kind: lag
     target: slave

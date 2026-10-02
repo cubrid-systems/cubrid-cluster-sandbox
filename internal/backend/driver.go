@@ -288,6 +288,17 @@ func NodePlan(e Kind, t *topology.Topology, node topology.Node, workdir, results
 	if t.Resources.CPUs > 0 {
 		args = append(args, "--cpus", strconv.FormatFloat(t.Resources.CPUs, 'g', -1, 64))
 	}
+	// A quota says how much; a cpuset says where. The engine and the program
+	// driving it go on different dies when the topology asks, and the runtime
+	// enforces it through the cgroup -- which under rootless podman needs the
+	// cpuset controller delegated to the user slice, a precondition the
+	// backend reports rather than the run failing with the runtime's sentence.
+	if set := t.Resources.CPUSet; set != "" && !node.IsClient() {
+		args = append(args, "--cpuset-cpus", set)
+	}
+	if set := t.Resources.ClientCPUSet; set != "" && node.IsClient() {
+		args = append(args, "--cpuset-cpus", set)
+	}
 	if t.Engine != nil && t.Engine.Path != "" {
 		args = append(args, "-v", t.Engine.Path+":/opt/cubrid-ro:ro")
 	}

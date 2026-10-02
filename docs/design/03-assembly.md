@@ -294,6 +294,7 @@ Not preferences; each one is load-bearing.
 | `--init` | without a reaping PID 1, `cubrid heartbeat stop` never returns |
 | `ping` in the image | `hb_check_ping` runs `popen("ping -w 1 -c 1 <host> …; echo $?")`. No binary → 127 → read as `HB_PING_FAILURE`, indistinguishable from a partitioned ping host, so **every master demotes itself on any heartbeat loss**. Its *absence* is now also a verb ([`04-faults.md`](04-faults.md) §10) |
 | `--cpus` set explicitly | a `host-cpu` load profile is only reproducible against a stated core count ([`06-traffic.md`](06-traffic.md) §5) |
+| `--cpuset-cpus`, when asked | a quota says how much; `--cpuset` / `--client-cpuset` say *where*. A measurement on a two-die machine puts the engine on one die and the program driving it on the other, and neither may migrate onto the other's cache. Under rootless podman the `cpuset` controller must be delegated to the user slice (`user@.service.d/delegate.conf`), or the runtime refuses the flag |
 | run as the invoking user | files written to the mounted work directory stay editable on the host; the CBRD-26983 assembly lost time to a root-owned `backupdb` output |
 | one user-defined network | hostname resolution between peers, and a place to cut |
 | `--shm-size` raised | CUBRID's shared memory does not fit the 64 MB default |

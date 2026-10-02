@@ -92,7 +92,7 @@ csb cluster create [--preset ha] [--nodes N] [--name NAME]
                    [--set key=value]... [--set-hidden key=value]...
                    [--ping-mode icmp|tcp|none] [--with-broker] [--broker-set KEY=VALUE]...
                    [--clients N] [--tools DIR] [--client-image IMG]
-                   [--cpus N] [--from FILE]
+                   [--cpus N] [--cpuset LIST] [--client-cpuset LIST] [--from FILE]
 csb cluster up                 start everything, in the order that works
 csb cluster down               graceful stop, servers flushed
 csb cluster destroy [--purge]  containers, network, volumes
