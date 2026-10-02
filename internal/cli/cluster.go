@@ -41,6 +41,7 @@ func createFlags(fs *flag.FlagSet) {
 	fs.Var(&repeatable{}, "label", "key=value recorded in the artifact and never interpreted (repeatable)")
 	fs.Int("clients", 0, "client nodes beside the HA group: where a workload runs")
 	fs.String("tools", "", "a host directory the clients get read-only at /tools")
+	fs.String("client-image", "", "image for the client nodes (default: the base image); yours, and it must already exist")
 	fs.String("ping-host", "", "the witness a node pings to tell 'the peer is gone' from 'I am gone'")
 	fs.Bool("with-broker", false, "run a broker, which is the door quiesce closes")
 	fs.Float64("cpus", 0, "CPU quota per node; host-load profiles are meaningless without it")
@@ -197,7 +198,8 @@ func fromArtifact(c *Ctx, path string) (*topology.Topology, *engine.Identity, er
 		// Everything else is derived from the name, so a rename is a rebuild of
 		// the derived fields rather than a string substitution.
 		rebuilt, rerr := topology.Resolve(topology.Options{
-			Name: n, Preset: t.Preset, Nodes: len(t.Nodes), Image: t.Image,
+			Name: n, Preset: t.Preset, Nodes: len(t.DBNodes()), Image: t.Image,
+			Clients: len(t.Clients()), Tools: t.Tools, ClientImage: t.ClientImage,
 			PingMode: t.PingMode, WithBroker: t.WithBroker,
 			CPUs: t.Resources.CPUs, ShmSize: t.Resources.ShmSize, Engine: id,
 		})
@@ -266,7 +268,7 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 		// $CSB_BACKEND or by detection recorded nothing, which is the case the
 		// field exists for.
 		Backend: string(backendFor(c, "")),
-		Clients: clients, Tools: c.str("tools"),
+		Clients: clients, Tools: c.str("tools"), ClientImage: c.str("client-image"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
 		CPUs:       cpus, Set: set, SetHidden: setHidden,
 		Labels: repeated(c, "label"),
@@ -322,6 +324,14 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 	if built {
 		c.Note("base_image_built", SevInfo,
 			"built the base image "+t.Image+"; this happens when its recipe changes, never when the engine does")
+	}
+	// The client image is the user's. csb builds the one recipe it wrote and
+	// no other, so an image that is not here is a precondition rather than a
+	// build step -- and it is checked now, before the network and the database
+	// nodes exist, rather than discovered by the client's `run` failing last.
+	if t.ClientImage != "" && !d.HasImage(c.Ctx, t.ClientImage) {
+		return nil, Precondition("client_image_missing",
+			"the client image %s is not on this machine; build or pull it first (csb builds only its own base image)", t.ClientImage)
 	}
 
 	// The build is bind-mounted, so a tree built on a newer distribution than the

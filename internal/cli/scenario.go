@@ -63,13 +63,14 @@ type Scenario struct {
 }
 
 type ScenarioCluster struct {
-	Preset     string   `json:"preset,omitempty"`
-	Clients    int      `json:"clients,omitempty"`
-	Tools      string   `json:"tools,omitempty"`
-	Network    string   `json:"network,omitempty"`
-	WithBroker bool     `json:"with_broker,omitempty"`
-	Set        []string `json:"set,omitempty"`
-	SetHidden  []string `json:"set_hidden,omitempty"`
+	Preset      string   `json:"preset,omitempty"`
+	Clients     int      `json:"clients,omitempty"`
+	Tools       string   `json:"tools,omitempty"`
+	ClientImage string   `json:"client_image,omitempty"`
+	Network     string   `json:"network,omitempty"`
+	WithBroker  bool     `json:"with_broker,omitempty"`
+	Set         []string `json:"set,omitempty"`
+	SetHidden   []string `json:"set_hidden,omitempty"`
 }
 
 // Step is one verb, or one wait for a state, or both.
@@ -151,7 +152,7 @@ type stepResult struct {
 const scenarioSchemaHelp = `the file (JSON; unknown keys are refused and named):
 
   name     string                 what this reproduces
-  cluster  { preset, clients, tools, network, with_broker, set[], set_hidden[] }
+  cluster  { preset, clients, tools, client_image, network, with_broker, set[], set_hidden[] }
   matrix   { key: [values] }      one run per combination
   repeats  int                    times to repeat each combination
   measure  [ role_change.measured | role_change.predicted
@@ -455,6 +456,9 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		}
 		if s.Cluster.Tools != "" {
 			create = append(create, "--tools", s.Cluster.Tools)
+		}
+		if s.Cluster.ClientImage != "" {
+			create = append(create, "--client-image", s.Cluster.ClientImage)
 		}
 		for _, kv := range substituteAll(s.Cluster.Set, binding) {
 			create = append(create, "--set", kv)

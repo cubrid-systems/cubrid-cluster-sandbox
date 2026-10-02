@@ -46,6 +46,30 @@ func TestNodePlanCarriesEveryContainerRequirement(t *testing.T) {
 	}
 }
 
+// A client runs the user's program and may need an image built for it; the
+// database nodes keep the base image whatever the clients run.
+func TestNodePlanGivesClientsTheirOwnImage(t *testing.T) {
+	top, err := topology.Resolve(topology.Options{Name: "hadb", Clients: 1, ClientImage: "perf-client:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	top.Image = "csb-base:test"
+	db := strings.Join(NodePlan(KindDocker, top, top.Nodes[0], "/w", "/res", 0, 0), " ")
+	client := strings.Join(NodePlan(KindDocker, top, top.Nodes[len(top.Nodes)-1], "/w", "/res", 0, 0), " ")
+	if !strings.Contains(db, " csb-base:test sleep") || strings.Contains(db, "perf-client") {
+		t.Errorf("the database node must run the base image: %s", db)
+	}
+	if !strings.Contains(client, " perf-client:1 sleep") {
+		t.Errorf("the client node must run the client image: %s", client)
+	}
+	// Without a client image, a client runs the base image as before.
+	plain, _ := topology.Resolve(topology.Options{Name: "hadb", Clients: 1})
+	plain.Image = "csb-base:test"
+	if line := strings.Join(NodePlan(KindDocker, plain, plain.Nodes[len(plain.Nodes)-1], "/w", "/res", 0, 0), " "); !strings.Contains(line, " csb-base:test sleep") {
+		t.Errorf("a client without --client-image must run the base image: %s", line)
+	}
+}
+
 func TestNodePlanOmitsCPUsWhenUnset(t *testing.T) {
 	top, _ := topology.Resolve(topology.Options{Name: "hadb"})
 	top.Image = "img"

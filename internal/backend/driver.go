@@ -313,6 +313,13 @@ func NodePlan(e Kind, t *topology.Topology, node topology.Node, workdir, results
 		}
 		args = append(args, "-v", filepath.Join(resultsDir, node.Name)+":/results")
 	}
+	// A client runs the user's program and may need an image built for it (a
+	// JDK, a compiler); the database nodes run the engine and keep the base
+	// image, whose every package is there for the engine's sake.
+	image := t.Image
+	if node.IsClient() && t.ClientImage != "" {
+		image = t.ClientImage
+	}
 	args = append(args,
 		"-v", workdir+":/work",
 		"-v", filepath.Join(nodeWork, "db")+":/db", // the same container path on every node
@@ -322,10 +329,19 @@ func NodePlan(e Kind, t *topology.Topology, node topology.Node, workdir, results
 		// guess one. Pinning it removes the guess: everything a node writes is
 		// UTC, which is what the record stores.
 		"-e", "TZ=UTC",
-		t.Image,
+		image,
 		"sleep", "infinity",
 	)
 	return args
+}
+
+// HasImage reports whether this backend holds an image by this name. It is
+// asked about an image csb did not build -- a client image -- because the
+// alternative is a `run` that fails with the backend's own sentence after the
+// network and the database nodes already exist.
+func (d *Driver) HasImage(ctx context.Context, image string) bool {
+	res, err := d.R.Run(ctx, d.E.Cmd(), "image", "inspect", image)
+	return err == nil && res != nil && res.ExitCode == 0
 }
 
 // CreateNode makes one container's directories and starts it.

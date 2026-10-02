@@ -78,6 +78,9 @@ func TestRejects(t *testing.T) {
 		// The engine does not read cubrid_ha.conf when ha_mode is off, so the
 		// value would land nowhere -- the silence --set exists to refuse.
 		{"single with an HA parameter", Options{Name: "x", Preset: "single", Set: []string{"ha_copy_sync_mode=async"}}},
+		// An image for client nodes that do not exist is a flag that would do
+		// nothing, and nothing is the one thing a flag must not quietly do.
+		{"client image without clients", Options{Name: "x", ClientImage: "perf-client:1"}},
 	}
 	for _, c := range bad {
 		if _, err := Resolve(c.o); err == nil {

@@ -98,6 +98,12 @@ type Topology struct {
 	Labels map[string]string `json:"labels,omitempty"`
 
 	Backend string `json:"backend,omitempty"`
+	// ClientImage is the image the client nodes run, when it is not the base
+	// image. A client runs the user's program, and the base image is built for
+	// the engine's needs -- ping, iptables, procps -- not for a JDBC driver
+	// that wants a JDK. The image is the user's and must already exist: csb
+	// builds the one recipe it wrote and no other.
+	ClientImage string `json:"client_image,omitempty"`
 	// HAMode is what the assembly writes for ha_mode: "on" for the ha preset,
 	// "off" for single. It is derived from the preset and recorded rather than
 	// left implicit, because the two presets are two different engines to the
@@ -113,24 +119,25 @@ type Topology struct {
 }
 
 type Options struct {
-	Name       string
-	Preset     string
-	Nodes      int
-	DB         string
-	Image      string
-	PingMode   string
-	Network    string // bridge (default) | tailnet
-	Backend    string // docker (default) | podman
-	Clients    int    // client nodes beside the HA group
-	Tools      string // a host directory the clients get read-only
-	WithBroker bool
-	CPUs       float64
-	ShmSize    string
-	Set        []string // key=value, validated
-	SetHidden  []string // key=value, written unvalidated
-	Labels     []string // key=value, recorded and never interpreted
-	Host       string   // the machine standing this up, as it calls itself
-	Engine     *engine.Identity
+	Name        string
+	Preset      string
+	Nodes       int
+	DB          string
+	Image       string
+	PingMode    string
+	Network     string // bridge (default) | tailnet
+	Backend     string // docker (default) | podman
+	Clients     int    // client nodes beside the HA group
+	Tools       string // a host directory the clients get read-only
+	ClientImage string // the image the client nodes run; empty is the base image
+	WithBroker  bool
+	CPUs        float64
+	ShmSize     string
+	Set         []string // key=value, validated
+	SetHidden   []string // key=value, written unvalidated
+	Labels      []string // key=value, recorded and never interpreted
+	Host        string   // the machine standing this up, as it calls itself
+	Engine      *engine.Identity
 }
 
 // haKeys is cubrid_ha.conf's surface. The list is the one the field's own
@@ -266,6 +273,10 @@ func Resolve(o Options) (*Topology, error) {
 			Name: fmt.Sprintf("%s-c%d", name, i), Kind: KindClient, Host: o.Host})
 	}
 	t.Tools = o.Tools
+	if o.ClientImage != "" && o.Clients == 0 {
+		return nil, fmt.Errorf("--client-image names an image for the client nodes, and this cluster has none (--clients N)")
+	}
+	t.ClientImage = o.ClientImage
 
 	for _, kv := range o.Set {
 		k, v, err := split(kv)
