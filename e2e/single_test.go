@@ -93,6 +93,7 @@ func TestSinglePreset(t *testing.T) {
 			"--with-broker", "--clients", "1", "--tools", tools, "--client-image", clientImage,
 			"--set", "log_buffer_size=16M", "--set", "double_write_buffer_size=0",
 			"--broker-set", "MIN_NUM_APPL_SERVER=4", "--broker-set", "MAX_NUM_APPL_SERVER=4", "--broker-set", "SQL_LOG=OFF",
+			"--cpuset", "0-1", "--client-cpuset", "2-3",
 			"--timeout", "600s")
 		if code != cli.ExitOK {
 			t.Fatalf("create exited %d: %s", code, notes(e))
@@ -142,6 +143,14 @@ func TestSinglePreset(t *testing.T) {
 		}
 		if code := c.exec("n1", "test $(pgrep -c -x cub_cas) -eq 4"); code != 0 {
 			t.Errorf("the broker did not start with exactly 4 CAS (exit %d)", code)
+		}
+		// And each kind of node sits where it was pinned -- the kernel's own
+		// word for it, read from inside.
+		if code := c.exec("n1", "grep -qx 'Cpus_allowed_list:[[:space:]]*0-1' /proc/self/status"); code != 0 {
+			t.Errorf("the database node is not pinned to 0-1 (exit %d)", code)
+		}
+		if code := c.exec("client", "grep -qx 'Cpus_allowed_list:[[:space:]]*2-3' /proc/self/status"); code != 0 {
+			t.Errorf("the client node is not pinned to 2-3 (exit %d)", code)
 		}
 		for _, n := range c.nodes("ha status") {
 			if n["name"] != c.cluster+"-n1" {

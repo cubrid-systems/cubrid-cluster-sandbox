@@ -86,6 +86,9 @@ func TestRejects(t *testing.T) {
 		// fighting a verb, and the refusal says which.
 		{"broker key the tool owns", Options{Name: "x", WithBroker: true, BrokerSet: []string{"access_mode=SO"}}},
 		{"malformed --broker-set", Options{Name: "x", WithBroker: true, BrokerSet: []string{"SQL_LOG"}}},
+		{"cpuset that is not a CPU list", Options{Name: "x", CPUSet: "0-7, 16"}},
+		{"cpuset with a stray word", Options{Name: "x", CPUSet: "all"}},
+		{"client cpuset without clients", Options{Name: "x", ClientCPUSet: "8-15"}},
 	}
 	for _, c := range bad {
 		if _, err := Resolve(c.o); err == nil {
