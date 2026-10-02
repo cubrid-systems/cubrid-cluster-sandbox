@@ -71,6 +71,7 @@ type ScenarioCluster struct {
 	WithBroker  bool     `json:"with_broker,omitempty"`
 	Set         []string `json:"set,omitempty"`
 	SetHidden   []string `json:"set_hidden,omitempty"`
+	BrokerSet   []string `json:"broker_set,omitempty"`
 }
 
 // Step is one verb, or one wait for a state, or both.
@@ -152,7 +153,7 @@ type stepResult struct {
 const scenarioSchemaHelp = `the file (JSON; unknown keys are refused and named):
 
   name     string                 what this reproduces
-  cluster  { preset, clients, tools, client_image, network, with_broker, set[], set_hidden[] }
+  cluster  { preset, clients, tools, client_image, network, with_broker, set[], set_hidden[], broker_set[] }
   matrix   { key: [values] }      one run per combination
   repeats  int                    times to repeat each combination
   measure  [ role_change.measured | role_change.predicted
@@ -465,6 +466,9 @@ func cmdScenarioRun(c *Ctx) (any, error) {
 		}
 		for _, kv := range substituteAll(s.Cluster.SetHidden, binding) {
 			create = append(create, "--set-hidden", kv)
+		}
+		for _, kv := range substituteAll(s.Cluster.BrokerSet, binding) {
+			create = append(create, "--broker-set", kv)
 		}
 
 		rr := runResult{Binding: binding, Cluster: name}

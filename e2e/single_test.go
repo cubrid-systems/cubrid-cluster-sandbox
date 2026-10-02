@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -90,7 +91,9 @@ func TestSinglePreset(t *testing.T) {
 		// was gating something real.
 		e, code := c.run("cluster", "create", "--name", c.cluster, "--preset", "single", "--build", build,
 			"--with-broker", "--clients", "1", "--tools", tools, "--client-image", clientImage,
-			"--set", "log_buffer_size=16M", "--set", "double_write_buffer_size=0", "--timeout", "600s")
+			"--set", "log_buffer_size=16M", "--set", "double_write_buffer_size=0",
+			"--broker-set", "MIN_NUM_APPL_SERVER=4", "--broker-set", "MAX_NUM_APPL_SERVER=4", "--broker-set", "SQL_LOG=OFF",
+			"--timeout", "600s")
 		if code != cli.ExitOK {
 			t.Fatalf("create exited %d: %s", code, notes(e))
 		}
@@ -125,6 +128,20 @@ func TestSinglePreset(t *testing.T) {
 			if !strings.Contains(string(conf), want) {
 				t.Errorf("cubrid.conf is missing %q", strings.TrimSpace(want))
 			}
+		}
+		// The broker took its overrides: the file says so, and so does the
+		// number of CAS processes the broker started with.
+		bconf, rerr := os.ReadFile(filepath.Join(home, "clusters", c.cluster, "work", c.cluster+"-n1", "cubrid", "conf", "cubrid_broker.conf"))
+		if rerr != nil {
+			t.Fatalf("cubrid_broker.conf not written: %v", rerr)
+		}
+		for key, want := range map[string]string{"MIN_NUM_APPL_SERVER": "4", "MAX_NUM_APPL_SERVER": "4", "SQL_LOG": "OFF", "ACCESS_MODE": "RW"} {
+			if !regexp.MustCompile(`(?m)^` + key + `\s*=` + want + `$`).Match(bconf) {
+				t.Errorf("cubrid_broker.conf lacks %s=%s:\n%s", key, want, bconf)
+			}
+		}
+		if code := c.exec("n1", "test $(pgrep -c -x cub_cas) -eq 4"); code != 0 {
+			t.Errorf("the broker did not start with exactly 4 CAS (exit %d)", code)
 		}
 		for _, n := range c.nodes("ha status") {
 			if n["name"] != c.cluster+"-n1" {
