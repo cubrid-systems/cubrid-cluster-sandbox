@@ -96,7 +96,12 @@ HA.` and declines. `cubrid hb start` afterwards works. Filed upstream as
 CBRD-20568, **rejected as not a product issue**, and closed for 10.1
 compatibility in 2017 — so it is current behaviour. *The tool never
 writes `[@dbname]` sections carrying `ha_mode`, and starts the heartbeat
-explicitly rather than through `cubrid service start`.* This one costs nothing
+explicitly rather than through `cubrid service start`.* A `single` cluster has
+no heartbeat to start: the assembly writes `ha_mode=off`, starts the server by
+name (`cubrid server start <db>`, output to `server-start.log` for the reason T8
+gives), and "serving" means `cubrid server status` lists that database. The
+state it reports is `standalone`, a different word from `registered_and_active`
+because a reader who sees "active" looks for the standby. This one costs nothing
 today and will cost something the moment a `single` and an `ha` cluster share a
 configuration
 ([`../requirements/02-ha-role-transition-field-evidence.md`](../requirements/02-ha-role-transition-field-evidence.md) §5).

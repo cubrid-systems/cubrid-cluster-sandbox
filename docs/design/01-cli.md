@@ -62,6 +62,12 @@ n1              a node by name, when the scenario genuinely means that node
 all             every node
 ```
 
+On a `single` cluster there is no heartbeat to query: `master` names the one
+node while its server is up, `slave` is an error that says the preset has no
+standby, and `ha status` reports the server state as `standalone` rather than a
+`registered_and_*` word it never had. `await { masters: 1 }` is therefore the
+same "serving" condition on a single that it is on a pair.
+
 `master` is a *query*, not a label. After a failover it names the other machine,
 and a scenario script that ran before the failover runs unchanged after it —
 which is the whole point (`../DESIGN.md` §2 G3, and the gap the CBRD-26983

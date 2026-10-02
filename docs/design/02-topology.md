@@ -38,7 +38,7 @@ so the migration is a promotion of an existing output rather than a new design.
 | Preset | Nodes | What it is |
 |---|---|---|
 | `ha` | 2 (default) | one master, one standby. The case that motivated the project |
-| `single` | 1 | `ha_mode=off`, one server. For the many bugs that are not HA bugs |
+| `single` | 1 | `ha_mode=off`, one server, no heartbeat. For the many bugs that are not HA bugs, and for measuring an engine that is not carrying replication log. `master` names the one node; `slave` names nothing and says so; the HA verbs (`ha promote`, `ha failback`, `ha resync`, `repl check`) refuse with `no_ha_group`; `--set ha_*` is refused because the engine does not read `cubrid_ha.conf` with HA off. The `describe` artifact records `ha_mode` |
 
 `replica`, `broker`, and `shard` are phase 3 **as topology shapes**. A single
 broker in front of the `ha` preset is not a shape and arrives earlier, as

@@ -101,6 +101,19 @@ func (i *Injector) Kill(ctx context.Context, node string) error {
 // a full service stop/start is required in between (docs/design/03-assembly.md §3).
 func (i *Injector) Start(ctx context.Context, node string) error {
 	_, _ = i.D.Exec(ctx, node, i.T.DB, "cubrid service stop >/dev/null 2>&1; true")
+	if i.T.HAOff() {
+		// No heartbeat to start: the server is the whole node. Its output goes to
+		// a file for the same reason the heartbeat's does (assembly T8).
+		logPath := "/work/" + node + "/server-start.log"
+		if _, err := i.D.Exec(ctx, node, i.T.DB, "cubrid server start "+i.T.DB+" > "+logPath+" 2>&1; true"); err != nil {
+			return err
+		}
+		if i.T.WithBroker {
+			_, _ = i.D.Exec(ctx, node, i.T.DB,
+				"cubrid broker start > /work/"+node+"/broker-start.log 2>&1; true")
+		}
+		return nil
+	}
 	logPath := "/work/" + node + "/heartbeat-start.log"
 	if _, err := i.D.Exec(ctx, node, i.T.DB, "cubrid heartbeat start > "+logPath+" 2>&1; true"); err != nil {
 		return err

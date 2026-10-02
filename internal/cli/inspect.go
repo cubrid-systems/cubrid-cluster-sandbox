@@ -1041,6 +1041,9 @@ func cmdHaResync(c *Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := requireHA(t); err != nil {
+		return nil, err
+	}
 	st, serr := inspect.Read(c.Ctx, a.D, t)
 	if serr != nil {
 		return nil, Failed("inspect_failed", "%v", serr)
@@ -1276,6 +1279,9 @@ func checkFlags(fs *flag.FlagSet) {
 func cmdReplCheck(c *Ctx) (any, error) {
 	a, t, err := loadCluster(c)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireHA(t); err != nil {
 		return nil, err
 	}
 	master, merr := a.Resolve(c.Ctx, "master")

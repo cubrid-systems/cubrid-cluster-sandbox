@@ -103,6 +103,18 @@ func Read(ctx context.Context, d *backend.Driver, t *topology.Topology) (*Status
 	st := &Status{Cluster: t.Cluster}
 	for _, n := range t.Nodes {
 		node := Node{Name: n.Name, Created: n.Role, Live: live[n.Name], Role: "unknown"}
+		if node.Live && t.HAOff() && !n.IsClient() {
+			// A server without HA has no heartbeat state, no changemode and no
+			// db_ha_apply_info. It is up or it is not, and that is the whole of
+			// tier 2 for it; the field is given its own word so nothing
+			// downstream mistakes it for a master with a standby somewhere.
+			if res, err := d.Exec(ctx, n.Name, t.DB, "cubrid server status 2>/dev/null"); err == nil && res.ExitCode == 0 &&
+				serverListed(res.Stdout, t.DB) {
+				node.Server, node.Role = StateStandalone, StateStandalone
+			}
+			st.Nodes = append(st.Nodes, node)
+			continue
+		}
 		if node.Live {
 			if res, err := d.Exec(ctx, n.Name, t.DB, "cubrid heartbeat status 2>/dev/null"); err == nil && res.ExitCode == 0 {
 				node.Server = reServer.FindString(res.Stdout)
@@ -195,11 +207,28 @@ func readRepl(ctx context.Context, d *backend.Driver, t *topology.Topology, node
 	return r
 }
 
+// StateStandalone is the server state of a node that runs without HA: up, and
+// with no group to be registered in. The same word assembly uses.
+const StateStandalone = "standalone"
+
+// IsActive reports whether a server state means "this node serves writes":
+// the active member of an HA group, or a standalone server.
+func IsActive(server string) bool {
+	return server == "registered_and_active" || server == StateStandalone
+}
+
+// serverListed reports whether `cubrid server status` output names db as a
+// running server, matching the name whole.
+func serverListed(out, db string) bool {
+	re := regexp.MustCompile(`(?m)^\s*Server\s+` + regexp.QuoteMeta(db) + `\s*\(`)
+	return re.MatchString(out)
+}
+
 // Serving reports whether the cluster has exactly one active node.
 func (s *Status) Serving() bool {
 	active := 0
 	for _, n := range s.Nodes {
-		if n.Server == "registered_and_active" {
+		if IsActive(n.Server) {
 			active++
 		}
 	}
