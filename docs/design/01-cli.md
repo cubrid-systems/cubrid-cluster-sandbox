@@ -91,6 +91,7 @@ csb cluster create [--preset ha] [--nodes N] [--name NAME]
                    [--build PATH | --version V]
                    [--set key=value]... [--set-hidden key=value]...
                    [--ping-mode icmp|tcp|none] [--with-broker]
+                   [--clients N] [--tools DIR] [--client-image IMG]
                    [--cpus N] [--from FILE]
 csb cluster up                 start everything, in the order that works
 csb cluster down               graceful stop, servers flushed

@@ -408,8 +408,18 @@ database name and both parameters.
 ## 8. Client nodes — where a workload actually belongs
 
 ```
-csb cluster create --clients N --tools <dir>
+csb cluster create --clients N --tools <dir> [--client-image <img>]
 ```
+
+A client runs the user's program, and the base image was built for the engine's
+needs — `ping`, `iptables`, `procps` — not for a JDBC driver that wants a JDK or
+a C client that wants a compiler. `--client-image` names the image the client
+nodes run instead; the database nodes keep the base image whatever the clients
+run. The image is the user's and must already exist on the machine: csb builds
+the one recipe it wrote and no other, so a missing one is a precondition
+(`client_image_missing`, exit 3) checked before the network and the database
+nodes are made, rather than the client's `run` failing last. The artifact
+records it, and `create --from` rebuilds with it.
 
 A node now has a **kind**. A `client` is part of the *cluster* — same network,
 same labels, destroyed with it — and is not part of the *HA group*: it never

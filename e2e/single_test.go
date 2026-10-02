@@ -5,6 +5,7 @@ package e2e
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,6 +40,36 @@ func TestSinglePreset(t *testing.T) {
 	if err := os.MkdirAll(tools, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A client image of the user's own: the base image plus a marker file, so
+	// the test can tell which node runs which. It is built with the backend
+	// csb will use, from a recipe that needs no network beyond ubuntu:24.04.
+	clientImage := fmt.Sprintf("csb-e2e-client:%d", time.Now().Unix()%100000)
+	buildClientImage(t, clientImage)
+
+	t.Run("a client image that is not here is a precondition", func(t *testing.T) {
+		c.t = t
+		e := c.wantExit(cli.ExitPrecondition, "cluster", "create", "--name", c.cluster, "--preset", "single", "--build", build,
+			"--clients", "1", "--client-image", "csb-e2e-no-such-image:0", "--timeout", "120s")
+		if !hasNote(e, "client_image_missing") {
+			t.Errorf("want client_image_missing, got %s", notes(e))
+		}
+		// Nothing was made: the check comes before the network and the nodes,
+		// so ls finds no container. (The run record of the refused command is
+		// written, as every command's is, so the name may be listed with
+		// containers: 0 -- that is the record, not a cluster.)
+		if ls, _ := c.run("cluster", "ls", "--timeout", "60s"); ls != nil {
+			d, _ := ls.Data.(map[string]any)
+			rows, _ := d["clusters"].([]any)
+			for _, r := range rows {
+				row, _ := r.(map[string]any)
+				if row["name"] == c.cluster {
+					if n, _ := row["containers"].(float64); n != 0 {
+						t.Errorf("a refused create left %v container(s) of %s behind", n, c.cluster)
+					}
+				}
+			}
+		}
+	})
 	defer func() {
 		c.t = t
 		if t.Failed() && os.Getenv("CSB_E2E_KEEP") != "0" {
@@ -58,7 +89,7 @@ func TestSinglePreset(t *testing.T) {
 		// keep out; the engine accepting it at start is the proof the table
 		// was gating something real.
 		e, code := c.run("cluster", "create", "--name", c.cluster, "--preset", "single", "--build", build,
-			"--with-broker", "--clients", "1", "--tools", tools,
+			"--with-broker", "--clients", "1", "--tools", tools, "--client-image", clientImage,
 			"--set", "log_buffer_size=16M", "--set", "double_write_buffer_size=0", "--timeout", "600s")
 		if code != cli.ExitOK {
 			t.Fatalf("create exited %d: %s", code, notes(e))
@@ -125,6 +156,13 @@ func TestSinglePreset(t *testing.T) {
 		if code := c.exec("client", "csql -u dba -c 'SELECT 1 FROM db_root' "+c.cluster+"@"+c.cluster+"-n1"); code != 0 {
 			t.Errorf("csql from the client node exited %d", code)
 		}
+		// And it runs the image it was given; the database node does not.
+		if code := c.exec("client", "test -f /client-image-marker"); code != 0 {
+			t.Errorf("the client node is not running the client image (exit %d)", code)
+		}
+		if code := c.exec("n1", "test -f /client-image-marker"); code == 0 {
+			t.Error("the database node is running the client image")
+		}
 	})
 
 	t.Run("the HA verbs refuse by name", func(t *testing.T) {
@@ -171,6 +209,22 @@ func TestSinglePreset(t *testing.T) {
 			t.Errorf("csql after up exited %d", code)
 		}
 	})
+}
+
+// buildClientImage makes a throwaway client image with the backend the suite
+// runs against: CSB_BACKEND, else docker.
+func buildClientImage(t *testing.T, tag string) {
+	t.Helper()
+	backend := os.Getenv("CSB_BACKEND")
+	if backend == "" {
+		backend = "docker"
+	}
+	cmd := exec.Command(backend, "build", "-q", "-t", tag, "-")
+	cmd.Stdin = strings.NewReader("FROM ubuntu:24.04\nRUN touch /client-image-marker\n")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s build of the client image failed: %v\n%s", backend, err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command(backend, "rmi", "-f", tag).Run() })
 }
 
 // serverState is what `ha status` reports for one node.

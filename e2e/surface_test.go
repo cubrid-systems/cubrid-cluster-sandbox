@@ -773,11 +773,28 @@ func (c *csb) pair() (master, standby string) {
 
 // exec runs one command on a node and returns its exit status, which is how the
 // suite tells "the node accepted this write" from "it refused".
+// exec runs a command on one node and returns the exit code the command had
+// INSIDE the node -- csb's own exit is 0 for a remote failure, which is why
+// `data.<node>.exit` is what this reads. The data is keyed by the node's full
+// name; `node` may be a selector (master, n1, client), so when the key is not
+// there and exactly one node answered, that answer is the one. A command that
+// produced no answer at all returns -1 rather than 0: a selector that resolved
+// nothing used to read as success, and every `exec(..) != 0` check built on it
+// was vacuous.
 func (c *csb) exec(node, command string) int {
 	c.t.Helper()
 	e, _ := c.run(append([]string{"node", "exec", node, "--timeout", "60s", "--"}, strings.Fields(command)...)...)
 	d, _ := e.Data.(map[string]any)
-	m, _ := d[node].(map[string]any)
+	m, ok := d[node].(map[string]any)
+	if !ok && len(d) == 1 {
+		for _, v := range d {
+			m, ok = v.(map[string]any)
+		}
+	}
+	if !ok {
+		c.t.Logf("node exec %s: no per-node answer in %v (%s)", node, d, notes(e))
+		return -1
+	}
 	code, _ := m["exit"].(float64)
 	return int(code)
 }
