@@ -40,6 +40,26 @@ func TestSinglePresetHasNoPartitionToDiagnose(t *testing.T) {
 	if top.PingMode != PingNone {
 		t.Errorf("ping mode = %q; a lone node has no partition to diagnose", top.PingMode)
 	}
+	// And no HA: 02-topology.md said ha_mode=off from the start, and for a long
+	// time the assembly wrote on anyway.
+	if !top.HAOff() || top.HAMode != HAModeOff {
+		t.Errorf("ha_mode = %q, want off", top.HAMode)
+	}
+}
+
+func TestHaPresetIsHA(t *testing.T) {
+	top, err := Resolve(Options{Name: "hadb"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top.HAOff() || top.HAMode != HAModeOn {
+		t.Errorf("ha_mode = %q, want on", top.HAMode)
+	}
+	// An artifact written before the field existed was HA, and must still be.
+	var old Topology
+	if old.HAOff() || old.HAModeValue() != HAModeOn {
+		t.Errorf("an artifact without ha_mode reads as %q, want on", old.HAModeValue())
+	}
 }
 
 func TestRejects(t *testing.T) {
@@ -54,6 +74,9 @@ func TestRejects(t *testing.T) {
 		{"single with two", Options{Name: "x", Preset: "single", Nodes: 2}},
 		{"unknown ping mode", Options{Name: "x", PingMode: "icmpv6"}},
 		{"malformed --set", Options{Name: "x", Set: []string{"noequals"}}},
+		// The engine does not read cubrid_ha.conf when ha_mode is off, so the
+		// value would land nowhere -- the silence --set exists to refuse.
+		{"single with an HA parameter", Options{Name: "x", Preset: "single", Set: []string{"ha_copy_sync_mode=async"}}},
 	}
 	for _, c := range bad {
 		if _, err := Resolve(c.o); err == nil {

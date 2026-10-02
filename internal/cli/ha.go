@@ -26,11 +26,23 @@ func promoteFlags(fs *flag.FlagSet) {
 func masters(st *inspect.Status) []string {
 	var out []string
 	for _, n := range st.Nodes {
-		if n.Server == "registered_and_active" {
+		if inspect.IsActive(n.Server) {
 			out = append(out, n.Name)
 		}
 	}
 	return out
+}
+
+// requireHA refuses an HA verb on a cluster that has no HA group: a single
+// server has nothing to promote, fail back to or rebuild from, and the verb
+// would otherwise reach the engine and report one of its own refusals, which
+// names the mechanism rather than the mistake.
+func requireHA(t *topology.Topology) error {
+	if t.HAOff() {
+		return Precondition("no_ha_group",
+			"cluster %s is preset single and runs with ha_mode=off: it has one server and no HA group, so there is nothing for this verb to act on", t.Cluster)
+	}
+	return nil
 }
 
 func nodeByName(st *inspect.Status, name string) *inspect.Node {
@@ -164,6 +176,9 @@ func cmdHaPromote(c *Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := requireHA(t); err != nil {
+		return nil, err
+	}
 	names, rerr := a.Resolve(c.Ctx, sel)
 	if rerr != nil {
 		return nil, Precondition("unresolved_selector", "%v", rerr)
@@ -262,6 +277,9 @@ func cmdHaFailback(c *Ctx) (any, error) {
 	}
 	a, t, err := loadCluster(c)
 	if err != nil {
+		return nil, err
+	}
+	if err := requireHA(t); err != nil {
 		return nil, err
 	}
 

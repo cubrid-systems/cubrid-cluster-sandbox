@@ -91,7 +91,13 @@ type Topology struct {
 	// out from under its new owner.
 	Labels map[string]string `json:"labels,omitempty"`
 
-	Backend    string           `json:"backend,omitempty"`
+	Backend string `json:"backend,omitempty"`
+	// HAMode is what the assembly writes for ha_mode: "on" for the ha preset,
+	// "off" for single. It is derived from the preset and recorded rather than
+	// left implicit, because the two presets are two different engines to the
+	// tool -- one has a heartbeat, roles and a replication pipeline, the other
+	// has a server. An artifact without the field predates it and was HA.
+	HAMode     string           `json:"ha_mode,omitempty"`
 	Tools      string           `json:"tools,omitempty"` // host directory the clients get read-only
 	WithBroker bool             `json:"with_broker"`
 	Nodes      []Node           `json:"nodes"`
@@ -216,11 +222,20 @@ func Resolve(o Options) (*Topology, error) {
 	if preset == "single" && ping != PingNone {
 		ping = PingNone // a lone node has no partition to diagnose
 	}
+	// single is ha_mode=off, as 02-topology.md has always said. For a long time
+	// the assembly wrote ha_mode=on for it regardless and started a heartbeat for
+	// a group of one, which made "a server without HA" impossible to stand up:
+	// every write carried replication log, and `master` was a heartbeat query
+	// against a node that had no group to be registered in.
+	haMode := HAModeOn
+	if preset == "single" {
+		haMode = HAModeOff
+	}
 
 	t := &Topology{
 		Schema: Schema, Cluster: name, Preset: preset,
 		DB: firstNonEmpty(o.DB, name), Network: name + "-net",
-		Image: o.Image, PingMode: ping, NetworkKind: net, Backend: o.Backend, WithBroker: o.WithBroker,
+		Image: o.Image, PingMode: ping, NetworkKind: net, Backend: o.Backend, HAMode: haMode, WithBroker: o.WithBroker,
 		Engine:    o.Engine,
 		Resources: Resources{CPUs: o.CPUs, ShmSize: firstNonEmpty(o.ShmSize, "1g")},
 		Parameters: Params{
@@ -253,6 +268,12 @@ func Resolve(o Options) (*Topology, error) {
 		}
 		switch {
 		case haKeys[k]:
+			if t.HAOff() {
+				// The engine does not read cubrid_ha.conf when ha_mode is off, so
+				// the value would be written and never take effect -- the exact
+				// silence 02-topology.md §5 refuses for unknown keys.
+				return nil, fmt.Errorf("preset single runs with ha_mode=off, so %s has no effect; use the ha preset for HA parameters", k)
+			}
 			t.HAParam(k, v)
 		case commonKeys[k]:
 			t.Parameters.Common[k] = v
@@ -281,6 +302,25 @@ func Resolve(o Options) (*Topology, error) {
 }
 
 func (t *Topology) HAParam(k, v string) { t.Parameters.HA[k] = v }
+
+const (
+	HAModeOn  = "on"
+	HAModeOff = "off"
+)
+
+// HAOff reports whether this topology runs without HA: no heartbeat, no roles,
+// no replication -- a server. Everything that reads a heartbeat state asks this
+// first. An artifact that predates the field was HA, so empty means on.
+func (t *Topology) HAOff() bool { return t.HAMode == HAModeOff }
+
+// HAModeValue is what cubrid.conf gets: the recorded mode, or "on" for an
+// artifact written before the field existed.
+func (t *Topology) HAModeValue() string {
+	if t.HAOff() {
+		return HAModeOff
+	}
+	return HAModeOn
+}
 
 // NodeNames, in ha_node_list order.
 func (t *Topology) NodeNames() []string {

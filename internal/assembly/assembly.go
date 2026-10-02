@@ -83,12 +83,28 @@ func (a *Assembler) State(ctx context.Context) (string, error) {
 	}
 	st, _ := a.serverState(ctx, a.Master().Name)
 	switch {
-	case st == "registered_and_active":
+	case st == a.activeState():
 		return StateServing, nil
 	case st != "":
 		return StateForming, nil
 	}
 	return StateSeeded, nil
+}
+
+// StateStandalone is the server state of a node that runs without HA: the
+// server is up and answering, and there is no heartbeat to register with. It is
+// a different word from registered_and_active on purpose -- a reader who sees
+// "active" expects a standby somewhere, and there is none.
+const StateStandalone = "standalone"
+
+func (a *Assembler) haOff() bool { return a.T.HAOff() }
+
+// activeState is the server state that means "serving" for this topology.
+func (a *Assembler) activeState() string {
+	if a.haOff() {
+		return StateStandalone
+	}
+	return "registered_and_active"
 }
 
 func (a *Assembler) seeded() bool {
@@ -105,11 +121,31 @@ var regState = regexp.MustCompile(`registered_and_[a-z_]+`)
 var clientIndexed = regexp.MustCompile(`^client\[([0-9]+)\]$`)
 
 func (a *Assembler) serverState(ctx context.Context, node string) (string, error) {
+	if a.haOff() {
+		// `cubrid server status` lists every server the master knows, one
+		// "Server <db> (rel ..., pid ...)" line each. The database name is
+		// matched whole, so perf_a does not answer for perf_ab.
+		res, err := a.D.Exec(ctx, node, a.T.DB, "cubrid server status 2>/dev/null")
+		if err != nil || res.ExitCode != 0 {
+			return "", err
+		}
+		if serverListed(res.Stdout, a.T.DB) {
+			return StateStandalone, nil
+		}
+		return "", nil
+	}
 	res, err := a.D.Exec(ctx, node, a.T.DB, "cubrid heartbeat status 2>/dev/null")
 	if err != nil || res.ExitCode != 0 {
 		return "", err
 	}
 	return regState.FindString(res.Stdout), nil
+}
+
+// serverListed reports whether `cubrid server status` output names db as a
+// running server.
+func serverListed(out, db string) bool {
+	re := regexp.MustCompile(`(?m)^\s*Server\s+` + regexp.QuoteMeta(db) + `\s*\(`)
+	return re.MatchString(out)
 }
 
 // ---- defined: configuration ---------------------------------------------
@@ -175,7 +211,7 @@ func (a *Assembler) cubridConf(shipped string) []byte {
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
-	b.WriteString("\n# written by csb\n[common]\nha_mode=on\ncubrid_port_id=31523\n")
+	b.WriteString("\n# written by csb\n[common]\nha_mode=" + a.T.HAModeValue() + "\ncubrid_port_id=31523\n")
 	for _, k := range sortedKeys(a.T.Parameters.Common) {
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.Common[k])
 	}
@@ -420,6 +456,9 @@ func copyFile(src, dst string) error {
 // the daemons a file instead, and the log stays for the failure case, which is
 // the only case anybody reads it in.
 func (a *Assembler) StartHeartbeat(ctx context.Context) error {
+	if a.haOff() {
+		return a.startServers(ctx)
+	}
 	var wg sync.WaitGroup
 	errs := make([]error, len(a.T.DBNodes()))
 	for i, n := range a.T.DBNodes() {
@@ -443,9 +482,29 @@ func (a *Assembler) StartHeartbeat(ctx context.Context) error {
 	return nil
 }
 
-// StartLog returns what heartbeat start wrote on a node, for the failure path.
+// startServers starts the server on every database node of a cluster without
+// HA. `cubrid server start` brings up cub_master itself if it is not running,
+// and its daemons inherit stdout like the heartbeat's do, so the output goes to
+// a file for the reason T8 gives.
+func (a *Assembler) startServers(ctx context.Context) error {
+	for _, n := range a.T.DBNodes() {
+		logPath := "/work/" + n.Name + "/server-start.log"
+		if _, err := a.D.Exec(ctx, n.Name, a.T.DB,
+			"cubrid server start "+a.T.DB+" > "+logPath+" 2>&1; echo rc=$?"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// StartLog returns what heartbeat start -- or, without HA, server start --
+// wrote on a node, for the failure path.
 func (a *Assembler) StartLog(node string) string {
-	b, err := os.ReadFile(filepath.Join(a.nodeDir(node), "heartbeat-start.log"))
+	name := "heartbeat-start.log"
+	if a.haOff() {
+		name = "server-start.log"
+	}
+	b, err := os.ReadFile(filepath.Join(a.nodeDir(node), name))
 	if err != nil {
 		return ""
 	}
@@ -465,6 +524,28 @@ func (a *Assembler) WaitServing(ctx context.Context) (map[string]string, error) 
 		deadline = d // the caller's --timeout wins; ours is only a floor
 	}
 	states := map[string]string{}
+	if a.haOff() {
+		// No group to form and no promotion to wait through: the server is up
+		// or it is not, and the start log says why when it is not.
+		for {
+			up := true
+			for _, n := range a.T.DBNodes() {
+				st, _ := a.serverState(ctx, n.Name)
+				states[n.Name] = st
+				if st != StateStandalone {
+					up = false
+				}
+			}
+			if up {
+				return states, nil
+			}
+			if time.Now().After(deadline) || ctx.Err() != nil {
+				n := a.Master().Name
+				return states, fmt.Errorf("the server on %s did not come up; its start log says: %s", n, a.StartLog(n))
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}
 	stuck := 0
 	var blocked error
 	for {
@@ -553,11 +634,15 @@ func (a *Assembler) Up(ctx context.Context) (map[string]string, error) {
 	if err := a.Seed(ctx); err != nil {
 		return nil, err
 	}
-	a.step("heartbeat start on %d node(s), concurrently", len(a.T.DBNodes()))
+	if a.haOff() {
+		a.step("server start on %s (ha_mode=off, no heartbeat)", a.Master().Name)
+	} else {
+		a.step("heartbeat start on %d node(s), concurrently", len(a.T.DBNodes()))
+	}
 	if err := a.StartHeartbeat(ctx); err != nil {
 		return nil, err
 	}
-	a.step("waiting for %s to reach registered_and_active", a.Master().Name)
+	a.step("waiting for %s to reach %s", a.Master().Name, a.activeState())
 	states, err := a.WaitServing(ctx)
 	if err != nil {
 		return states, err
@@ -568,8 +653,15 @@ func (a *Assembler) Up(ctx context.Context) (map[string]string, error) {
 // Down stops every node gracefully: the server flushes, which is a different
 // scenario from a crash and produces different engine behaviour.
 func (a *Assembler) Down(ctx context.Context) error {
+	stop := "cubrid service stop"
+	if a.haOff() {
+		// Without HA the server was started by name, so it is stopped by name
+		// and the service -- the master -- after it. `service stop` alone leaves
+		// the server to the master's shutdown, which is a different stop.
+		stop = "cubrid server stop " + a.T.DB + " >/dev/null 2>&1; cubrid service stop"
+	}
 	for _, n := range a.T.DBNodes() {
-		res, err := a.D.Exec(ctx, n.Name, a.T.DB, "cubrid service stop")
+		res, err := a.D.Exec(ctx, n.Name, a.T.DB, stop)
 		if err != nil {
 			return err
 		}
@@ -708,6 +800,19 @@ func (a *Assembler) Resolve(ctx context.Context, sel string) ([]string, error) {
 		}
 		return out, nil
 	case "master", "slave":
+		if a.haOff() {
+			// One server, no roles. "master" names it when it is up, so a
+			// scenario written against a pair addresses a single the same way;
+			// "slave" names nothing, and says why rather than "no node".
+			if sel == "slave" {
+				return nil, fmt.Errorf("cluster %s is preset single: it has no standby", a.T.Cluster)
+			}
+			n := a.Master().Name
+			if st, _ := a.serverState(ctx, n); st != StateStandalone {
+				return nil, fmt.Errorf("the server on %s is not running", n)
+			}
+			return []string{n}, nil
+		}
 		var master, standby []string
 		for _, n := range a.T.DBNodes() {
 			st, _ := a.serverState(ctx, n.Name)

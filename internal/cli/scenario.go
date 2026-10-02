@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/inspect"
 	"github.com/cubrid-systems/cubrid-cluster-sandbox/internal/record"
 )
 
@@ -874,11 +875,14 @@ func rolesFor(cluster string, timeout time.Duration) (masters, standbys int, mas
 		return 0, 0, "", jerr
 	}
 	for _, n := range env.Data.Nodes {
-		switch n.Server {
-		case "registered_and_active":
+		switch {
+		// A standalone server counts as the one master, so that `await
+		// {masters: 1}` means "serving" on a single cluster the way it does on a
+		// pair, and a scenario can start the same way on both.
+		case inspect.IsActive(n.Server):
 			masters++
 			masterCreatedAs = n.Created
-		case "registered_and_standby":
+		case n.Server == "registered_and_standby":
 			standbys++
 		}
 	}
