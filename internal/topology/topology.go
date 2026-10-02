@@ -62,6 +62,12 @@ type Params struct {
 	Common map[string]string `json:"common,omitempty"` // cubrid.conf
 	HA     map[string]string `json:"ha,omitempty"`     // cubrid_ha.conf
 	Hidden map[string]string `json:"hidden,omitempty"` // written unvalidated, on request
+	// Broker is cubrid_broker.conf's [%csb] section, the keys a --broker-set
+	// overrides. The file is written by this tool by construction (03-assembly.md
+	// §6), so these are overrides of its own text rather than a parameter
+	// surface of the engine's; a measurement wants a fixed CAS count and no SQL
+	// log, and had no way to say so.
+	Broker map[string]string `json:"broker,omitempty"`
 	// Unverified names the --set keys this tool could not look up. They were
 	// written all the same, to the file their name says, because the engine
 	// refuses a name it does not know at server start -- so a typo is loud
@@ -135,6 +141,7 @@ type Options struct {
 	ShmSize     string
 	Set         []string // key=value, validated
 	SetHidden   []string // key=value, written unvalidated
+	BrokerSet   []string // KEY=VALUE for cubrid_broker.conf's [%csb] section
 	Labels      []string // key=value, recorded and never interpreted
 	Host        string   // the machine standing this up, as it calls itself
 	Engine      *engine.Identity
@@ -162,6 +169,17 @@ var commonKeys = map[string]bool{
 	"sort_buffer_size": true, "max_clients": true, "cubrid_port_id": true,
 	"db_volume_size": true, "log_volume_size": true, "log_max_archives": true,
 	"ha_mode": true, "force_remove_log_archives": true,
+}
+
+// brokerOwned are the cubrid_broker.conf keys the tool decides for itself, with
+// the reason an override would fight it. Everything else in the [%csb] section
+// -- CAS counts, SQL_LOG, timeouts -- is the user's to set.
+var brokerOwned = map[string]string{
+	"ACCESS_MODE":        "quiesce and resume write it",
+	"BROKER_PORT":        "33000 is what every client and document reaches the broker at",
+	"SERVICE":            "the broker exists because --with-broker was given",
+	"MASTER_SHM_ID":      "a shared-memory id this tool keeps distinct per cluster",
+	"APPL_SERVER_SHM_ID": "a shared-memory id this tool keeps distinct per cluster",
 }
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
@@ -316,6 +334,23 @@ func Resolve(o Options) (*Topology, error) {
 			return nil, err
 		}
 		t.Parameters.Hidden[k] = v
+	}
+	if len(o.BrokerSet) > 0 && !o.WithBroker {
+		return nil, fmt.Errorf("--broker-set configures the broker, and this cluster has none (--with-broker)")
+	}
+	for _, kv := range o.BrokerSet {
+		k, v, err := split(kv)
+		if err != nil {
+			return nil, err
+		}
+		k = strings.ToUpper(k)
+		if why, owned := brokerOwned[k]; owned {
+			return nil, fmt.Errorf("%s is written by csb itself and cannot be overridden: %s", k, why)
+		}
+		if t.Parameters.Broker == nil {
+			t.Parameters.Broker = map[string]string{}
+		}
+		t.Parameters.Broker[k] = v
 	}
 	for _, kv := range o.Labels {
 		k, v, err := split(kv)

@@ -391,7 +391,16 @@ broker has no door to close
 
 - **A third configuration file**, `cubrid_broker.conf`, with `ACCESS_MODE` as a
   parameter the tool owns rather than a `--set` key — `quiesce` writes it, so a
-  user setting it by hand would be fighting a verb.
+  user setting it by hand would be fighting a verb. The rest of the broker's
+  section is the user's: `--broker-set KEY=VALUE` replaces a key the template
+  has where it stands and adds one it lacks. A measurement wants a fixed CAS
+  count (`MIN_NUM_APPL_SERVER`=`MAX_NUM_APPL_SERVER`, so no CAS is spawned
+  inside a measured window) and `SQL_LOG=OFF` (so the broker is not writing a
+  log line per statement to the same disk), and the fixed template could say
+  neither. The five keys the tool decides — `ACCESS_MODE`, `BROKER_PORT`,
+  `SERVICE`, the two shared-memory ids — are refused with the reason. The
+  overrides are recorded in the artifact under `parameters.broker` and refused
+  without `--with-broker`, since there is nothing to configure.
 - **One more start step, after `serving`.** The broker starts once a master is
   `registered_and_active`, not before: a broker in front of a server that is
   still `registered_and_to_be_active` accepts a connection and fails the first

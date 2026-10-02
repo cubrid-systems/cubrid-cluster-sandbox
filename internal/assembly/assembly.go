@@ -296,26 +296,42 @@ const BrokerName = "csb"
 // brokerConf is a single broker, RW, reachable only from inside the node. No
 // port is published: access stays node exec and node shell, which is what keeps
 // port bookkeeping absent ([`../DESIGN.md`] §6).
+//
+// The [%csb] section takes the topology's --broker-set overrides: a key the
+// template has is replaced in place, one it does not have is appended to the
+// section. The keys the tool decides for itself were refused before they got
+// here (topology.brokerOwned), so nothing below fights quiesce.
 func (a *Assembler) brokerConf() []byte {
-	return []byte(`# written by csb
-[broker]
-MASTER_SHM_ID           =30001
-ADMIN_LOG_FILE          =log/broker/cubrid_broker.log
-
-[%` + BrokerName + `]
-SERVICE                 =ON
-BROKER_PORT             =33000
-MIN_NUM_APPL_SERVER     =2
-MAX_NUM_APPL_SERVER     =10
-APPL_SERVER_SHM_ID      =33000
-LOG_DIR                 =log/broker/sql_log
-ERROR_LOG_DIR           =log/broker/error_log
-SQL_LOG                 =ON
-TIME_TO_KILL            =120
-SESSION_TIMEOUT         =300
-KEEP_CONNECTION         =AUTO
-ACCESS_MODE             =RW
-`)
+	section := []string{
+		"SERVICE                 =ON",
+		"BROKER_PORT             =33000",
+		"MIN_NUM_APPL_SERVER     =2",
+		"MAX_NUM_APPL_SERVER     =10",
+		"APPL_SERVER_SHM_ID      =33000",
+		"LOG_DIR                 =log/broker/sql_log",
+		"ERROR_LOG_DIR           =log/broker/error_log",
+		"SQL_LOG                 =ON",
+		"TIME_TO_KILL            =120",
+		"SESSION_TIMEOUT         =300",
+		"KEEP_CONNECTION         =AUTO",
+		"ACCESS_MODE             =RW",
+	}
+	over := a.T.Parameters.Broker
+	seen := map[string]bool{}
+	for i, line := range section {
+		k := strings.TrimSpace(strings.SplitN(line, "=", 2)[0])
+		if v, ok := over[k]; ok {
+			section[i] = fmt.Sprintf("%-24s=%s", k, v)
+			seen[k] = true
+		}
+	}
+	for _, k := range sortedKeys(over) {
+		if !seen[k] {
+			section = append(section, fmt.Sprintf("%-24s=%s", k, over[k]))
+		}
+	}
+	return []byte("# written by csb\n[broker]\nMASTER_SHM_ID           =30001\nADMIN_LOG_FILE          =log/broker/cubrid_broker.log\n\n[%" +
+		BrokerName + "]\n" + strings.Join(section, "\n") + "\n")
 }
 
 // StartBroker starts the broker on every node, once the group is serving.

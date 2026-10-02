@@ -81,11 +81,27 @@ func TestRejects(t *testing.T) {
 		// An image for client nodes that do not exist is a flag that would do
 		// nothing, and nothing is the one thing a flag must not quietly do.
 		{"client image without clients", Options{Name: "x", ClientImage: "perf-client:1"}},
+		{"broker override without a broker", Options{Name: "x", BrokerSet: []string{"SQL_LOG=OFF"}}},
+		// ACCESS_MODE is the door quiesce closes; a user setting it would be
+		// fighting a verb, and the refusal says which.
+		{"broker key the tool owns", Options{Name: "x", WithBroker: true, BrokerSet: []string{"access_mode=SO"}}},
+		{"malformed --broker-set", Options{Name: "x", WithBroker: true, BrokerSet: []string{"SQL_LOG"}}},
 	}
 	for _, c := range bad {
 		if _, err := Resolve(c.o); err == nil {
 			t.Errorf("%s: expected an error", c.why)
 		}
+	}
+}
+
+func TestBrokerOverridesAreUppercasedAndKept(t *testing.T) {
+	top, err := Resolve(Options{Name: "x", WithBroker: true,
+		BrokerSet: []string{"max_num_appl_server=16", "SQL_LOG=OFF"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if top.Parameters.Broker["MAX_NUM_APPL_SERVER"] != "16" || top.Parameters.Broker["SQL_LOG"] != "OFF" {
+		t.Errorf("broker overrides = %v", top.Parameters.Broker)
 	}
 }
 

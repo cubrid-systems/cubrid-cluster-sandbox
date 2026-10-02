@@ -44,6 +44,7 @@ func createFlags(fs *flag.FlagSet) {
 	fs.String("client-image", "", "image for the client nodes (default: the base image); yours, and it must already exist")
 	fs.String("ping-host", "", "the witness a node pings to tell 'the peer is gone' from 'I am gone'")
 	fs.Bool("with-broker", false, "run a broker, which is the door quiesce closes")
+	fs.Var(&repeatable{}, "broker-set", "KEY=VALUE for the broker's section of cubrid_broker.conf, e.g. MAX_NUM_APPL_SERVER=16 (repeatable)")
 	fs.Float64("cpus", 0, "CPU quota per node; host-load profiles are meaningless without it")
 	fs.Var(&repeatable{}, "set", "key=value, validated (repeatable)")
 	fs.Var(&repeatable{}, "set-hidden", "key=value, written unvalidated (repeatable)")
@@ -270,7 +271,7 @@ func cmdClusterCreate(c *Ctx) (any, error) {
 		Backend: string(backendFor(c, "")),
 		Clients: clients, Tools: c.str("tools"), ClientImage: c.str("client-image"),
 		WithBroker: c.fs.Lookup("with-broker").Value.String() == "true",
-		CPUs:       cpus, Set: set, SetHidden: setHidden,
+		CPUs:       cpus, Set: set, SetHidden: setHidden, BrokerSet: repeated(c, "broker-set"),
 		Labels: repeated(c, "label"),
 		// Recorded where it is observed. A machine knows its own name; a
 		// cluster does not, and asking it later would be asking the wrong
