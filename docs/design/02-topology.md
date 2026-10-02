@@ -247,10 +247,23 @@ Overrides land in one of two files and the user should not have to know which:
 csb cluster create --set ha_ping_hosts=ping-host --set max_clients=200
 ```
 
-The tool routes each key to `cubrid.conf` or `cubrid_ha.conf` by looking it up,
-and refuses an unknown key rather than writing a file the engine will silently
-ignore — "silent config divergence" is a named failure mode
-([`../DESIGN.md`](../DESIGN.md) §7).
+The tool routes each key to `cubrid.conf` or `cubrid_ha.conf` by its name —
+`ha_*` is `cubrid_ha.conf`'s — and writes it. The lookup table *routes*; it does
+not *gate*. It used to: an unknown key was refused "rather than writing a file
+the engine will silently ignore", and that premise is wrong for `cubrid.conf`.
+The engine looks every name up at server start and refuses one it does not have
+(`system_parameter.c`, `prm_find` → `PRM_ERR_UNKNOWN_PARAM`, with the file and
+line quoted), so a typo is loud there — and the refusal here kept out the
+hundreds of real parameters the shipped conf never mentions
+(`double_write_buffer_size`, `supplemental_log`, ...), which a measurement
+cluster has to set. "Silent config divergence" ([`../DESIGN.md`](../DESIGN.md)
+§7) remains a named failure mode for the one file where it is real: with
+`ha_mode=off` the engine does not read `cubrid_ha.conf` at all, so on a
+`single` cluster `--set ha_*` is refused.
+
+A key the table does not know is still written, and is listed in `describe`
+under `parameters.unverified` with an info note at create — not because it is
+suspect, but so the artifact says which keys csb did not vouch for.
 
 ### Hidden parameters, and the hole that lookup rule leaves
 
@@ -271,15 +284,20 @@ Two tiers, then, and the second one is opt-in rather than lenient:
 --set-hidden key=value   a parameter the engine does not advertise
 ```
 
-`--set` keeps its refusal, so a typo stays an error. `--set-hidden` writes
-without validation, and everything written that way is **flagged in `describe`**:
+`--set` writes to the file the name says, and the engine keeps a typo an error at
+server start. `--set-hidden` writes to `cubrid_ha.conf` without validation, and
+everything written that way is **flagged in `describe`**, beside the `--set`
+keys the table could not vouch for:
 
 ```yaml
 parameters:
   common:
     ha_mode: on
+    double_write_buffer_size: 0
   hidden:                 # written unvalidated, on request
     ha_calc_score_interval_in_msecs: 300000
+  unverified:             # --set keys not in csb's table; written as given
+    - double_write_buffer_size
 ```
 
 The flag is not bookkeeping. A cluster carrying a hidden parameter may be in a
@@ -361,11 +379,11 @@ bin/ctp.sh ha_repl -c conf/ha_repl.conf
 and nothing else. The addresses in that file describe machines CTP would have
 reached over ssh; a csb cluster's nodes are containers the command is about to
 create, so their addresses are an *output* of the create rather than an input to
-it. Validation is kept: an unknown key is refused and named, exactly as `--set`
-refuses one, because the engine accepts a file with a key it ignores and the
-divergence is then silent. A parameter the engine has and does not advertise —
-`ha_max_heartbeat_gap` and the other two this project measured — is not a typo,
-so it routes to `--set-hidden` and says so rather than being refused as unknown.
+it. A key in an engine section rides as `--set` whether or not the lookup table
+knows it, exactly as `--set` carries one (§5); what is refused and named is a
+*section* this tool has no file for. A parameter the engine has and does not
+advertise — `ha_max_heartbeat_gap` and the other two this project measured —
+routes to `--set-hidden` and says so, as it always has.
 `cubrid_download_url` is answered out loud: csb bind-mounts a build from the host
 and never puts an engine in an image, so `--build` decides what runs.
 
