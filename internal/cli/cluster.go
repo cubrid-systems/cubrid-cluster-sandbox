@@ -58,10 +58,11 @@ func createFlags(fs *flag.FlagSet) {
 // output of the create rather than an input to it -- which is what
 // `describe --format ctp` writes back.
 //
-// Unknown keys are refused rather than carried, and named. That is the same rule
-// --set follows, and the reason is the same: the engine accepts a file with a key
-// it ignores, so a typo that travelled from a CTP conf would take effect nowhere
-// and be reported by nothing (docs/design/02-topology.md §5).
+// An unknown section is refused and named. An unknown KEY in an engine section
+// is carried as --set and flagged unverified, the same rule --set follows: the
+// engine refuses a parameter name it does not have at server start, so a typo
+// that travelled from a CTP conf is reported there, by the engine, loudly
+// (docs/design/02-topology.md §5).
 func ctpSets(c *Ctx, path string) (sets, hidden []string, err error) {
 	f, oerr := os.Open(path)
 	if oerr != nil {
@@ -296,6 +297,15 @@ func standUp(c *Ctx, t *topology.Topology, id *engine.Identity) (any, error) {
 		c.Note("hidden_parameter_set", SevWarn,
 			"this cluster carries unvalidated parameters ("+strings.Join(t.HiddenKeys(), ", ")+
 				"); it may be in a state the engine's documentation does not describe")
+	}
+	if len(t.Parameters.Unverified) > 0 {
+		// Info, not a warning: the engine checks the name at server start and a
+		// wrong one stops the cluster at did_not_reach_serving with the start
+		// log quoted. The note is so the reader knows which keys csb did not
+		// vouch for, nothing more.
+		c.Note("unverified_parameter_set", SevInfo,
+			fmt.Sprintf("%d parameter(s) are not in csb's table and were written as given (%s); the engine refuses a name it does not know at server start",
+				len(t.Parameters.Unverified), strings.Join(t.Parameters.Unverified, ", ")))
 	}
 
 	d := &backend.Driver{R: r, E: backendFor(c, t.Backend)}

@@ -75,10 +75,12 @@ func ParseCTPConf(r io.Reader) (keys []CTPKey, other map[string]string, err erro
 // CTPSets turns a parsed conf into the --set arguments a create would take, and
 // names what it refused.
 //
-// Validation is kept rather than waived: an unknown key is refused here exactly
-// as it is on the command line, because the engine accepts a file with a key it
-// ignores and the divergence is then silent (§5). A typo carried over from a CTP
-// conf is worth finding at the moment of the move.
+// What is refused is a SECTION this tool has no file for. A key in an engine
+// section rides as --set whether or not the tables know it, exactly as it does
+// on the command line: the engine refuses a parameter name it does not have at
+// server start, so a typo carried over from a CTP conf is found at the moment
+// of the move -- by the engine, with the line quoted (§5).
+//
 // measuredHidden are parameters the engine has and does not advertise: absent
 // from `paramdump`, present in the field's own tuning, and measured by this
 // project (findings/switchover-threshold.md). They are not typos and refusing
@@ -98,12 +100,15 @@ func CTPSets(keys []CTPKey) (sets, hidden, refused []string) {
 			// section: CTP's sections say where CTP would have written it, and
 			// this model routes by name (§5).
 			switch {
-			case haKeys[k.Key] || commonKeys[k.Key]:
-				sets = append(sets, k.Key+"="+k.Value)
 			case measuredHidden[k.Key]:
 				hidden = append(hidden, k.Key+"="+k.Value)
 			default:
-				refused = append(refused, fmt.Sprintf("%s.%s (not a parameter this tool knows)", k.Section, k.Key))
+				// Every engine parameter rides as --set. A name the tables do
+				// not know is written and flagged unverified rather than
+				// refused: the engine refuses a name it does not have at
+				// server start, which is louder than anything this tool can
+				// say about it (topology.go, Resolve).
+				sets = append(sets, k.Key+"="+k.Value)
 			}
 		case "master", "slave", "brokercommon", "broker1", "broker2", "cm":
 			// Addresses and broker/manager sections are not engine parameters.

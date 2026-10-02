@@ -3,6 +3,7 @@ package topology
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -100,14 +101,29 @@ func TestParameterRouting(t *testing.T) {
 		t.Errorf("cubrid.conf key went to %+v", top.Parameters)
 	}
 
-	// An unknown key is refused rather than written to a file the engine will
-	// silently ignore -- and the refusal names the documented escape hatch.
-	_, err = Resolve(Options{Name: "x", Set: []string{"frobnicate=7"}})
-	if err == nil {
-		t.Fatal("an unknown parameter must be refused")
+	// A key the tables do not know is written to the file its name says and
+	// listed as unverified -- not refused. The engine refuses a name it does
+	// not have at server start, so a typo is loud there; what the refusal here
+	// used to keep out was the hundreds of real parameters the shipped conf
+	// does not mention (double_write_buffer_size, supplemental_log, ...).
+	top, err = Resolve(Options{Name: "x", Set: []string{"double_write_buffer_size=0", "ha_apply_mem_frobnicate=1"}})
+	if err != nil {
+		t.Fatalf("an unknown parameter must be carried, not refused: %v", err)
 	}
-	if want := "--set-hidden"; !contains(err.Error(), want) {
-		t.Errorf("the refusal must name %s: %v", want, err)
+	if top.Parameters.Common["double_write_buffer_size"] != "0" {
+		t.Errorf("an unknown cubrid.conf key went to %+v", top.Parameters)
+	}
+	if top.Parameters.HA["ha_apply_mem_frobnicate"] != "1" {
+		t.Errorf("an unknown ha_* key must still go to cubrid_ha.conf: %+v", top.Parameters)
+	}
+	if got := strings.Join(top.Parameters.Unverified, ","); got != "double_write_buffer_size,ha_apply_mem_frobnicate" {
+		t.Errorf("unverified = %q; both unknown keys must be listed, sorted", got)
+	}
+	if top.Parameters.Unverified != nil && len(top.Parameters.Unverified) > 0 {
+		known, _ := Resolve(Options{Name: "x", Set: []string{"max_clients=200"}})
+		if len(known.Parameters.Unverified) != 0 {
+			t.Errorf("a known key was listed as unverified: %v", known.Parameters.Unverified)
+		}
 	}
 
 	// --set-hidden takes what --set cannot validate, because the three

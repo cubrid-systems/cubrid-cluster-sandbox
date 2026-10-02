@@ -62,6 +62,12 @@ type Params struct {
 	Common map[string]string `json:"common,omitempty"` // cubrid.conf
 	HA     map[string]string `json:"ha,omitempty"`     // cubrid_ha.conf
 	Hidden map[string]string `json:"hidden,omitempty"` // written unvalidated, on request
+	// Unverified names the --set keys this tool could not look up. They were
+	// written all the same, to the file their name says, because the engine
+	// refuses a name it does not know at server start -- so a typo is loud
+	// there, and the only thing lost by writing it is this tool's say-so. The
+	// list is kept so `describe` still says which keys that was.
+	Unverified []string `json:"unverified,omitempty"`
 }
 
 // Topology is also the describe artifact: the same value the tool builds from is
@@ -266,21 +272,33 @@ func Resolve(o Options) (*Topology, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The tables route; they do not gate. Which file a key belongs to is
+		// decided by its name -- ha_* is cubrid_ha.conf's -- and a key neither
+		// table knows is written to that file and listed as unverified. The
+		// refusal this used to be was built on "the engine accepts a file with a
+		// key it ignores", which is wrong for cubrid.conf: prm_find fails on a
+		// name it does not know and the server does not start (system_parameter.c,
+		// PRM_ERR_UNKNOWN_PARAM). So a typo is loud at the engine, and refusing
+		// it here only kept out the hundreds of real parameters the engine has
+		// and the shipped conf does not mention.
+		isHA := haKeys[k] || strings.HasPrefix(k, "ha_")
+		if isHA && t.HAOff() {
+			// The engine does not read cubrid_ha.conf when ha_mode is off, so
+			// the value would be written and never take effect -- that is the
+			// one silence worth refusing.
+			return nil, fmt.Errorf("preset single runs with ha_mode=off, so %s has no effect; use the ha preset for HA parameters", k)
+		}
 		switch {
-		case haKeys[k]:
-			if t.HAOff() {
-				// The engine does not read cubrid_ha.conf when ha_mode is off, so
-				// the value would be written and never take effect -- the exact
-				// silence 02-topology.md §5 refuses for unknown keys.
-				return nil, fmt.Errorf("preset single runs with ha_mode=off, so %s has no effect; use the ha preset for HA parameters", k)
-			}
+		case isHA:
 			t.HAParam(k, v)
-		case commonKeys[k]:
-			t.Parameters.Common[k] = v
 		default:
-			return nil, fmt.Errorf("unknown parameter %q; if the engine has it but does not advertise it, use --set-hidden %s", k, kv)
+			t.Parameters.Common[k] = v
+		}
+		if !haKeys[k] && !commonKeys[k] {
+			t.Parameters.Unverified = append(t.Parameters.Unverified, k)
 		}
 	}
+	sort.Strings(t.Parameters.Unverified)
 	for _, kv := range o.SetHidden {
 		k, v, err := split(kv)
 		if err != nil {

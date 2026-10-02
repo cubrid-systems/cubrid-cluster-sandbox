@@ -61,10 +61,12 @@ func TestCTPSetsKeepsValidationAndSkipsAddresses(t *testing.T) {
 		t.Errorf("refused %v from a conf whose parameters are all known", refused)
 	}
 
-	// And an unknown key is refused rather than written, exactly as --set would.
-	bad, _, _ := ParseCTPConf(strings.NewReader("env.i1.ha.ha_no_such_thing=1\n"))
-	if _, _, r := CTPSets(bad); len(r) != 1 {
-		t.Errorf("an unknown parameter was not refused: %v", r)
+	// A key the tables do not know rides as --set, exactly as --set would carry
+	// it: written and flagged unverified, refused by the engine if misspelt.
+	// What IS refused is a section this tool has no file for.
+	odd, _, _ := ParseCTPConf(strings.NewReader("env.i1.ha.ha_no_such_thing=1\n"))
+	if s, _, r := CTPSets(odd); len(r) != 0 || strings.Join(s, " ") != "ha_no_such_thing=1" {
+		t.Errorf("an unknown parameter must be carried: sets=%v refused=%v", s, r)
 	}
 }
 
