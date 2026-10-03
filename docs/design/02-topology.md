@@ -60,7 +60,7 @@ cosmetic: the assembly has two hard constraints that only a naming rule can
 satisfy.
 
 ```
-cluster name          hadb                 (default: the database name)
+cluster name          hadb                 (the database name defaults to it; pass --db when the cluster name has a dash, which createdb refuses)
 node names            hadb-n1, hadb-n2     (also the container hostnames)
 network               hadb-net
 database directory    /db                  INSIDE every container, identically
@@ -282,7 +282,7 @@ M2.5.
 Two tiers, then, and the second one is opt-in rather than lenient:
 
 ```
---set     key=value      known key; validated against the lookup table
+--set     key=value      routed by name to cubrid.conf or cubrid_ha.conf; a key the tables do not know is written and listed as unverified (§5)
 --set-hidden key=value   a parameter the engine does not advertise
 ```
 
