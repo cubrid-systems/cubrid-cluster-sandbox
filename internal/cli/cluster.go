@@ -48,7 +48,7 @@ func createFlags(fs *flag.FlagSet) {
 	fs.Float64("cpus", 0, "CPU quota per node; host-load profiles are meaningless without it")
 	fs.String("cpuset", "", "CPUs the database nodes are pinned to, e.g. 0-7,16-23 (a quota says how much, this says where)")
 	fs.String("client-cpuset", "", "CPUs the client nodes are pinned to, e.g. 8-15,24-31")
-	fs.Var(&repeatable{}, "set", "key=value, validated (repeatable)")
+	fs.Var(&repeatable{}, "set", "key=value for cubrid.conf (ha_* to cubrid_ha.conf); an unknown key is written and listed as unverified (repeatable)")
 	fs.Var(&repeatable{}, "set-hidden", "key=value, written unvalidated (repeatable)")
 	fs.String("from", "", "a describe artifact to rebuild from")
 	fs.String("from-ctp", "", "a CTP ha_repl.conf to take engine parameters from")
