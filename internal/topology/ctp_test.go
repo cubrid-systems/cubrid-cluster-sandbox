@@ -76,6 +76,7 @@ func TestWriteCTPConfNamesContainersAndSaysSo(t *testing.T) {
 		Nodes: []Node{{Name: "hadb-n1", Role: "master"}, {Name: "hadb-n2", Role: "slave"}},
 	}
 	tp.Parameters.HA = map[string]string{"ha_max_heartbeat_gap": "10"}
+	tp.Parameters.Hidden = map[string]string{"ha_calc_score_interval_in_msecs": "300000", "ignore_trailing_space": "yes"}
 	var buf bytes.Buffer
 	if err := tp.WriteCTPConf(&buf, "", "1000:1000"); err != nil {
 		t.Fatal(err)
@@ -87,12 +88,19 @@ func TestWriteCTPConfNamesContainersAndSaysSo(t *testing.T) {
 		"env.hadb.master.ssh.user=1000:1000",
 		"env.hadb.ha.ha_db_list=hadb",
 		"env.hadb.ha.ha_max_heartbeat_gap=10",
+		// a hidden key goes to the section create wrote it to: CTP's ha
+		// section is cubrid_ha.conf, where the engine reads HA keys only
+		"env.hadb.ha.ha_calc_score_interval_in_msecs=300000",
+		"env.hadb.cubrid.ignore_trailing_space=yes",
 		"CONTAINER NAMES",     // the transport is named, not implied
 		"cubrid_download_url", // and so is what does not apply
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the fragment does not carry %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "env.hadb.ha.ignore_trailing_space") {
+		t.Errorf("a hidden key that is not an HA one is in the ha section:\n%s", out)
 	}
 
 	// A single node cannot be an ha_repl environment, and saying so beats

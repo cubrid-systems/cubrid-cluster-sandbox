@@ -215,6 +215,11 @@ func (a *Assembler) cubridConf(shipped string) []byte {
 	for _, k := range sortedKeys(a.T.Parameters.Common) {
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.Common[k])
 	}
+	for _, k := range sortedKeys(a.T.Parameters.Hidden) {
+		if !topology.IsHAKey(k) {
+			fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.Hidden[k])
+		}
+	}
 	return []byte(b.String())
 }
 
@@ -248,7 +253,9 @@ func (a *Assembler) haConf() []byte {
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.HA[k])
 	}
 	for _, k := range sortedKeys(a.T.Parameters.Hidden) {
-		fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.Hidden[k])
+		if topology.IsHAKey(k) { // the rest is cubrid.conf's, where the engine reads it
+			fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.Hidden[k])
+		}
 	}
 	return []byte(b.String())
 }
