@@ -159,6 +159,12 @@ var engineDirs = []string{"bin", "lib", "cci", "msg", "locales", "timezones", "s
 // writes both configuration files. It runs on the host: the node's work
 // directory is the container's /work, so nothing here needs a running container.
 func (a *Assembler) WriteConfig(node topology.Node, enginePath string) error {
+	// T1, for every path that writes the conf: create, create --from an
+	// artifact, and cluster up, the last two from a describe that an earlier
+	// csb may have written unspelled.
+	if err := a.T.SpellPerNode(); err != nil {
+		return err
+	}
 	root := filepath.Join(a.nodeDir(node.Name), "cubrid")
 	for _, d := range []string{"conf", "databases", "log", "var", "tmp"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
@@ -225,11 +231,10 @@ func (a *Assembler) cubridConf(shipped string) []byte {
 
 // haConf writes cubrid_ha.conf.
 //
-// T1 -- ha_copy_sync_mode takes one colon-separated entry per node in
-// ha_node_list, so a value correct for one node is a hard "Invalid Parameter"
-// startup failure for two. Resolve spells a --set of it per node (perNode), so
-// what arrives here has the node count's entries; unset, every node defaults
-// to sync.
+// T1 -- ha_copy_sync_mode takes one entry per node in ha_node_list, so a value
+// correct for one node is a hard "Invalid Parameter" startup failure for two.
+// WriteConfig spells it per node (Topology.SpellPerNode) before this runs;
+// unset, every node defaults to sync.
 func (a *Assembler) haConf() []byte {
 	var b strings.Builder
 	b.WriteString("# written by csb\n[common]\n")

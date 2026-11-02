@@ -340,6 +340,11 @@ func Resolve(o Options) (*Topology, error) {
 		// PRM_ERR_UNKNOWN_PARAM). So a typo is loud at the engine, and refusing
 		// it here only kept out the hundreds of real parameters the engine has
 		// and the shipped conf does not mention.
+		// The engine reads parameter names in any case; this one is spelled
+		// per node below, so an upper-case spelling must not get past it.
+		if strings.EqualFold(k, perNodeKey) {
+			k = perNodeKey
+		}
 		isHA := IsHAKey(k)
 		if isHA && t.HAOff() {
 			// The engine does not read cubrid_ha.conf when ha_mode is off, so
@@ -348,8 +353,8 @@ func Resolve(o Options) (*Topology, error) {
 			return nil, fmt.Errorf("preset single runs with ha_mode=off, so %s has no effect; use the ha preset for HA parameters", k)
 		}
 		switch {
-		case k == "ha_copy_sync_mode":
-			nv, err := perNode(k, v, len(t.DBNodes()))
+		case k == perNodeKey:
+			nv, err := PerNode(k, v, len(t.DBNodes()))
 			if err != nil {
 				return nil, err
 			}
@@ -368,6 +373,9 @@ func Resolve(o Options) (*Topology, error) {
 		k, v, err := split(kv)
 		if err != nil {
 			return nil, err
+		}
+		if strings.EqualFold(k, perNodeKey) {
+			return nil, fmt.Errorf("%s is a --set key: --set spells it per node, and --set-hidden would write it as given", perNodeKey)
 		}
 		t.Parameters.Hidden[k] = v
 	}
@@ -403,23 +411,51 @@ func Resolve(o Options) (*Topology, error) {
 
 func (t *Topology) HAParam(k, v string) { t.Parameters.HA[k] = v }
 
-// perNode spells a parameter that takes one colon-separated entry per node in
-// ha_node_list (T1, docs/design/03-assembly.md §2): a single value is written
-// for every node, and a list must have an entry a node. Another count is the
-// engine's "Invalid Parameter" when the heartbeat starts, so it is refused
-// here, before anything is made.
-func perNode(k, v string, nodes int) (string, error) {
-	if !strings.Contains(v, ":") {
+// perNodeKey is the parameter that takes one entry per node in ha_node_list.
+const perNodeKey = "ha_copy_sync_mode"
+
+// perNodeSep is what the engine splits it on (util_split_ha_sync: " ,:").
+func perNodeSep(r rune) bool { return r == ':' || r == ',' || r == ' ' }
+
+// PerNode spells ha_copy_sync_mode for a cluster of nodes database nodes (T1,
+// docs/design/03-assembly.md §2). The engine splits the value on spaces,
+// commas and colons, fails to start on fewer entries than nodes, and ignores
+// any past them. csb writes it colon-separated: a single value once for every
+// node, a list of exactly one entry per node. An empty value is refused, and so
+// is a list of another count -- a longer one too, which the engine would
+// accept, because it is a value meant for a cluster of another size.
+func PerNode(k, v string, nodes int) (string, error) {
+	entries := strings.FieldsFunc(v, perNodeSep)
+	switch {
+	case len(entries) == 0:
+		return "", fmt.Errorf("%s is empty; give sync or async, or leave it out, which is sync on every node", k)
+	case len(entries) == 1 && !strings.ContainsFunc(v, perNodeSep):
 		vals := make([]string, nodes)
 		for i := range vals {
 			vals[i] = v
 		}
 		return strings.Join(vals, ":"), nil
+	case len(entries) != nodes:
+		return "", fmt.Errorf("%s takes one entry per node in ha_node_list, and this cluster has %d nodes; %q has %d (a single value is written for every node)", k, nodes, v, len(entries))
 	}
-	if n := len(strings.Split(v, ":")); n != nodes {
-		return "", fmt.Errorf("%s takes one entry per node in ha_node_list, separated by ':', and this cluster has %d nodes; %q has %d (a single value is written for every node)", k, nodes, v, n)
+	return strings.Join(entries, ":"), nil
+}
+
+// SpellPerNode spells the topology's ha_copy_sync_mode for its database nodes.
+// What is already spelled stays as it is; a describe artifact of a csb from
+// before the spelling holds the value as it was asked ("async"), and a cluster
+// brought back from one gets it written per node, or refused.
+func (t *Topology) SpellPerNode() error {
+	v, ok := t.Parameters.HA[perNodeKey]
+	if !ok {
+		return nil
 	}
-	return v, nil
+	nv, err := PerNode(perNodeKey, v, len(t.DBNodes()))
+	if err != nil {
+		return err
+	}
+	t.Parameters.HA[perNodeKey] = nv
+	return nil
 }
 
 const (

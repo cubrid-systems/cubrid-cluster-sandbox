@@ -134,8 +134,6 @@ nodes:
   - name: hadb-n1
     role: master          # the role at create time, not now
     host: hgryoo-desktop  # the machine it ran on, observed not instructed
-    overrides:
-      ha_copy_sync_mode: sync
   - name: hadb-n2
     role: slave
     host: hgryoo-desktop
@@ -149,7 +147,9 @@ engine:
 parameters:               # every non-default, both files, per scope
   common:
     ha_mode: on
+  ha:
     ha_ping_hosts: ping-host
+    ha_copy_sync_mode: async:async   # one entry per node, as written to cubrid_ha.conf
 resources:                # what "saturated" means on this machine
   cpus: 4
   shm_size: 512m
@@ -343,14 +343,16 @@ guarantee for each: `icmp` requires `ping` in the image, and its absence returns
 then a reproducible condition rather than an accident
 ([`04-faults.md`](04-faults.md) §10).
 
-Two parameters are special and are handled by construction rather than by the
-user:
+Two parameters are special: the tool spells one and sets the other.
 
-- **`ha_copy_sync_mode` is spelled per node.** It takes one colon-separated
-  entry per node in `ha_node_list`, so a value correct for one node is a hard
-  `Invalid Parameter` startup failure for two. A `--set` of a single value is
-  written for every node, a list must have one entry per node, and another
-  count is refused at create. Unset, every node defaults to `sync`.
+- **`ha_copy_sync_mode` is spelled per node.** It takes one entry per node in
+  `ha_node_list`, and the engine fails to start on fewer, so a value correct
+  for one node is a hard `Invalid Parameter` startup failure for two. The user
+  picks the value; a single value is written for every node, a list (the
+  engine splits on `:`, `,` and spaces) must have one entry per node, and
+  another count, or an empty value, is refused by `--set` -- and, for a
+  cluster made `--from` an artifact or brought `up`, when its conf is written.
+  `--set-hidden` does not take it. Unset, every node defaults to `sync`.
 - **`ha_ping_hosts` is set by default**, because a cluster without it cannot
   diagnose a partition at all. A scenario may ask for it to be unset — that is
   one of the two split-brain flavours — and when it does, the deviation is named
