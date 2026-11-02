@@ -2,6 +2,8 @@ package assembly
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -36,6 +38,10 @@ func TestHAConfWritesThePingParameter(t *testing.T) {
 			wantNot: []string{"ha_ping_hosts", "ha_tcp_ping_hosts"}},
 		{name: "no host resolved writes neither",
 			mode: topology.PingICMP, host: "", wantNot: []string{"ha_ping_hosts"}},
+		{name: "ha_copy_sync_mode as Resolve spelled it",
+			mode: topology.PingICMP, host: "172.19.0.1",
+			set:  map[string]string{"ha_copy_sync_mode": "async:async"},
+			want: "\nha_copy_sync_mode=async:async\n"},
 		{name: "an explicit --set wins and is not written twice",
 			mode: topology.PingICMP, host: "172.19.0.1",
 			set:  map[string]string{"ha_ping_hosts": "ping-host"},
@@ -113,5 +119,34 @@ func TestANodeResolvesByItsSuffixAsWellAsItsFullName(t *testing.T) {
 		if !strings.Contains(rerr.Error(), want) {
 			t.Errorf("the error does not carry %q: %v", want, rerr)
 		}
+	}
+}
+
+// WriteConfig is the one place every conf is written from -- create, create
+// --from and cluster up -- so an artifact an earlier csb wrote with the value
+// as it was asked ("async") still starts.
+func TestWriteConfigSpellsAnUnspelledHACopySyncMode(t *testing.T) {
+	engineTree := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(engineTree, "conf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(engineTree, "conf", "cubrid.conf"), []byte("[common]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tp := topology.Topology{
+		DB:    "hadb",
+		Nodes: []topology.Node{{Name: "hadb-n1", Role: "master", Kind: topology.KindDB}, {Name: "hadb-n2", Role: "slave", Kind: topology.KindDB}},
+	}
+	tp.Parameters.HA = map[string]string{"ha_copy_sync_mode": "async"}
+	a := &Assembler{T: &tp, Workdir: t.TempDir()}
+	if err := a.WriteConfig(tp.Nodes[0], engineTree); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(a.Workdir, "hadb-n1", "cubrid", "conf", "cubrid_ha.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "\nha_copy_sync_mode=async:async\n") {
+		t.Errorf("cubrid_ha.conf:\n%s", b)
 	}
 }

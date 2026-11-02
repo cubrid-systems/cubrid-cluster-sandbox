@@ -97,6 +97,72 @@ func TestRejects(t *testing.T) {
 	}
 }
 
+// ha_copy_sync_mode takes one entry per node in ha_node_list (T1). It used to
+// be dropped whatever was asked -- a pair asked for async ran sync -- and is
+// now spelled per node, the way the engine splits it, or refused.
+func TestHACopySyncModeIsSpelledPerNode(t *testing.T) {
+	for _, c := range []struct {
+		nodes, clients int
+		key, set, want string
+	}{
+		{2, 0, "ha_copy_sync_mode", "async", "async:async"},
+		{2, 1, "ha_copy_sync_mode", "async", "async:async"}, // a client is not a node of ha_node_list
+		{2, 0, "ha_copy_sync_mode", "sync:async", "sync:async"},
+		{2, 0, "ha_copy_sync_mode", "sync,async", "sync:async"}, // the engine splits on commas and spaces too
+		{3, 0, "ha_copy_sync_mode", "async", "async:async:async"},
+		{2, 0, "HA_COPY_SYNC_MODE", "async", "async:async"},
+	} {
+		top, err := Resolve(Options{Name: "x", Nodes: c.nodes, Clients: c.clients, Set: []string{c.key + "=" + c.set}})
+		if err != nil {
+			t.Errorf("%d nodes, %s=%s: %v", c.nodes, c.key, c.set, err)
+			continue
+		}
+		if got := top.Parameters.HA["ha_copy_sync_mode"]; got != c.want {
+			t.Errorf("%d nodes, %s=%s: %q, want %q", c.nodes, c.key, c.set, got, c.want)
+		}
+	}
+	for _, c := range []struct {
+		nodes int
+		set   string
+		want  string
+	}{
+		{2, "sync:async:sync", "one entry per node"},
+		{3, "sync,async", "one entry per node"},
+		{2, "async:", "one entry per node"}, // the engine sees one entry
+		{2, "", "is empty"},
+		{2, ":", "is empty"},
+	} {
+		_, err := Resolve(Options{Name: "x", Nodes: c.nodes, Set: []string{"ha_copy_sync_mode=" + c.set}})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%d nodes, %q: %v, want %q", c.nodes, c.set, err, c.want)
+		}
+	}
+	if _, err := Resolve(Options{Name: "x", SetHidden: []string{"ha_copy_sync_mode=async"}}); err == nil {
+		t.Error("--set-hidden ha_copy_sync_mode was taken as given")
+	}
+}
+
+// A describe artifact of a csb from before the spelling holds the value as it
+// was asked; the topology brought back from it is spelled when its conf is
+// written, and what is spelled already stays.
+func TestSpellPerNodeTakesAnUnspelledArtifact(t *testing.T) {
+	top := &Topology{Nodes: []Node{{Name: "x-n1", Kind: KindDB}, {Name: "x-n2", Kind: KindDB}, {Name: "x-c1", Kind: KindClient}}}
+	top.Parameters.HA = map[string]string{"ha_copy_sync_mode": "async"}
+	for i := 0; i < 2; i++ {
+		if err := top.SpellPerNode(); err != nil || top.Parameters.HA["ha_copy_sync_mode"] != "async:async" {
+			t.Fatalf("spell %d: %v, %q", i+1, err, top.Parameters.HA["ha_copy_sync_mode"])
+		}
+	}
+	top.Parameters.HA["ha_copy_sync_mode"] = " async "
+	if err := top.SpellPerNode(); err != nil || top.Parameters.HA["ha_copy_sync_mode"] != "async:async" {
+		t.Errorf("a value with spaces around it: %v, %q", err, top.Parameters.HA["ha_copy_sync_mode"])
+	}
+	top.Parameters.HA["ha_copy_sync_mode"] = "sync:sync:sync"
+	if err := top.SpellPerNode(); err == nil {
+		t.Error("three entries on two nodes were written")
+	}
+}
+
 func TestBrokerOverridesAreUppercasedAndKept(t *testing.T) {
 	top, err := Resolve(Options{Name: "x", WithBroker: true,
 		BrokerSet: []string{"max_num_appl_server=16", "SQL_LOG=OFF"}})

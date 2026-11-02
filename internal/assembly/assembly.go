@@ -159,6 +159,12 @@ var engineDirs = []string{"bin", "lib", "cci", "msg", "locales", "timezones", "s
 // writes both configuration files. It runs on the host: the node's work
 // directory is the container's /work, so nothing here needs a running container.
 func (a *Assembler) WriteConfig(node topology.Node, enginePath string) error {
+	// T1, for every path that writes the conf: create, create --from an
+	// artifact, and cluster up, the last two from a describe that an earlier
+	// csb may have written unspelled.
+	if err := a.T.SpellPerNode(); err != nil {
+		return err
+	}
 	root := filepath.Join(a.nodeDir(node.Name), "cubrid")
 	for _, d := range []string{"conf", "databases", "log", "var", "tmp"} {
 		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
@@ -225,10 +231,10 @@ func (a *Assembler) cubridConf(shipped string) []byte {
 
 // haConf writes cubrid_ha.conf.
 //
-// T1 -- ha_copy_sync_mode is deliberately absent. It takes one colon-separated
-// entry per node in ha_node_list, so a value correct for one node is a hard
-// "Invalid Parameter" startup failure for two. Unset, every node defaults to
-// sync and the value cannot go out of step with the node count.
+// T1 -- ha_copy_sync_mode takes one entry per node in ha_node_list, so a value
+// correct for one node is a hard "Invalid Parameter" startup failure for two.
+// WriteConfig spells it per node (Topology.SpellPerNode) before this runs;
+// unset, every node defaults to sync.
 func (a *Assembler) haConf() []byte {
 	var b strings.Builder
 	b.WriteString("# written by csb\n[common]\n")
@@ -247,9 +253,6 @@ func (a *Assembler) haConf() []byte {
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.PingHost)
 	}
 	for _, k := range sortedKeys(a.T.Parameters.HA) {
-		if k == "ha_copy_sync_mode" {
-			continue // T1: never, whatever was asked for
-		}
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.HA[k])
 	}
 	for _, k := range sortedKeys(a.T.Parameters.Hidden) {
