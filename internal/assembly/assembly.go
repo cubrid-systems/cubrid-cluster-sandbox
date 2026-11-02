@@ -225,10 +225,11 @@ func (a *Assembler) cubridConf(shipped string) []byte {
 
 // haConf writes cubrid_ha.conf.
 //
-// T1 -- ha_copy_sync_mode is deliberately absent. It takes one colon-separated
-// entry per node in ha_node_list, so a value correct for one node is a hard
-// "Invalid Parameter" startup failure for two. Unset, every node defaults to
-// sync and the value cannot go out of step with the node count.
+// T1 -- ha_copy_sync_mode takes one colon-separated entry per node in
+// ha_node_list, so a value correct for one node is a hard "Invalid Parameter"
+// startup failure for two. Resolve spells a --set of it per node (perNode), so
+// what arrives here has the node count's entries; unset, every node defaults
+// to sync.
 func (a *Assembler) haConf() []byte {
 	var b strings.Builder
 	b.WriteString("# written by csb\n[common]\n")
@@ -247,9 +248,6 @@ func (a *Assembler) haConf() []byte {
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.PingHost)
 	}
 	for _, k := range sortedKeys(a.T.Parameters.HA) {
-		if k == "ha_copy_sync_mode" {
-			continue // T1: never, whatever was asked for
-		}
 		fmt.Fprintf(&b, "%s=%s\n", k, a.T.Parameters.HA[k])
 	}
 	for _, k := range sortedKeys(a.T.Parameters.Hidden) {

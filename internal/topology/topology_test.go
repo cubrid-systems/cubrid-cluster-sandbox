@@ -97,6 +97,34 @@ func TestRejects(t *testing.T) {
 	}
 }
 
+// ha_copy_sync_mode takes one entry per node in ha_node_list (T1). It used to
+// be dropped whatever was asked -- a pair asked for async ran sync -- and is
+// now spelled per node, or refused when the count is wrong.
+func TestHACopySyncModeIsSpelledPerNode(t *testing.T) {
+	for _, c := range []struct {
+		nodes int
+		set   string
+		want  string
+	}{
+		{2, "async", "async:async"},
+		{2, "sync:async", "sync:async"},
+		{3, "async", "async:async:async"},
+	} {
+		top, err := Resolve(Options{Name: "x", Nodes: c.nodes, Set: []string{"ha_copy_sync_mode=" + c.set}})
+		if err != nil {
+			t.Errorf("%d nodes, %s: %v", c.nodes, c.set, err)
+			continue
+		}
+		if got := top.Parameters.HA["ha_copy_sync_mode"]; got != c.want {
+			t.Errorf("%d nodes, %s: %q, want %q", c.nodes, c.set, got, c.want)
+		}
+	}
+	_, err := Resolve(Options{Name: "x", Set: []string{"ha_copy_sync_mode=sync:async:sync"}})
+	if err == nil || !strings.Contains(err.Error(), "one entry per node") {
+		t.Errorf("three entries on two nodes: %v", err)
+	}
+}
+
 func TestBrokerOverridesAreUppercasedAndKept(t *testing.T) {
 	top, err := Resolve(Options{Name: "x", WithBroker: true,
 		BrokerSet: []string{"max_num_appl_server=16", "SQL_LOG=OFF"}})

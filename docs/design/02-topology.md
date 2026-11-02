@@ -346,10 +346,11 @@ then a reproducible condition rather than an accident
 Two parameters are special and are handled by construction rather than by the
 user:
 
-- **`ha_copy_sync_mode` is left unset.** It takes one colon-separated entry per
-  node in `ha_node_list`, so a value correct for one node is a hard
-  `Invalid Parameter` startup failure for two. Unset, every node defaults to
-  `sync` and the value cannot go out of step with the node count.
+- **`ha_copy_sync_mode` is spelled per node.** It takes one colon-separated
+  entry per node in `ha_node_list`, so a value correct for one node is a hard
+  `Invalid Parameter` startup failure for two. A `--set` of a single value is
+  written for every node, a list must have one entry per node, and another
+  count is refused at create. Unset, every node defaults to `sync`.
 - **`ha_ping_hosts` is set by default**, because a cluster without it cannot
   diagnose a partition at all. A scenario may ask for it to be unset — that is
   one of the two split-brain flavours — and when it does, the deviation is named

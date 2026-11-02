@@ -55,8 +55,12 @@ project's own runs; the seventh comes from the field's tracker.
 
 **T1 — `ha_copy_sync_mode` needs one entry per node.** `util_common.c:894`
 iterates `num_ha_nodes`, so a value that is correct for one node is a hard
-`Invalid Parameter` startup failure for two. *The tool leaves it unset*, which
-defaults every node to `sync` and cannot go out of step with the count.
+`Invalid Parameter` startup failure for two. *The tool spells it per node*: a
+`--set` of a single value is written once for every node (`async` on two nodes
+is `async:async`), a colon-separated list must have one entry per node, and any
+other count is refused before the cluster is made. Unset, every node defaults
+to `sync`. (Until 2026-11 the tool dropped the key whatever was asked and still
+recorded it in `describe`, so a pair asked for `async` ran `sync`.)
 
 **T2 — both nodes need the database directory at the same container path.**
 `${DB}_vinf` holds absolute volume paths, so a slave whose directory is

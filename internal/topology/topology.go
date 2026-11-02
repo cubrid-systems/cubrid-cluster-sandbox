@@ -348,6 +348,12 @@ func Resolve(o Options) (*Topology, error) {
 			return nil, fmt.Errorf("preset single runs with ha_mode=off, so %s has no effect; use the ha preset for HA parameters", k)
 		}
 		switch {
+		case k == "ha_copy_sync_mode":
+			nv, err := perNode(k, v, len(t.DBNodes()))
+			if err != nil {
+				return nil, err
+			}
+			t.HAParam(k, nv)
 		case isHA:
 			t.HAParam(k, v)
 		default:
@@ -396,6 +402,25 @@ func Resolve(o Options) (*Topology, error) {
 }
 
 func (t *Topology) HAParam(k, v string) { t.Parameters.HA[k] = v }
+
+// perNode spells a parameter that takes one colon-separated entry per node in
+// ha_node_list (T1, docs/design/03-assembly.md §2): a single value is written
+// for every node, and a list must have an entry a node. Another count is the
+// engine's "Invalid Parameter" when the heartbeat starts, so it is refused
+// here, before anything is made.
+func perNode(k, v string, nodes int) (string, error) {
+	if !strings.Contains(v, ":") {
+		vals := make([]string, nodes)
+		for i := range vals {
+			vals[i] = v
+		}
+		return strings.Join(vals, ":"), nil
+	}
+	if n := len(strings.Split(v, ":")); n != nodes {
+		return "", fmt.Errorf("%s takes one entry per node in ha_node_list, separated by ':', and this cluster has %d nodes; %q has %d (a single value is written for every node)", k, nodes, v, n)
+	}
+	return v, nil
+}
 
 const (
 	HAModeOn  = "on"
