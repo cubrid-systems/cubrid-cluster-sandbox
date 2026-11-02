@@ -153,6 +153,10 @@ func TestSpellPerNodeTakesAnUnspelledArtifact(t *testing.T) {
 			t.Fatalf("spell %d: %v, %q", i+1, err, top.Parameters.HA["ha_copy_sync_mode"])
 		}
 	}
+	top.Parameters.HA["ha_copy_sync_mode"] = " async "
+	if err := top.SpellPerNode(); err != nil || top.Parameters.HA["ha_copy_sync_mode"] != "async:async" {
+		t.Errorf("a value with spaces around it: %v, %q", err, top.Parameters.HA["ha_copy_sync_mode"])
+	}
 	top.Parameters.HA["ha_copy_sync_mode"] = "sync:sync:sync"
 	if err := top.SpellPerNode(); err == nil {
 		t.Error("three entries on two nodes were written")

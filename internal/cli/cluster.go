@@ -213,6 +213,12 @@ func fromArtifact(c *Ctx, path string) (*topology.Topology, *engine.Identity, er
 		rebuilt.Parameters = t.Parameters
 		t = *rebuilt
 	}
+	// An artifact of a csb from before T1's spelling holds ha_copy_sync_mode
+	// as it was asked: spelled here, the cluster's own describe carries what
+	// cubrid_ha.conf will, and a wrong count is refused before anything exists.
+	if err := t.SpellPerNode(); err != nil {
+		return nil, nil, Usage("%s: %v", path, err)
+	}
 	return &t, id, nil
 }
 

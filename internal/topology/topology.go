@@ -425,6 +425,7 @@ func perNodeSep(r rune) bool { return r == ':' || r == ',' || r == ' ' }
 // is a list of another count -- a longer one too, which the engine would
 // accept, because it is a value meant for a cluster of another size.
 func PerNode(k, v string, nodes int) (string, error) {
+	v = strings.TrimSpace(v) // " async" in a hand-edited artifact is one value
 	entries := strings.FieldsFunc(v, perNodeSep)
 	switch {
 	case len(entries) == 0:
