@@ -367,15 +367,17 @@ the image does not ([`../DESIGN.md`](../DESIGN.md) §5 A2).
 
 Per node, two files, from the topology model:
 
-- **`cubrid.conf`** — `ha_mode`, `cubrid_port_id`, and any `--set` key that
-  belongs to this file.
+- **`cubrid.conf`** — `ha_mode`, `cubrid_port_id`, and any `--set` or
+  `--set-hidden` key that belongs to this file by its name.
 - **`cubrid_ha.conf`** — `ha_port_id`, `ha_node_list` (the whole group, and the
   *same* on every node — that is how each node learns who its peer is),
-  `ha_db_list`, `ha_ping_hosts` unless a scenario asked for it unset, and
-  `ha_apply_max_mem_size`.
+  `ha_db_list`, `ha_ping_hosts` unless a scenario asked for it unset,
+  `ha_apply_max_mem_size`, and any `--set` or `--set-hidden` key named `ha_*`.
 
-An unknown `--set` key is refused rather than written, because the engine
-accepts a file with a key it ignores and the divergence is then silent
+An unknown `--set` key is written and listed under `parameters.unverified`
+rather than refused: the engine refuses a name it does not have when it reads
+the file, so a typo is loud at server start, and refusing it here only kept out
+the real parameters the shipped conf does not mention
 ([`02-topology.md`](02-topology.md) §5).
 
 ## 6. The broker, when the topology has one

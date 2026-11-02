@@ -223,13 +223,14 @@ one for a config format.
 **A scenario is refused for what it says, before a cluster is stood up for it.**
 Two rules, and both were learned from what the format used to tolerate.
 
-*Unknown keys are refused and named.* This is the rule the tool already applies
-to a CTP `ha_repl.conf` it did not write ([`02-topology.md`](02-topology.md) §7)
-— the engine accepts a file with a key it ignores, so a typo takes effect nowhere
-and is reported by nothing. Its own format had the weaker rule, and the cost is
-worse here than there: half the keys in a step are *assertions*, so `contain` for
-`contains` produced a step that ran, checked nothing and printed `ok`. A green
-result that verified nothing is the one failure a tool like this cannot have.
+*Unknown keys are refused and named.* Nothing downstream reads a scenario's keys
+but this tool, so a typo there takes effect nowhere and is reported by nothing —
+unlike an engine parameter, which the engine refuses by name when it reads its
+file, and which `--set` and a CTP `ha_repl.conf` therefore carry unknown
+([`02-topology.md`](02-topology.md) §5, §7). The cost is high here: half the keys
+in a step are *assertions*, so `contain` for `contains` produced a step that ran,
+checked nothing and printed `ok`. A green result that verified nothing is the one
+failure a tool like this cannot have.
 
 *Everything checkable is checked before `cluster create`.* Every step's argv goes
 through the same `lookup` the command line dispatches through, which is what

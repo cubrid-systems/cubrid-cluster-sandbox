@@ -68,7 +68,7 @@ type Resources struct {
 type Params struct {
 	Common map[string]string `json:"common,omitempty"` // cubrid.conf
 	HA     map[string]string `json:"ha,omitempty"`     // cubrid_ha.conf
-	Hidden map[string]string `json:"hidden,omitempty"` // written unvalidated, on request
+	Hidden map[string]string `json:"hidden,omitempty"` // written unvalidated, on request, to the file IsHAKey names
 	// Broker is cubrid_broker.conf's [%csb] section, the keys a --broker-set
 	// overrides. The file is written by this tool by construction (03-assembly.md
 	// §6), so these are overrides of its own text rather than a parameter
@@ -148,7 +148,7 @@ type Options struct {
 	CPUSet       string // CPUs the database nodes are pinned to, "0-7,16-23"
 	ClientCPUSet string // CPUs the client nodes are pinned to
 	ShmSize      string
-	Set          []string // key=value, validated
+	Set          []string // key=value, routed by name; an unknown key is written and listed as unverified
 	SetHidden    []string // key=value, written unvalidated
 	BrokerSet    []string // KEY=VALUE for cubrid_broker.conf's [%csb] section
 	Labels       []string // key=value, recorded and never interpreted
@@ -170,9 +170,18 @@ var haKeys = map[string]bool{
 	"ha_sql_log_max_size_in_mbytes": true, "ha_sql_log_max_count": true, "ha_sql_log_path": true,
 }
 
+// IsHAKey is whether a key belongs in cubrid_ha.conf: one of its own, or any
+// ha_* name. The engine reads only HA parameters from that file -- a key
+// without PRM_FOR_HA is skipped there (system_parameter.c) -- and every
+// parameter from cubrid.conf, so a key routed the other way is read. The name
+// is not the flag in one case: ha_mode_for_sa_utils_only is not an HA
+// parameter, and goes where the engine skips it.
+func IsHAKey(k string) bool { return haKeys[k] || strings.HasPrefix(k, "ha_") }
+
 // commonKeys is what the engine ships in its own cubrid.conf. It is not the full
 // parameter set -- the engine has hundreds and advertises them only to a running
-// server -- so it is a floor, and --set-hidden is the documented way past it.
+// server -- so it is a floor: a --set key in neither table is still written,
+// and listed as unverified.
 var commonKeys = map[string]bool{
 	"service": true, "server": true, "data_buffer_size": true, "log_buffer_size": true,
 	"sort_buffer_size": true, "max_clients": true, "cubrid_port_id": true,
@@ -331,7 +340,7 @@ func Resolve(o Options) (*Topology, error) {
 		// PRM_ERR_UNKNOWN_PARAM). So a typo is loud at the engine, and refusing
 		// it here only kept out the hundreds of real parameters the engine has
 		// and the shipped conf does not mention.
-		isHA := haKeys[k] || strings.HasPrefix(k, "ha_")
+		isHA := IsHAKey(k)
 		if isHA && t.HAOff() {
 			// The engine does not read cubrid_ha.conf when ha_mode is off, so
 			// the value would be written and never take effect -- that is the

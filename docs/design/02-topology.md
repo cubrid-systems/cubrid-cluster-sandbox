@@ -283,13 +283,18 @@ Two tiers, then, and the second one is opt-in rather than lenient:
 
 ```
 --set     key=value      routed by name to cubrid.conf or cubrid_ha.conf; a key the tables do not know is written and listed as unverified (§5)
---set-hidden key=value   a parameter the engine does not advertise
+--set-hidden key=value   a parameter the engine does not advertise; routed by name as --set is
 ```
 
 `--set` writes to the file the name says, and the engine keeps a typo an error at
-server start. `--set-hidden` writes to `cubrid_ha.conf` without validation, and
-everything written that way is **flagged in `describe`**, beside the `--set`
-keys the table could not vouch for:
+server start. `--set-hidden` writes without validation to the file the name says
+too: a `ha_*` key to `cubrid_ha.conf`, any other to `cubrid.conf`. The engine reads
+only HA parameters from `cubrid_ha.conf` — a key without `PRM_FOR_HA` is skipped
+there (`system_parameter.c`) — and every parameter from `cubrid.conf`. Until the
+route, every hidden key went to `cubrid_ha.conf`, and a hidden parameter that is
+not an HA one, such as `ignore_trailing_space`, was written and never read.
+Everything written with `--set-hidden` is **flagged in `describe`**, beside the
+`--set` keys the table could not vouch for:
 
 ```yaml
 parameters:
@@ -307,10 +312,14 @@ state the engine's own documentation does not describe — the field reports an
 Active-Active window under a raised `ha_calc_score_interval_in_msecs`
 ([`04-faults.md`](04-faults.md) §5) — and the next person to read the artifact
 needs to know that before they trust anything measured on it. The lookup table
-also cannot say whether a hidden key exists at all, so a misspelled
-`--set-hidden` produces a file the engine ignores: `describe` showing a hidden
-key that `paramdump` cannot confirm is the only warning available, and the tool
-prints it as one.
+also cannot say whether a hidden key exists at all. A misspelled one is still
+loud at the engine, which refuses a name it does not have in either file
+whenever it reads that file, as it does for `--set` above. What stays silent is a
+real key the engine does not read where it was written: a `ha_*` key on preset
+`single`, which reads no `cubrid_ha.conf`, and `ha_mode_for_sa_utils_only`, a
+`ha_*` name that is not an HA parameter. `describe` showing a hidden key that
+`paramdump` cannot confirm is the only warning available, and the tool prints it
+as one.
 
 ### The ping mechanism is a topology choice, not a parameter detail
 

@@ -57,6 +57,26 @@ func TestHAConfWritesThePingParameter(t *testing.T) {
 	}
 }
 
+// The engine reads only HA parameters from cubrid_ha.conf, so a hidden key
+// that is not one goes to cubrid.conf: written to cubrid_ha.conf,
+// ignore_trailing_space=yes left the pair comparing 'k' and 'k ' as two keys,
+// and nothing said so.
+func TestAHiddenKeyGoesWhereTheEngineReadsIt(t *testing.T) {
+	tp := topology.Topology{
+		DB:    "hadb",
+		Nodes: []topology.Node{{Name: "hadb-n1", Role: "master"}, {Name: "hadb-n2", Role: "slave"}},
+	}
+	tp.Parameters.Hidden = map[string]string{"ha_calc_score_interval_in_msecs": "300000", "ignore_trailing_space": "yes"}
+	a := &Assembler{T: &tp}
+	ha, conf := string(a.haConf()), string(a.cubridConf("[common]\n"))
+	if !strings.Contains(ha, "\nha_calc_score_interval_in_msecs=300000\n") || strings.Contains(ha, "ignore_trailing_space") {
+		t.Errorf("cubrid_ha.conf:\n%s", ha)
+	}
+	if !strings.Contains(conf, "\nignore_trailing_space=yes\n") || strings.Contains(conf, "ha_calc_score_interval_in_msecs") {
+		t.Errorf("cubrid.conf:\n%s", conf)
+	}
+}
+
 // Both documents that specify this surface address a node by the SUFFIX of its
 // name -- README's "n1 also selects", and 01-cli.md §2's "n1  a node by name".
 // Only the full "<cluster>-n1" resolved, so a caller who read either was told a

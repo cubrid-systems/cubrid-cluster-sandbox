@@ -182,9 +182,13 @@ func (t *Topology) WriteCTPConf(w io.Writer, instance, user string) error {
 		fmt.Fprintf(w, "env.%s.ha.%s=%s\n", instance, k, t.Parameters.HA[k])
 	}
 	if len(t.Parameters.Hidden) > 0 {
-		fmt.Fprintf(w, "\n# carried unvalidated by --set-hidden; CTP will write them as given\n")
+		fmt.Fprintf(w, "\n# carried unvalidated by --set-hidden, in the section create wrote each to\n")
 		for _, k := range ctpSortedKeys(t.Parameters.Hidden) {
-			fmt.Fprintf(w, "env.%s.ha.%s=%s\n", instance, k, t.Parameters.Hidden[k])
+			sec := "cubrid"
+			if IsHAKey(k) {
+				sec = "ha"
+			}
+			fmt.Fprintf(w, "env.%s.%s.%s=%s\n", instance, sec, k, t.Parameters.Hidden[k])
 		}
 	}
 	return nil
