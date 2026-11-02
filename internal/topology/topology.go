@@ -148,7 +148,7 @@ type Options struct {
 	CPUSet       string // CPUs the database nodes are pinned to, "0-7,16-23"
 	ClientCPUSet string // CPUs the client nodes are pinned to
 	ShmSize      string
-	Set          []string // key=value, validated
+	Set          []string // key=value, routed by name; an unknown key is written and listed as unverified
 	SetHidden    []string // key=value, written unvalidated
 	BrokerSet    []string // KEY=VALUE for cubrid_broker.conf's [%csb] section
 	Labels       []string // key=value, recorded and never interpreted
@@ -180,7 +180,8 @@ func IsHAKey(k string) bool { return haKeys[k] || strings.HasPrefix(k, "ha_") }
 
 // commonKeys is what the engine ships in its own cubrid.conf. It is not the full
 // parameter set -- the engine has hundreds and advertises them only to a running
-// server -- so it is a floor, and --set-hidden is the documented way past it.
+// server -- so it is a floor: a --set key in neither table is still written,
+// and listed as unverified.
 var commonKeys = map[string]bool{
 	"service": true, "server": true, "data_buffer_size": true, "log_buffer_size": true,
 	"sort_buffer_size": true, "max_clients": true, "cubrid_port_id": true,
